@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
-import { RefreshCw, Target } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { RefreshCw, Target, UploadCloud } from 'lucide-react';
 import { Card } from './ui/Card';
-import { listSalesTargets, syncHrPbTargets } from '../lib/serverApi';
+import { listSalesTargets, syncHrPbTargets, uploadExcelWorkbook } from '../lib/serverApi';
 
 interface SalesTargetRow {
   id: string;
@@ -28,6 +28,25 @@ interface SalespersonSummary {
 
 export default function HrPbTargetsCard() {
   const [syncing, setSyncing] = useState(false);
+  const [uploadingHrPb, setUploadingHrPb] = useState(false);
+  const hrPbFileRef = useRef<HTMLInputElement>(null);
+
+  const handleHrPbUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingHrPb(true);
+    setMessage(null);
+    try {
+      await uploadExcelWorkbook(file);
+      setMessage('HR-PB.xlsx uploaded and synced successfully!');
+      fetchTargets();
+    } catch (err: any) {
+      setMessage(err?.message || 'Upload failed');
+    } finally {
+      setUploadingHrPb(false);
+      e.target.value = '';
+    }
+  };
   const [targets, setTargets] = useState<SalesTargetRow[]>([]);
   const [summary, setSummary] = useState<SalespersonSummary[]>([]);
   const [territory, setTerritory] = useState<'All' | 'Punjab' | 'Haryana'>('All');
@@ -83,15 +102,33 @@ export default function HrPbTargetsCard() {
           </p>
           {message && <p className="mt-1 text-xs font-bold text-brand-green">{message}</p>}
         </div>
-        <button
-          type="button"
-          onClick={handleSync}
-          disabled={syncing}
-          className="btn-primary !py-1.5 text-xs font-bold flex items-center gap-1.5"
-        >
-          <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} />
-          {syncing ? 'Syncing...' : '1-Click Sync HR-PB'}
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            ref={hrPbFileRef}
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            className="hidden"
+            onChange={handleHrPbUpload}
+          />
+          <button
+            type="button"
+            onClick={() => hrPbFileRef.current?.click()}
+            disabled={uploadingHrPb}
+            className="btn-secondary !py-1.5 text-xs font-bold flex items-center gap-1.5"
+          >
+            <UploadCloud size={13} />
+            {uploadingHrPb ? 'Uploading...' : 'Upload HR-PB.xlsx'}
+          </button>
+          <button
+            type="button"
+            onClick={handleSync}
+            disabled={syncing}
+            className="btn-primary !py-1.5 text-xs font-bold flex items-center gap-1.5"
+          >
+            <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} />
+            {syncing ? 'Syncing...' : '1-Click Sync HR-PB'}
+          </button>
+        </div>
       </div>
 
       {/* Salesperson / Area Officer Summary Split by Territory */}

@@ -2018,6 +2018,20 @@ export function syncHrPbTargets(): Promise<any> {
   });
 }
 
+export async function uploadExcelWorkbook(file: File): Promise<any> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const resp = await fetch(`${API_BASE_URL}/api/v1/imports/excel/upload`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new ServerError(`Excel upload failed: ${txt}`, { code: 'upload_failed', status: resp.status });
+  }
+  return resp.json();
+}
+
 export function listSalesTargets(params: { state?: string; salesperson?: string; q?: string } = {}): Promise<any> {
   const query = new URLSearchParams();
   if (params.state) query.set('state', params.state);

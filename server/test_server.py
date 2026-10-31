@@ -172,5 +172,65 @@ class TestServerApi(unittest.TestCase):
         self.assertEqual(r_after["delayedOrderCount"], delayed_before, "Today's new order must NOT increment delayedOrderCount")
         self.assertEqual(r_after["ordersValuePaise"], orders_val_before + 23000000, "ordersValuePaise must increase by order value")
 
+    def test_09_stock_preview_contract_shape(self):
+        # 1. Test POST /api/v1/imports/excel/stock-preview
+        with open("data/1-8-26.xlsx", "rb") as f:
+            bytes_data = f.read()
+        r = self.client.post("/api/v1/imports/excel/stock-preview?fileName=1-8-26.xlsx", content=bytes_data)
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+
+        # Must contain all required fields of StockPreviewOut
+        required_fields = [
+            "sourceFormat", "allowedSheets", "sections", "validation", "provenance",
+            "reconciliations", "sheetCount", "allowedSheetsFound", "tableCount",
+            "rowCount", "formulaCellCount", "formulaCacheMissingCount",
+            "formulaCacheUnusableCount", "warningCount", "incompleteTableCount",
+            "previewedAt", "authorizedFileSha256", "authorizedFileMatch",
+            "applyPreviewDigest", "applyableItemCount", "quarantineRowCount",
+            "applyPlanErrors", "applyBlockedReason", "readyToApply",
+            "businessRecordsCreated", "stockChanged", "disclaimer"
+        ]
+        for field in required_fields:
+            self.assertIn(field, data, f"Missing required field {field} in StockPreviewOut")
+        self.assertFalse(data["businessRecordsCreated"], "businessRecordsCreated must be false")
+        self.assertFalse(data["stockChanged"], "stockChanged must be false")
+        self.assertTrue(data["readyToApply"], "readyToApply should be true")
+
+    def test_10_debtor_preview_and_apply_contract(self):
+        # 1. Test POST /api/v1/debtors/imports/preview
+        with open("data/HR-PB.xlsx", "rb") as f:
+            bytes_data = f.read()
+        r = self.client.post("/api/v1/debtors/imports/preview?fileName=HR-PB.xlsx", content=bytes_data)
+        self.assertEqual(r.status_code, 200, f"Debtor preview failed: {r.text}")
+        prev = r.json()
+
+        self.assertIn("filename", prev)
+        self.assertIn("fileSha256", prev)
+        self.assertIn("applyPreviewDigest", prev)
+        self.assertEqual(len(prev["applyPreviewDigest"]), 64)
+        self.assertTrue(prev["applyAvailable"])
+        self.assertFalse(prev["businessRecordsCreated"])
+        self.assertFalse(prev["databaseRowsWritten"])
+        self.assertIsInstance(prev["rows"], list)
+
+        # 2. Test POST /api/v1/debtors/imports/apply
+        apply_r = self.client.post(
+            f"/api/v1/debtors/imports/apply?fileSha256={prev['fileSha256']}&previewDigest={prev['applyPreviewDigest']}&confirm=true&fileName=HR-PB.xlsx",
+            content=bytes_data
+        )
+        self.assertEqual(apply_r.status_code, 200, f"Debtor apply failed: {apply_r.text}")
+        outcome = apply_r.json()
+        self.assertFalse(outcome["businessRecordsCreated"])
+        self.assertTrue(outcome["databaseRowsWritten"])
+        self.assertGreater(outcome["snapshotRowCount"], 0)
+
+    def test_11_api_no_cache_headers(self):
+        # GET /api/v1/dashboard/summary should set Cache-Control: no-cache
+        r = self.client.get("/api/v1/dashboard/summary")
+        self.assertEqual(r.status_code, 200)
+        cc = r.headers.get("cache-control", "").lower()
+        self.assertTrue("no-cache" in cc or "no-store" in cc, f"Cache-Control must be set to no-cache, got {cc}")
+
 if __name__ == '__main__':
     unittest.main()

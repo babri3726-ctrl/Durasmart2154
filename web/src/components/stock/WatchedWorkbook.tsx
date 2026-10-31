@@ -11,8 +11,8 @@
  *  apply — the difference is only that the owner does not have to preview the same file first.
  */
 
-import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle2, FolderSync, RefreshCw, Zap } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, FolderSync, RefreshCw, UploadCloud, Zap } from 'lucide-react';
 import { Card } from '../ui/Card';
 import { ConfirmDialog } from '../ui/Overlays';
 import { invalidate, syncKeys } from '../../lib/syncStore';
@@ -21,6 +21,7 @@ import {
   previewWatchedWorkbook,
   readStockWatch,
   syncWatchedWorkbook,
+  uploadExcelWorkbook,
   ServerError,
   type ServerStockImportApply,
   type ServerStockWatch,
@@ -62,6 +63,33 @@ export default function WatchedWorkbook() {
   const [confirmed, setConfirmed] = useState(false);
   const [apply, setApply] = useState<ApplyState>({ kind: 'idle' });
   const [confirmingSync, setConfirmingSync] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [directUploading, setDirectUploading] = useState(false);
+
+  const handleDirectUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setDirectUploading(true);
+    setError(null);
+    try {
+      await uploadExcelWorkbook(file);
+      invalidate(
+        syncKeys.stockSummary,
+        syncKeys.stockUpvc,
+        syncKeys.stockAccessories,
+        syncKeys.stockProduction,
+        syncKeys.stockImported,
+        syncKeys.stockImports,
+      );
+      await load();
+    } catch (err: any) {
+      setError(err?.message || 'Direct upload failed');
+    } finally {
+      setDirectUploading(false);
+      e.target.value = '';
+    }
+  };
+
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -152,8 +180,7 @@ export default function WatchedWorkbook() {
   const canSync =
     watch?.configured === true &&
     watch.present &&
-    watch.readable &&
-    !watch.matchesLatestBatch;
+    watch.readable;
 
   const canReview =
     watch?.configured === true &&
@@ -213,9 +240,24 @@ export default function WatchedWorkbook() {
             type="button"
             className="btn-primary"
             onClick={() => setConfirmingSync(true)}
-            disabled={apply.kind === 'applying'}
+            disabled={apply.kind === 'applying' || directUploading}
           >
             <Zap size={13} /> {apply.kind === 'applying' ? 'Syncing…' : 'Sync now'}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            className="hidden"
+            onChange={handleDirectUpload}
+          />
+          <button
+            type="button"
+            className="btn-secondary flex items-center gap-1.5"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={directUploading}
+          >
+            <UploadCloud size={13} /> {directUploading ? 'Uploading…' : 'Upload Workbook from PC'}
           </button>
           <span className="text-[11px] text-muted">
             Authorises this file's revision and applies it in one step — the press is the consent.
