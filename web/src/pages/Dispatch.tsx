@@ -94,8 +94,10 @@ export default function Dispatch() {
       });
       invalidate(
         syncKeys.dispatch(quickDispatchOrderTarget.id),
+        syncKeys.dispatchRegister,
         syncKeys.order(quickDispatchOrderTarget.id),
         syncKeys.orderList(),
+        syncKeys.dashboard,
       );
       toast.success(
         `Order ${quickDispatchOrderTarget.number ?? quickDispatchOrderTarget.id} marked as fully dispatched!`,

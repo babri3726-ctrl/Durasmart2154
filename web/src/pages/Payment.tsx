@@ -119,7 +119,13 @@ export default function Payment() {
 
       // Refresh list & sync stores
       sync.refresh();
-      invalidate(syncKeys.debtors, syncKeys.orderList());
+      invalidate(
+        syncKeys.payments,
+        syncKeys.debtors,
+        syncKeys.customers,
+        syncKeys.dashboard,
+        syncKeys.orderList(),
+      );
     } catch (err: any) {
       toast.error(err.message || 'Failed to record payment');
     } finally {
@@ -137,7 +143,13 @@ export default function Payment() {
       await voidPayment(payment.id);
       toast.success(`Payment voucher voided. Balance restored.`);
       sync.refresh();
-      invalidate(syncKeys.debtors, syncKeys.orderList());
+      invalidate(
+        syncKeys.payments,
+        syncKeys.debtors,
+        syncKeys.customers,
+        syncKeys.dashboard,
+        syncKeys.orderList(),
+      );
     } catch (err: any) {
       toast.error(err.message || 'Failed to void payment');
     }

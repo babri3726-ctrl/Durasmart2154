@@ -161,7 +161,7 @@ function DebtorListCard() {
     try {
       const res = await syncHrPbTargets();
       setSyncMessage(res.message || 'HR-PB targets synced successfully!');
-      invalidate(syncKeys.debtors);
+      invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
     } catch (err: any) {
       setSyncMessage(err.message || 'Failed to sync HR-PB');
     } finally {
@@ -187,7 +187,7 @@ function DebtorListCard() {
       setAddDistrict('');
       setAddSalesperson('');
       setAddBalance('0.00');
-      invalidate(syncKeys.debtors);
+      invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
     } catch (err: any) {
       alert(err.message || 'Failed to create debtor');
     } finally {
@@ -218,7 +218,7 @@ function DebtorListCard() {
         balance: parseFloat(editBalance) || 0.0,
       });
       setEditingDebtor(null);
-      invalidate(syncKeys.debtors);
+      invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
     } catch (err: any) {
       alert(err.message || 'Failed to update debtor');
     } finally {
@@ -233,7 +233,7 @@ function DebtorListCard() {
     try {
       await deleteDebtor(debtorId);
       setDeletingDebtor(null);
-      invalidate(syncKeys.debtors);
+      invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
     } catch (err: any) {
       alert(err.message || 'Failed to delete debtor');
     } finally {

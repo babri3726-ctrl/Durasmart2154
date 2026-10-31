@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import os
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .stock_parser import extract_3sheet_stock, DEFAULT_ONEDRIVE_PATH, get_file_sha256
 from .hr_pb_parser import extract_hr_pb_targets, DEFAULT_HRPB_PATH
@@ -408,43 +408,97 @@ def get_dashboard_summary(from_date: Optional[str] = Query(None, alias="from"), 
 
     orders_value = sum(o.get("ordersValuePaise") or o.get("totalPaise") or o.get("valuePaise") or 0 for o in in_window_orders)
     
-    # Collections inside window
+    # Collections inside window (excluding voided payments)
     payments = STATE.get("payments", [])
     in_window_payments = []
     for p in payments:
-        p_date = p.get("date", p.get("createdAt", "")[:10])
+        if p.get("voidedAt"):
+            continue
+        p_date = p.get("paymentDate") or p.get("date") or p.get("createdAt", "")[:10]
         if from_date and p_date < from_date:
             continue
         if to_date and p_date > to_date:
             continue
         in_window_payments.append(p)
-    collected_paise = sum(p.get("amountPaise", 0) for p in in_window_payments)
+    collected_paise = sum(int(p.get("amountPaise", 0)) for p in in_window_payments)
 
     # Current Balances
     debtors = STATE.get("debtors", [])
     customers = STATE.get("customers", [])
     
     tot_debtor_bal = sum(int(round(float(d.get("balance", 0.0)) * 100)) for d in debtors)
-    tot_cust_bal = sum(c.get("outstandingPaise", 0) for c in customers)
+    tot_cust_bal = sum(int(c.get("outstandingPaise", 0)) for c in customers)
     outstanding_paise = tot_debtor_bal if tot_debtor_bal > 0 else tot_cust_bal
 
-    overdue_paise = sum(c.get("overduePaise", 0) for c in customers if c.get("isOverdue"))
+    overdue_paise = sum(
+        int(c.get("overduePaise", c.get("outstandingPaise", 0)))
+        for c in customers
+        if c.get("overduePaise", 0) > 0 or (c.get("isOverdue") and c.get("outstandingPaise", 0) > 0)
+    )
 
     pending_cust = len([c for c in customers if c.get("status") in ["pendingApproval", "pending"]])
 
     today_str = datetime.now().strftime("%Y-%m-%d")
-    delayed_orders = len([
-        o for o in orders
-        if o.get("expectedDispatchDate") 
-        and str(o.get("expectedDispatchDate"))[:10] < today_str 
-        and o.get("status") not in ["dispatched", "delivered", "draft", "cancelled"]
-    ])
+    sla_cutoff = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
+    
+    delayed_orders = 0
+    for o in orders:
+        if o.get("status") in ["dispatched", "delivered", "draft", "cancelled"]:
+            continue
+        if o.get("dispatchStatus") == "dispatched":
+            continue
+        
+        # Check explicit expectedDispatchDate or fallback SLA (orderDate <= 3 days ago)
+        exp_date = o.get("expectedDispatchDate")
+        order_date = o.get("orderDate") or o.get("date") or (o.get("createdAt", "")[:10] if o.get("createdAt") else None)
+        
+        is_delayed = False
+        if exp_date and str(exp_date)[:10] < today_str:
+            is_delayed = True
+        elif not exp_date and order_date and str(order_date)[:10] <= sla_cutoff:
+            is_delayed = True
+            
+        if is_delayed:
+            delayed_orders += 1
 
-    # Dispatched goods in the window (from targets or recorded dispatches)
+    # Dispatched goods in the window (from targets base + recorded dispatches)
     targets = STATE.get("targets", [])
-    tot_disp_mt = sum(float(t.get("dispatched_mt", 0.0)) for t in targets)
-    if tot_disp_mt == 0:
-        tot_disp_mt = 621.776
+    base_disp_mt = sum(float(t.get("dispatched_mt", 0.0)) for t in targets)
+    if base_disp_mt == 0:
+        base_disp_mt = 621.776
+
+    dispatches = STATE.get("dispatches", [])
+    recorded_disp_mt = 0.0
+    for dsp in dispatches:
+        if dsp.get("voidedAt"):
+            continue
+        dsp_date = dsp.get("dispatchDate") or dsp.get("createdAt", "")[:10]
+        if from_date and dsp_date < from_date:
+            continue
+        if to_date and dsp_date > to_date:
+            continue
+        
+        # Calculate MT
+        dsp_qty_mt = 0.0
+        if dsp.get("lines"):
+            for line in dsp["lines"]:
+                try:
+                    q = float(line.get("quantity", 0.0))
+                    u = str(line.get("unit", "MT")).strip().lower()
+                    if u == "kg":
+                        dsp_qty_mt += q / 1000.0
+                    else:
+                        dsp_qty_mt += q
+                except (ValueError, TypeError):
+                    pass
+        elif dsp.get("totalQuantity"):
+            try:
+                dsp_qty_mt += float(dsp.get("totalQuantity", 0.0))
+            except (ValueError, TypeError):
+                pass
+        recorded_disp_mt += dsp_qty_mt
+
+    tot_disp_mt = round(base_disp_mt + recorded_disp_mt, 3)
 
     return {
         "periodStart": from_date or "2026-10-01",
@@ -1297,6 +1351,7 @@ def quick_dispatch_order(order_id: str, body: Optional[Dict[str, Any]] = None):
             "unit": line.get("unit", "MT")
         })
 
+    order["status"] = "dispatched"
     order["dispatchedQuantity"] = order.get("orderedQuantity", f"{total_qty:.3f}")
     order["dispatchStatus"] = "dispatched"
     order["lastDispatchDate"] = dispatch_date
@@ -1679,18 +1734,23 @@ def create_payment(body: PaymentCreate):
     STATE["payments"].insert(0, saved)
 
     # Auto-deduct balances in memory
-    for d in STATE.get("debtors", []):
-        if d["id"] == cust_id or d["name"].lower() == cust_name.lower():
-            old_paise = round(float(d.get("balance", 0.0)) * 100)
-            new_paise = max(0, old_paise - amt_paise)
-            d["balance"] = round(new_paise / 100.0, 2)
-            d["balance_formatted"] = f"{d['balance']:.2f}"
+    matched_d = next((d for d in STATE.get("debtors", []) if d["id"] == cust_id), None)
+    if not matched_d and cust_name:
+        matched_d = next((d for d in STATE.get("debtors", []) if d["name"].lower() == cust_name.lower()), None)
+    if matched_d:
+        old_paise = round(float(matched_d.get("balance", 0.0)) * 100)
+        new_paise = max(0, old_paise - amt_paise)
+        matched_d["balance"] = round(new_paise / 100.0, 2)
+        matched_d["balance_formatted"] = f"{matched_d['balance']:.2f}"
 
-    for c in STATE.get("customers", []):
-        if c["id"] == cust_id or c["name"].lower() == cust_name.lower():
-            c["outstandingPaise"] = max(0, c.get("outstandingPaise", 0) - amt_paise)
-            c["overduePaise"] = max(0, c.get("overduePaise", 0) - amt_paise)
-            c["lastPaymentDate"] = pay_date
+    matched_c = next((c for c in STATE.get("customers", []) if c["id"] == cust_id), None)
+    if not matched_c and cust_name:
+        matched_c = next((c for c in STATE.get("customers", []) if c["name"].lower() == cust_name.lower()), None)
+    if matched_c:
+        matched_c["outstandingPaise"] = max(0, matched_c.get("outstandingPaise", 0) - amt_paise)
+        matched_c["overduePaise"] = max(0, matched_c.get("overduePaise", 0) - amt_paise)
+        matched_c["isOverdue"] = matched_c["overduePaise"] > 0
+        matched_c["lastPaymentDate"] = pay_date
 
     return saved
 
@@ -1717,17 +1777,22 @@ def void_payment(payment_id: str):
     db.void_payment(payment_id)
 
     # Re-credit balances in memory
-    for d in STATE.get("debtors", []):
-        if d["id"] == cust_id or d["name"].lower() == cust_name.lower():
-            old_paise = round(float(d.get("balance", 0.0)) * 100)
-            new_paise = old_paise + amt_paise
-            d["balance"] = round(new_paise / 100.0, 2)
-            d["balance_formatted"] = f"{d['balance']:.2f}"
+    matched_d = next((d for d in STATE.get("debtors", []) if d["id"] == cust_id), None)
+    if not matched_d and cust_name:
+        matched_d = next((d for d in STATE.get("debtors", []) if d["name"].lower() == cust_name.lower()), None)
+    if matched_d:
+        old_paise = round(float(matched_d.get("balance", 0.0)) * 100)
+        new_paise = old_paise + amt_paise
+        matched_d["balance"] = round(new_paise / 100.0, 2)
+        matched_d["balance_formatted"] = f"{matched_d['balance']:.2f}"
 
-    for c in STATE.get("customers", []):
-        if c["id"] == cust_id or c["name"].lower() == cust_name.lower():
-            c["outstandingPaise"] = c.get("outstandingPaise", 0) + amt_paise
-            c["overduePaise"] = c.get("overduePaise", 0) + amt_paise
+    matched_c = next((c for c in STATE.get("customers", []) if c["id"] == cust_id), None)
+    if not matched_c and cust_name:
+        matched_c = next((c for c in STATE.get("customers", []) if c["name"].lower() == cust_name.lower()), None)
+    if matched_c:
+        matched_c["outstandingPaise"] = matched_c.get("outstandingPaise", 0) + amt_paise
+        matched_c["overduePaise"] = matched_c.get("overduePaise", 0) + amt_paise
+        matched_c["isOverdue"] = matched_c["overduePaise"] > 0
 
     return pay
 

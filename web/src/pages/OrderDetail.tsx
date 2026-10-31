@@ -369,7 +369,13 @@ export default function OrderDetail() {
     setSubmittingDispatch(true);
     try {
       await quickDispatchOrder(id, { vehicleNo, notes: dispatchNotes });
-      invalidate(syncKeys.dispatch(id), syncKeys.order(id), syncKeys.orderList());
+      invalidate(
+        syncKeys.dispatch(id),
+        syncKeys.dispatchRegister,
+        syncKeys.order(id),
+        syncKeys.orderList(),
+        syncKeys.dashboard,
+      );
       toast.success('Order marked as fully dispatched!');
       setQuickDispatchModalOpen(false);
       order.retry();

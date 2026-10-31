@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -49,15 +49,31 @@ function orderStatusBadge(status: string) {
 function CockpitSummary({ from, to }: { from: string; to: string }) {
   const orderToken = useSyncPrefix(syncKeys.orderList(''));
   const debtorToken = useSyncToken(syncKeys.debtors);
+  const customerToken = useSyncToken(syncKeys.customers);
+  const paymentToken = useSyncToken(syncKeys.payments);
+  const dashboardToken = useSyncToken(syncKeys.dashboard);
   const stockToken = useSyncToken(syncKeys.stockSummary);
   const dispatchToken = useSyncPrefix(syncKeys.dispatchRegister);
 
   const load = useCallback(
     () => dashboardCockpit({ from: from || undefined, to: to || undefined }),
-    // Re-fetch automatically whenever order, debtor, stock or dispatch sync tokens update
-    [from, to, orderToken, debtorToken, stockToken, dispatchToken]
+    // Re-fetch automatically whenever order, debtor, customer, payment, dashboard, stock or dispatch sync tokens update
+    [from, to, orderToken, debtorToken, customerToken, paymentToken, dashboardToken, stockToken, dispatchToken]
   );
   const { state, data, error, retry, sync } = useResource(load);
+
+  // Background live update pulse (every 8 seconds + on window focus)
+  useEffect(() => {
+    const handleFocus = () => sync.refresh();
+    window.addEventListener('focus', handleFocus);
+    const interval = setInterval(() => {
+      sync.refresh();
+    }, 8000);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      clearInterval(interval);
+    };
+  }, [sync]);
 
   return (
     <div className="space-y-6">

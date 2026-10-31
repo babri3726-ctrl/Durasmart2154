@@ -64,6 +64,9 @@ export const syncKeys = {
   dispatch: (orderId: string) => `dispatches:${orderId}`,
   dispatchRegister: 'dispatches:',
   debtors: 'debtors',
+  customers: 'customers',
+  payments: 'payments',
+  dashboard: 'dashboard',
   target: (employeeId: string) => `targets:${employeeId}`,
   targetBook: 'targets:',
   // A successful workbook apply changes every stock read, on both clients. These keys are bumped
