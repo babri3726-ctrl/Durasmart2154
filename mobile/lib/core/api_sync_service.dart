@@ -14,11 +14,11 @@ class ApiSyncService {
   static List<String> get candidateHosts => [
     if (userCustomHost != null && userCustomHost!.trim().isNotEmpty) userCustomHost!.trim(),
     if (envBackendUrl.isNotEmpty) envBackendUrl.trim(),
-    'https://linking-helicopter-meetings-news.trycloudflare.com', // Public Cloudflare HTTPS Tunnel (works on any phone without any app)
-    'http://100.95.241.124:8010', // Dedicated Tailscale Mesh IP
-    'http://192.168.29.86:8010', // Local WiFi LAN IP
-    'http://10.0.2.2:8010',       // Android Emulator Host Loopback
-    'http://127.0.0.1:8010',      // Localhost
+    'https://durasmart2154.onrender.com', // Permanent 24/7 Cloud Backend (Render.com)
+    'http://100.95.241.124:8010',         // Tailscale Mesh IP
+    'http://192.168.29.86:8010',          // Local WiFi LAN IP
+    'http://10.0.2.2:8010',               // Android Emulator Host Loopback
+    'http://127.0.0.1:8010',              // Localhost
     'http://localhost:8010',
   ];
 
