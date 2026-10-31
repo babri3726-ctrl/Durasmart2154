@@ -1,0 +1,601 @@
+import base64
+import os
+import re
+import sqlite3
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+DB_PATH = os.path.join(DATA_DIR, "operations.db")
+SLIPS_DIR = os.path.join(DATA_DIR, "slips")
+
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(SLIPS_DIR, exist_ok=True)
+
+def get_connection() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH, timeout=5.0)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode = WAL;")
+    conn.execute("PRAGMA synchronous = NORMAL;")
+    conn.execute("PRAGMA busy_timeout = 5000;")
+    return conn
+
+def init_db(seed_state: Optional[Dict[str, Any]] = None):
+    with get_connection() as conn:
+        conn.executescript("""
+        CREATE TABLE IF NOT EXISTS parties (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            state TEXT NOT NULL,
+            city TEXT DEFAULT '',
+            district TEXT DEFAULT '',
+            salesperson TEXT DEFAULT 'Unassigned',
+            salesperson_id TEXT DEFAULT '',
+            mobile TEXT DEFAULT '',
+            balance_paise INTEGER DEFAULT 0,
+            credit_days INTEGER DEFAULT 30,
+            status TEXT DEFAULT 'active',
+            created_at TEXT,
+            updated_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS orders (
+            id TEXT PRIMARY KEY,
+            order_number TEXT UNIQUE NOT NULL,
+            customer_id TEXT NOT NULL,
+            customer_name TEXT NOT NULL,
+            salesperson_name TEXT DEFAULT '',
+            salesperson_id TEXT DEFAULT '',
+            state TEXT DEFAULT '',
+            order_date TEXT NOT NULL,
+            due_date TEXT DEFAULT '',
+            expected_dispatch_date TEXT DEFAULT '',
+            payment_terms TEXT DEFAULT '30 days credit',
+            status TEXT DEFAULT 'pendingApproval',
+            notes TEXT DEFAULT '',
+            slip_image_url TEXT,
+            total_paise INTEGER DEFAULT 0,
+            created_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS order_lines (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id TEXT NOT NULL,
+            line_no INTEGER NOT NULL,
+            product TEXT NOT NULL,
+            quantity TEXT NOT NULL,
+            unit TEXT NOT NULL,
+            rate_paise INTEGER DEFAULT 0,
+            amount_paise INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS payments (
+            id TEXT PRIMARY KEY,
+            voucher_no TEXT UNIQUE NOT NULL,
+            customer_id TEXT NOT NULL,
+            customer_name TEXT NOT NULL,
+            amount_paise INTEGER NOT NULL,
+            payment_date TEXT NOT NULL,
+            method TEXT DEFAULT 'NEFT',
+            reference TEXT DEFAULT '',
+            notes TEXT DEFAULT '',
+            created_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS dispatches (
+            id TEXT PRIMARY KEY,
+            order_id TEXT NOT NULL,
+            order_number TEXT NOT NULL,
+            customer_id TEXT NOT NULL,
+            dispatch_date TEXT NOT NULL,
+            vehicle_number TEXT DEFAULT '',
+            driver_name TEXT DEFAULT '',
+            transport_name TEXT DEFAULT '',
+            notes TEXT DEFAULT '',
+            slip_image_url TEXT,
+            created_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS dispatch_lines (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dispatch_id TEXT NOT NULL,
+            line_no INTEGER NOT NULL,
+            product TEXT NOT NULL,
+            quantity TEXT NOT NULL,
+            unit TEXT NOT NULL
+        );
+        """)
+
+        # Schema migrations for payments
+        try:
+            conn.execute("ALTER TABLE payments ADD COLUMN voided_at TEXT")
+        except Exception:
+            pass
+
+        # Check if parties table is empty and seed if available
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) as count FROM parties")
+        count = cur.fetchone()["count"]
+        if count == 0 and seed_state:
+            # Seed from seed_state debtors and customers
+            now = datetime.now().isoformat()
+            debtors = seed_state.get("debtors", [])
+            for d in debtors:
+                bal_paise = int(round(float(d.get("balance", 0.0)) * 100))
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO parties 
+                    (id, name, state, city, district, salesperson, salesperson_id, mobile, balance_paise, credit_days, status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        d["id"],
+                        d["name"],
+                        d.get("state", "Punjab"),
+                        d.get("city", ""),
+                        d.get("district", ""),
+                        d.get("salesperson", "Unassigned"),
+                        d.get("salespersonId", "EMP-SP-01"),
+                        d.get("mobile", "919800000000"),
+                        bal_paise,
+                        30,
+                        "active",
+                        now,
+                        now,
+                    ),
+                )
+            # Also seed any customers not in debtors
+            for c in seed_state.get("customers", []):
+                bal_paise = c.get("outstandingPaise", 0)
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO parties 
+                    (id, name, state, city, district, salesperson, salesperson_id, mobile, balance_paise, credit_days, status, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        c["id"],
+                        c["name"],
+                        c.get("state", "Punjab"),
+                        c.get("city", ""),
+                        c.get("district", ""),
+                        c.get("salesperson", "Unassigned"),
+                        c.get("salespersonId", ""),
+                        c.get("mobile", "919800000000"),
+                        bal_paise,
+                        c.get("creditDays", 30),
+                        c.get("status", "active"),
+                        now,
+                        now,
+                    ),
+                )
+            conn.commit()
+
+def save_slip_image(order_id: str, image_data: Optional[str]) -> Optional[str]:
+    """Saves raw base64 image data to disk file and returns relative API URL."""
+    if not image_data or not isinstance(image_data, str):
+        return None
+    if image_data.startswith("http://") or image_data.startswith("https://") or image_data.startswith("/api/v1/slips/"):
+        return image_data
+
+    # Strip data URI prefix if present (e.g. data:image/jpeg;base64,...)
+    raw_b64 = image_data
+    if "," in image_data:
+        raw_b64 = image_data.split(",", 1)[1]
+
+    try:
+        data_bytes = base64.b64decode(raw_b64)
+        clean_id = re.sub(r"[^\w\-]", "_", order_id)
+        filename = f"{clean_id}.jpg"
+        filepath = os.path.join(SLIPS_DIR, filename)
+        with open(filepath, "wb") as f:
+            f.write(data_bytes)
+        return f"/api/v1/slips/{filename}"
+    except Exception as e:
+        print(f"Failed to decode slip image for {order_id}: {e}")
+        return None
+
+def get_next_order_number() -> str:
+    """Returns the next strictly monotonic order number (e.g. SO-2026-0001)."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT MAX(CAST(SUBSTR(order_number, 9) AS INTEGER)) as max_num FROM orders WHERE order_number LIKE 'SO-2026-%'")
+        row = cur.fetchone()
+        max_num = row["max_num"] if row and row["max_num"] else 0
+        return f"SO-2026-{max_num + 1:04d}"
+
+def get_next_order_id() -> str:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) as count FROM orders")
+        cnt = cur.fetchone()["count"]
+        return f"ORD-{cnt + 1001}"
+
+def save_order(order: Dict[str, Any]) -> Dict[str, Any]:
+    """Persists order and lines to SQLite. Handles slip image saving and party upsert."""
+    now = datetime.now().isoformat()
+    order_id = order.get("id") or get_next_order_id()
+    order_number = order.get("number") or get_next_order_number()
+    order["id"] = order_id
+    order["number"] = order_number
+
+    # Save image to file if provided
+    raw_img = order.get("slipImageData") or order.get("slipImageUrl")
+    slip_url = save_slip_image(order_id, raw_img)
+    order["slipImageUrl"] = slip_url
+    order["slipImageData"] = None
+
+    customer_id = order.get("customerId", "CUST-WALKIN")
+    customer_name = order.get("customerName", "Direct Dealer")
+
+    # Ensure party exists in DB
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO parties (id, name, state, city, salesperson, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                customer_id,
+                customer_name,
+                order.get("state", "Punjab"),
+                order.get("city", ""),
+                order.get("salespersonName", "Unassigned"),
+                now,
+                now,
+            ),
+        )
+
+        total_paise = order.get("valuePaise") or order.get("totalPaise") or 0
+
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO orders 
+            (id, order_number, customer_id, customer_name, salesperson_name, salesperson_id, state, 
+             order_date, due_date, expected_dispatch_date, payment_terms, status, notes, slip_image_url, total_paise, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                order_id,
+                order_number,
+                customer_id,
+                customer_name,
+                order.get("salespersonName", ""),
+                order.get("salespersonId", ""),
+                order.get("state", ""),
+                order.get("orderDate", now[:10]),
+                order.get("dueDate", ""),
+                order.get("expectedDispatchDate", ""),
+                order.get("paymentTerms", "30 days credit"),
+                order.get("status", "pendingApproval"),
+                order.get("notes", ""),
+                slip_url,
+                total_paise,
+                now,
+            ),
+        )
+
+        # Delete old lines and re-insert
+        conn.execute("DELETE FROM order_lines WHERE order_id = ?", (order_id,))
+        lines = order.get("lines", [])
+        for idx, line in enumerate(lines):
+            conn.execute(
+                """
+                INSERT INTO order_lines (order_id, line_no, product, quantity, unit, rate_paise, amount_paise)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    order_id,
+                    idx + 1,
+                    line.get("product") or line.get("productName", "UPVC"),
+                    str(line.get("quantity") or line.get("orderedQuantity", "1.000")),
+                    line.get("unit", "MT"),
+                    int(line.get("ratePaise", 0)),
+                    int(line.get("amountPaise") or line.get("valuePaise", 0)),
+                ),
+            )
+        conn.commit()
+
+    return order
+
+def save_party(party: Dict[str, Any]) -> Dict[str, Any]:
+    """Persists debtor/customer to SQLite."""
+    now = datetime.now().isoformat()
+    party_id = party.get("id") or f"DEBTOR-MAN-{datetime.now().strftime('%H%M%S')}"
+    party["id"] = party_id
+    bal_paise = int(round(float(party.get("balance", 0.0)) * 100)) if "balance" in party else party.get("outstandingPaise", 0)
+
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO parties 
+            (id, name, state, city, district, salesperson, salesperson_id, mobile, balance_paise, credit_days, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                party_id,
+                party["name"],
+                party.get("state", "Punjab"),
+                party.get("city", ""),
+                party.get("district", ""),
+                party.get("salesperson", "Unassigned"),
+                party.get("salespersonId", ""),
+                party.get("mobile", "919800000000"),
+                bal_paise,
+                party.get("creditDays", 30),
+                party.get("status", "active"),
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+
+    return party
+
+def save_payment(payment: Dict[str, Any]) -> Dict[str, Any]:
+    """Persists payment and updates party balance using integer paise arithmetic."""
+    now = datetime.now().isoformat()
+    voucher_no = payment.get("voucherNo") or f"RCPT-2026-{datetime.now().strftime('%H%M%S')}"
+    payment_id = payment.get("id") or f"PAY-{datetime.now().strftime('%H%M%S')}"
+    payment["id"] = payment_id
+    payment["voucherNo"] = voucher_no
+    amount_paise = int(payment.get("amountPaise") or int(round(float(payment.get("amount", 0.0)) * 100)))
+    customer_id = payment.get("customerId", "")
+
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO payments 
+            (id, voucher_no, customer_id, customer_name, amount_paise, payment_date, method, reference, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                payment_id,
+                voucher_no,
+                customer_id,
+                payment.get("customerName", "Customer"),
+                amount_paise,
+                payment.get("paymentDate", now[:10]),
+                payment.get("method", "NEFT"),
+                payment.get("reference", ""),
+                payment.get("notes", ""),
+                now,
+            ),
+        )
+
+        # Update party balance in integer paise
+        if customer_id:
+            conn.execute(
+                """
+                UPDATE parties 
+                SET balance_paise = MAX(0, balance_paise - ?),
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (amount_paise, now, customer_id),
+            )
+
+        conn.commit()
+
+    return payment
+
+def void_payment(payment_id: str) -> Optional[Dict[str, Any]]:
+    """Marks a payment voided and reverses the balance deduction in SQLite."""
+    now = datetime.now().isoformat()
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM payments WHERE id = ?", (payment_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        payment = dict(row)
+        if payment.get("voided_at"):
+            payment["voidedAt"] = payment["voided_at"]
+            return payment
+
+        amount_paise = payment["amount_paise"]
+        customer_id = payment["customer_id"]
+
+        conn.execute("UPDATE payments SET voided_at = ? WHERE id = ?", (now, payment_id))
+
+        if customer_id:
+            conn.execute(
+                """
+                UPDATE parties 
+                SET balance_paise = balance_paise + ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (amount_paise, now, customer_id),
+            )
+        conn.commit()
+        payment["voided_at"] = now
+        payment["voidedAt"] = now
+        return payment
+
+def save_dispatch(dispatch: Dict[str, Any]) -> Dict[str, Any]:
+    """Persists dispatch and dispatch lines."""
+    now = datetime.now().isoformat()
+    dispatch_id = dispatch.get("id") or f"DSP-{datetime.now().strftime('%H%M%S')}"
+    dispatch["id"] = dispatch_id
+
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO dispatches 
+            (id, order_id, order_number, customer_id, dispatch_date, vehicle_number, driver_name, transport_name, notes, slip_image_url, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                dispatch_id,
+                dispatch.get("orderId", ""),
+                dispatch.get("orderNumber", ""),
+                dispatch.get("customerId", ""),
+                dispatch.get("dispatchDate", now[:10]),
+                dispatch.get("vehicleNumber", ""),
+                dispatch.get("driverName", ""),
+                dispatch.get("transportName", ""),
+                dispatch.get("notes", ""),
+                dispatch.get("slipImageUrl"),
+                now,
+            ),
+        )
+
+        conn.execute("DELETE FROM dispatch_lines WHERE dispatch_id = ?", (dispatch_id,))
+        for idx, line in enumerate(dispatch.get("lines", [])):
+            conn.execute(
+                """
+                INSERT INTO dispatch_lines (dispatch_id, line_no, product, quantity, unit)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    dispatch_id,
+                    idx + 1,
+                    line.get("product", ""),
+                    str(line.get("quantity", "0.000")),
+                    line.get("unit", "MT"),
+                ),
+            )
+        conn.commit()
+
+    return dispatch
+
+def load_all_persisted_state() -> Dict[str, Any]:
+    """Hydrates orders, debtors, customers, payments from SQLite."""
+    with get_connection() as conn:
+        # Load parties
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM parties ORDER BY name ASC")
+        parties = cur.fetchall()
+
+        debtors = []
+        customers = []
+        for p in parties:
+            bal_paise = p["balance_paise"] or 0
+            bal_rupees = round(bal_paise / 100.0, 2)
+            d_row = {
+                "id": p["id"],
+                "name": p["name"],
+                "state": p["state"],
+                "city": p["city"],
+                "district": p["district"],
+                "salesperson": p["salesperson"],
+                "salespersonId": p["salesperson_id"] or "EMP-SP-01",
+                "mobile": p["mobile"],
+                "balance": bal_rupees,
+                "creditDays": p["credit_days"],
+                "status": p["status"],
+            }
+            debtors.append(d_row)
+
+            c_row = {
+                "id": p["id"],
+                "name": p["name"],
+                "city": p["city"],
+                "district": p["district"],
+                "state": p["state"],
+                "mobile": p["mobile"],
+                "contactPerson": p["name"],
+                "status": p["status"],
+                "creditDays": p["credit_days"],
+                "salespersonId": p["salesperson_id"] or "EMP-SP-01",
+                "salesperson": p["salesperson"],
+                "source": "database",
+                "openingPaise": 0,
+                "outstandingPaise": bal_paise,
+                "advancePaise": 0,
+                "unbilledValuePaise": 0,
+                "overduePaise": bal_paise if p["status"] == "active" else 0,
+                "isOverdue": bal_paise > 0,
+                "invoiceCount": 0,
+                "orderCount": 0,
+                "lastPaymentDate": None,
+            }
+            customers.append(c_row)
+
+        # Load orders and their lines
+        cur.execute("SELECT * FROM orders ORDER BY created_at DESC")
+        order_rows = cur.fetchall()
+        orders = []
+        for o in order_rows:
+            order_id = o["id"]
+            cur.execute("SELECT * FROM order_lines WHERE order_id = ? ORDER BY line_no ASC", (order_id,))
+            line_rows = cur.fetchall()
+            lines = [
+                {
+                    "orderLineId": l["line_no"],
+                    "lineNo": l["line_no"],
+                    "productId": "PRD-CUSTOM",
+                    "product": l["product"],
+                    "productName": l["product"],
+                    "unit": l["unit"],
+                    "quantity": l["quantity"],
+                    "orderedQuantity": l["quantity"],
+                    "dispatchedQuantity": "0.000",
+                    "remainingQuantity": l["quantity"],
+                    "ratePaise": l["rate_paise"],
+                    "amountPaise": l["amount_paise"],
+                    "valuePaise": l["amount_paise"],
+                }
+                for l in line_rows
+            ]
+
+            orders.append({
+                "id": o["id"],
+                "number": o["order_number"],
+                "customerId": o["customer_id"],
+                "customerName": o["customer_name"],
+                "salespersonName": o["salesperson_name"],
+                "salespersonId": o["salesperson_id"],
+                "state": o["state"],
+                "orderDate": o["order_date"],
+                "date": o["order_date"],
+                "dueDate": o["due_date"],
+                "expectedDispatchDate": o["expected_dispatch_date"],
+                "paymentTerms": o["payment_terms"],
+                "status": o["status"],
+                "notes": o["notes"],
+                "slipImageUrl": o["slip_image_url"],
+                "totalPaise": o["total_paise"],
+                "valuePaise": o["total_paise"],
+                "lines": lines,
+                "lineCount": len(lines),
+            })
+
+        # Load payments
+        cur.execute("SELECT * FROM payments ORDER BY created_at DESC")
+        payment_rows = cur.fetchall()
+        payments = [
+            {
+                "id": py["id"],
+                "voucherNo": py["voucher_no"],
+                "customerId": py["customer_id"],
+                "customerName": py["customer_name"],
+                "orderId": None,
+                "orderNumber": None,
+                "invoiceNumber": "",
+                "invoiceAmountPaise": 0,
+                "amountPaise": py["amount_paise"],
+                "paymentDate": py["payment_date"],
+                "date": py["payment_date"],
+                "method": py["method"],
+                "reference": py["reference"],
+                "notes": py["notes"],
+                "allowAdvance": True,
+                "duplicateSuspected": False,
+                "duplicateOfId": None,
+                "voidedAt": py["voided_at"] if "voided_at" in py.keys() else None,
+                "source": "server",
+                "sourceRef": None,
+                "createdAt": py["created_at"],
+            }
+            for py in payment_rows
+        ]
+
+        return {
+            "debtors": debtors,
+            "customers": customers,
+            "orders": orders,
+            "payments": payments,
+        }

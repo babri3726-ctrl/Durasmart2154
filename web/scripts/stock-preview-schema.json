@@ -1,0 +1,171 @@
+{
+  "decimalStringFields": [
+    "ReconciliationOut.computed",
+    "ReconciliationOut.difference",
+    "ReconciliationOut.displayedTotal",
+    "StockCellOut.value"
+  ],
+  "generatedBy": "owner-panel/scripts/export-stock-preview-schema.py",
+  "generatedOn": "2026-10-20",
+  "models": {
+    "ApplyPlanErrorOut": [
+      "code",
+      "detail",
+      "rowNumber",
+      "sourceSheet",
+      "tableId"
+    ],
+    "CellAddressOut": [
+      "coordinate",
+      "sheet"
+    ],
+    "ProvenanceOut": [
+      "allowedSheets",
+      "fileSha256",
+      "filename",
+      "formulaCacheUsed",
+      "sheetsEnumerated",
+      "sheetsRead",
+      "sizeBytes",
+      "workbookPropertyModifiedAt"
+    ],
+    "ReconciliationOut": [
+      "cell",
+      "code",
+      "computed",
+      "detail",
+      "difference",
+      "displayedTotal",
+      "displayedTotalCoordinate",
+      "sheet",
+      "tableId"
+    ],
+    "StockCellOut": [
+      "columnKey",
+      "columnLabel",
+      "columnLabelCoordinate",
+      "coordinate",
+      "isFormula",
+      "rawText",
+      "source",
+      "value",
+      "warnings"
+    ],
+    "StockColumnOut": [
+      "coordinate",
+      "index",
+      "key",
+      "label"
+    ],
+    "StockPreviewOut": [
+      "allowedSheets",
+      "allowedSheetsFound",
+      "applyBlockedReason",
+      "applyPlanErrors",
+      "applyPreviewDigest",
+      "applyableItemCount",
+      "authorizedFileMatch",
+      "authorizedFileSha256",
+      "businessRecordsCreated",
+      "disclaimer",
+      "formulaCacheMissingCount",
+      "formulaCacheUnusableCount",
+      "formulaCellCount",
+      "incompleteTableCount",
+      "previewedAt",
+      "provenance",
+      "quarantineRowCount",
+      "readyToApply",
+      "reconciliations",
+      "rowCount",
+      "sections",
+      "sheetCount",
+      "sourceFormat",
+      "stockChanged",
+      "tableCount",
+      "validation",
+      "warningCount"
+    ],
+    "StockRowOut": [
+      "association",
+      "cells",
+      "label",
+      "labelCoordinate",
+      "parentCoordinate",
+      "parentLabel",
+      "role",
+      "rowNumber",
+      "strays",
+      "unit",
+      "warnings"
+    ],
+    "StockSectionOut": [
+      "aliasApplied",
+      "completeness",
+      "displayName",
+      "id",
+      "kind",
+      "reconciliations",
+      "sectionTitlePresent",
+      "sourceLabel",
+      "sourceLabelCoordinate",
+      "sourceSheet",
+      "tables",
+      "warnings"
+    ],
+    "StockTableOut": [
+      "completeness",
+      "displayName",
+      "displayedGrandTotal",
+      "displayedTotals",
+      "duplicateOf",
+      "duplicateState",
+      "family",
+      "firstDataRow",
+      "formulaCacheUsed",
+      "headerRow",
+      "id",
+      "labelColumn",
+      "lastDataRow",
+      "rowCount",
+      "rows",
+      "sourceHeading",
+      "sourceHeadingCoordinate",
+      "sourceLabel",
+      "sourceLabelCoordinate",
+      "sourceSheet",
+      "valueColumns",
+      "warnings"
+    ],
+    "StockWarningOut": [
+      "code",
+      "columnLabel",
+      "coordinate",
+      "message",
+      "rowNumber",
+      "sourceSheet",
+      "tableId"
+    ],
+    "ValidationCheckOut": [
+      "detail",
+      "id",
+      "status"
+    ],
+    "ValidationOut": [
+      "checks",
+      "status",
+      "warnings"
+    ]
+  },
+  "operationId": "read_stock_preview_api_v1_imports_excel_stock_preview_post",
+  "requestBodyMediaTypes": [
+    "application/octet-stream",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  ],
+  "responseModel": "StockPreviewOut",
+  "route": "/api/v1/imports/excel/stock-preview",
+  "writeFlagsAreConstFalse": {
+    "businessRecordsCreated": false,
+    "stockChanged": false
+  }
+}

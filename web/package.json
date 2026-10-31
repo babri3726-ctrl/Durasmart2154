@@ -1,0 +1,53 @@
+{
+  "name": "demo-operations-panel",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --noEmit",
+    "lint": "eslint src --max-warnings=0",
+    "test:entry": "node --test scripts/entry-boundary-test.mjs",
+    "test:dispatch": "node --test scripts/dispatch-entry-test.mjs",
+    "test:session": "node --test scripts/session-refresh-test.mjs",
+    "test:refresh": "node --test scripts/live-refresh-test.mjs",
+    "test:reporting": "node --test scripts/reporting-window-test.mjs",
+    "test:stock": "node --test scripts/stock-preview-contract-test.mjs",
+    "test:stock:read": "node --test scripts/stock-read-contract-test.mjs",
+    "test:debtors": "node --test scripts/debtor-apply-contract-test.mjs",
+    "test:provisional": "node --test scripts/provisional-sync-contract-test.mjs",
+    "test:provisional-management": "node --test scripts/provisional-management-contract-test.mjs",
+    "test": "node --test scripts/entry-boundary-test.mjs scripts/dispatch-entry-test.mjs scripts/session-refresh-test.mjs scripts/live-refresh-test.mjs scripts/reporting-window-test.mjs scripts/stock-preview-contract-test.mjs scripts/stock-read-contract-test.mjs scripts/debtor-apply-contract-test.mjs scripts/provisional-sync-contract-test.mjs scripts/provisional-management-contract-test.mjs",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\""
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^3.9.1",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-hook-form": "^7.54.0",
+    "react-router-dom": "^6.28.0",
+    "zod": "^3.24.1",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.16.0",
+    "@types/node": "^26.6.5",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9.16.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "globals": "^15.13.0",
+    "postcss": "^8.4.49",
+    "prettier": "^3.4.2",
+    "tailwindcss": "^3.4.16",
+    "typescript": "~5.6.3",
+    "typescript-eslint": "^8.17.0",
+    "vite": "^5.4.11"
+  }
+}

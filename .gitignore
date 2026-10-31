@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.sqlite3
+.env
+venv/
+env/
+
+# Node / Web
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+tsconfig.app.tsbuildinfo
+tsconfig.node.tsbuildinfo
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+*.apk
+android/.gradle/
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+*.swp
+*.bak

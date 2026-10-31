@@ -1,0 +1,315 @@
+{
+  "categories": [
+    {
+      "key": "steel-coil",
+      "kind": "metal",
+      "label": "Steel Coil (Slit)",
+      "sectionIds": [
+        "total_stock.slit_coil"
+      ],
+      "sourceSheet": "TOTAL STOCK"
+    },
+    {
+      "key": "profile-kanda",
+      "kind": "metal",
+      "label": "Profile / Kanda",
+      "sectionIds": [
+        "total_stock.profile_kanda"
+      ],
+      "sourceSheet": "TOTAL STOCK"
+    },
+    {
+      "key": "gp-sheet",
+      "kind": "metal",
+      "label": "GP Sheet",
+      "sectionIds": [
+        "total_stock.gp"
+      ],
+      "sourceSheet": "TOTAL STOCK"
+    },
+    {
+      "key": "upvc-new",
+      "kind": "upvc",
+      "label": "UPVC New",
+      "sectionIds": [
+        "upvc_total_stock.upvc_current"
+      ],
+      "sourceSheet": "UPVC TOTAL STOCK"
+    },
+    {
+      "key": "upvc-old",
+      "kind": "upvc",
+      "label": "UPVC Old",
+      "sectionIds": [
+        "upvc_total_stock.upvc_old"
+      ],
+      "sourceSheet": "UPVC TOTAL STOCK"
+    },
+    {
+      "key": "upvc-waste",
+      "kind": "upvc",
+      "label": "UPVC Waste",
+      "sectionIds": [
+        "upvc_total_stock.upvc_waste"
+      ],
+      "sourceSheet": "UPVC TOTAL STOCK"
+    },
+    {
+      "key": "upvc-total",
+      "kind": "upvc",
+      "label": "UPVC Total Stock",
+      "sectionIds": [
+        "upvc_total_stock.upvc_current",
+        "upvc_total_stock.upvc_old",
+        "upvc_total_stock.upvc_waste"
+      ],
+      "sourceSheet": "UPVC TOTAL STOCK"
+    },
+    {
+      "key": "upvc-item",
+      "kind": "gap",
+      "label": "UPVC Item / Accessories",
+      "sectionIds": [],
+      "sourceSheet": "UPVC ITEM"
+    }
+  ],
+  "decimalStringFields": [
+    "StockCategoryOut.footage",
+    "StockCategoryOut.pieces",
+    "StockCategoryOut.quantity",
+    "StockCategoryOut.withheldQuantity",
+    "StockMaterialOut.footage",
+    "StockMaterialOut.quantity",
+    "StockWithheldGroupOut.quantity",
+    "UpvcCellOut.footage",
+    "UpvcCellOut.pieces",
+    "UpvcGroupOut.footage",
+    "UpvcGroupOut.pieces",
+    "UpvcRowOut.footage",
+    "UpvcRowOut.pieces",
+    "UpvcTotalsOut.footage",
+    "UpvcTotalsOut.pieces"
+  ],
+  "generatedBy": "owner-panel/scripts/export-stock-read-schema.py",
+  "generatedOn": "2026-10-22",
+  "models": {
+    "AccessoryStockOut": [
+      "appliedAt",
+      "available",
+      "batchId",
+      "categories",
+      "description",
+      "reason",
+      "sourceLabel",
+      "sourceSheet"
+    ],
+    "GapCategoryOut": [
+      "key",
+      "label"
+    ],
+    "ProductionStockOut": [
+      "appliedAt",
+      "available",
+      "batchId",
+      "categories",
+      "description",
+      "reason",
+      "sourceLabel",
+      "sourceSheet"
+    ],
+    "StockBatchBriefOut": [
+      "appliedAt",
+      "appliedByName",
+      "appliedItemCount",
+      "authorizedSha256",
+      "available",
+      "batchId",
+      "fileSha256",
+      "filename",
+      "itemCount",
+      "quarantineCount",
+      "sheetsRead",
+      "staleCount"
+    ],
+    "StockCategoryOut": [
+      "figureCount",
+      "footage",
+      "key",
+      "label",
+      "negativeCount",
+      "note",
+      "pieces",
+      "quantity",
+      "sourceSheet",
+      "staleCount",
+      "status",
+      "unit",
+      "withheldCount",
+      "withheldQuantity"
+    ],
+    "StockMaterialOut": [
+      "carriedFromBatchId",
+      "carryReason",
+      "categoryKey",
+      "categoryLabel",
+      "colour",
+      "columnLabel",
+      "company",
+      "dimensionLabel",
+      "dimensionValue",
+      "footage",
+      "itemKey",
+      "label",
+      "labelCoordinate",
+      "lengthFt",
+      "quantity",
+      "reasons",
+      "rowNumber",
+      "sectionId",
+      "sectionName",
+      "sourceBatchId",
+      "sourceLabel",
+      "sourceSheet",
+      "stale",
+      "status",
+      "stockType",
+      "tableDisplayName",
+      "tableId",
+      "unit",
+      "valueCoordinate",
+      "warnings"
+    ],
+    "StockSummaryOut": [
+      "available",
+      "categories",
+      "materials",
+      "snapshot",
+      "stockMovementsCreated",
+      "warnings",
+      "withheld"
+    ],
+    "StockWarningBriefOut": [
+      "count",
+      "key",
+      "message",
+      "severity"
+    ],
+    "StockWithheldGroupOut": [
+      "categoryKey",
+      "categoryLabel",
+      "count",
+      "quantity",
+      "reasons",
+      "sourceSheet"
+    ],
+    "UpvcCellOut": [
+      "colour",
+      "footage",
+      "lengthFt",
+      "pieces",
+      "rowCount"
+    ],
+    "UpvcGroupOut": [
+      "footage",
+      "key",
+      "label",
+      "pieces",
+      "rowCount"
+    ],
+    "UpvcRowOut": [
+      "colour",
+      "footage",
+      "label",
+      "lengthFt",
+      "negative",
+      "pieces",
+      "stale",
+      "stockType",
+      "stockTypeLabel"
+    ],
+    "UpvcStockOut": [
+      "appliedAt",
+      "available",
+      "batchId",
+      "byColour",
+      "byLength",
+      "colour",
+      "lengthFt",
+      "matrix",
+      "rows",
+      "search",
+      "stockMovementsCreated",
+      "stockType",
+      "totals"
+    ],
+    "UpvcTotalsOut": [
+      "footage",
+      "footageRowCount",
+      "missingLengthCount",
+      "negativeCount",
+      "pieces",
+      "rowCount",
+      "staleCount"
+    ]
+  },
+  "operationIds": {
+    "accessories": "accessory_stock_api_v1_stock_accessories_get",
+    "production": "production_stock_api_v1_stock_production_get",
+    "summary": "stock_summary_api_v1_stock_summary_get",
+    "upvc": "upvc_stock_api_v1_stock_upvc_get"
+  },
+  "queryParams": {
+    "accessories": [],
+    "production": [],
+    "summary": [],
+    "upvc": [
+      "colour",
+      "lengthFt",
+      "q",
+      "type"
+    ]
+  },
+  "readCreatesNothingField": "stockMovementsCreated",
+  "readCreatesNothingIsConstFalse": {
+    "StockSummaryOut": true,
+    "UpvcStockOut": true
+  },
+  "responseModels": {
+    "accessories": "AccessoryStockOut",
+    "production": "ProductionStockOut",
+    "summary": "StockSummaryOut",
+    "upvc": "UpvcStockOut"
+  },
+  "routes": {
+    "accessories": "/api/v1/stock/accessories",
+    "production": "/api/v1/stock/production",
+    "summary": "/api/v1/stock/summary",
+    "upvc": "/api/v1/stock/upvc"
+  },
+  "sectionCategories": [
+    {
+      "categoryKey": "gp-sheet",
+      "sectionId": "total_stock.gp"
+    },
+    {
+      "categoryKey": "profile-kanda",
+      "sectionId": "total_stock.profile_kanda"
+    },
+    {
+      "categoryKey": "steel-coil",
+      "sectionId": "total_stock.slit_coil"
+    },
+    {
+      "categoryKey": "upvc-new",
+      "sectionId": "upvc_total_stock.upvc_current"
+    },
+    {
+      "categoryKey": "upvc-old",
+      "sectionId": "upvc_total_stock.upvc_old"
+    },
+    {
+      "categoryKey": "upvc-waste",
+      "sectionId": "upvc_total_stock.upvc_waste"
+    }
+  ]
+}

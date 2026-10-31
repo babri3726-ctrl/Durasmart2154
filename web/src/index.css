@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  font-size: 15px;
+}
+
+body {
+  @apply bg-canvas text-ink antialiased;
+}
+
+/* Subtle scrollbar for dense tables */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: #c9d2e4;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@layer components {
+  .card {
+    @apply rounded-card bg-white shadow-card;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-field px-4 py-2.5 text-sm font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-brand-blue text-white hover:bg-[#2b63d4];
+  }
+  .btn-grad {
+    @apply btn bg-brand-grad text-white hover:opacity-90;
+  }
+  .btn-ghost {
+    @apply btn border border-line bg-white text-ink hover:bg-canvas;
+  }
+  .btn-danger {
+    @apply btn bg-brand-red text-white hover:bg-[#c93e4b];
+  }
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs;
+  }
+  .input {
+    @apply w-full rounded-field border border-line bg-white px-3.5 py-2.5 text-sm outline-none placeholder:text-faint focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15;
+  }
+  .input-error {
+    @apply border-brand-red focus:border-brand-red;
+  }
+  .label {
+    @apply mb-1 block text-xs font-bold text-muted;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-bold;
+  }
+  .th {
+    @apply whitespace-nowrap px-4 py-3 text-left text-[11px] font-extrabold uppercase tracking-wide text-muted;
+  }
+  .td {
+    @apply px-4 py-3 text-sm;
+  }
+  .row-hover {
+    @apply cursor-pointer transition-colors hover:bg-canvas/70;
+  }
+  .section-title {
+    @apply text-[15px] font-black text-ink;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: white;
+  }
+  /* Print the open receipt/panel area only */
+  body:has(.print-area) * {
+    visibility: hidden;
+  }
+  body:has(.print-area) .print-area,
+  body:has(.print-area) .print-area * {
+    visibility: visible;
+  }
+  body:has(.print-area) .print-area {
+    position: fixed;
+    inset: 0;
+    overflow: visible;
+  }
+}
