@@ -24,10 +24,11 @@ const TONE: Record<string, string> = {
   'upvc-old': 'bg-brand-teal',
   'upvc-waste': 'bg-brand-red',
   'upvc-total': 'bg-brand-blue',
+  'upvc-roofing': 'bg-brand-blue',
   'upvc-item': 'bg-brand-grad',
 };
 
-const UPVC_KEYS = new Set(['upvc-new', 'upvc-old', 'upvc-waste', 'upvc-total', 'upvc-item']);
+const UPVC_KEYS = new Set(['upvc-new', 'upvc-old', 'upvc-waste', 'upvc-total', 'upvc-roofing', 'upvc-item']);
 
 function figure(category: ServerStockCategory) {
   if (UPVC_KEYS.has(category.key)) {

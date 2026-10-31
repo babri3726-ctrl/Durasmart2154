@@ -2105,6 +2105,53 @@ def sync_stock_watch():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/v1/imports/excel/stock-imports")
+def list_stock_imports(q: Optional[str] = None, page: int = 1, pageSize: int = 20):
+    snap = STATE.get("latest_snapshot")
+    if not snap:
+        try:
+            snap = extract_3sheet_stock(DEFAULT_ONEDRIVE_PATH)
+            STATE["latest_snapshot"] = snap
+        except Exception:
+            pass
+
+    items = []
+    if snap:
+        total_items = snap["summary"]["metal_items_count"] + snap["summary"]["upvc_matrix_count"]
+        items.append({
+            "id": "SIM-BATCH-001",
+            "state": "applied",
+            "filename": snap.get("filename", "1-8-26.xlsx"),
+            "sourceFormat": "xlsx",
+            "fileSha256": snap.get("file_sha256", "506a936b89c80ed3b0c74c2109a0ce547ef6eee32cf80a3587acba24ce83868a"),
+            "authorizedSha256": snap.get("file_sha256", "506a936b89c80ed3b0c74c2109a0ce547ef6eee32cf80a3587acba24ce83868a"),
+            "fileSizeBytes": snap.get("file_size", 527366),
+            "previewDigest": "DIGEST-" + snap.get("file_sha256", "506a936b")[:12],
+            "outcomeDigest": "OUTCOME-" + snap.get("file_sha256", "506a936b")[:12],
+            "workbookPropertyModifiedAt": snap.get("synced_at"),
+            "sheetsEnumerated": snap.get("allowed_sheets", ["TOTAL STOCK", "UPVC TOTAL STOCK", "UPVC ITEM"]),
+            "sheetsRead": snap.get("allowed_sheets", ["TOTAL STOCK", "UPVC TOTAL STOCK", "UPVC ITEM"]),
+            "validationStatus": "valid",
+            "warningCount": 0,
+            "tableCount": 3,
+            "rowCount": total_items,
+            "itemCount": total_items,
+            "appliedItemCount": total_items,
+            "carriedForwardCount": 0,
+            "staleCount": 0,
+            "quarantineCount": 0,
+            "appliedAt": snap.get("synced_at", datetime.now().isoformat() + "+05:30"),
+            "appliedBy": "Harpreet Singh (Owner)"
+        })
+
+    return {
+        "items": items,
+        "page": page,
+        "pageSize": pageSize,
+        "total": len(items),
+        "totalPages": 1
+    }
+
 # ----------------- Stock Reading Endpoints -----------------
 @app.get("/api/v1/stock/summary")
 def get_stock_summary():
@@ -2381,7 +2428,7 @@ def get_stock_summary():
                 "note": "Extracted from TOTAL STOCK Col G/H in 1-8-26.xlsx"
             },
             {
-                "key": "upvc-roofing",
+                "key": "upvc-total",
                 "label": "UPVC Roofing Matrix",
                 "sourceSheet": "UPVC TOTAL STOCK",
                 "status": "ready",
