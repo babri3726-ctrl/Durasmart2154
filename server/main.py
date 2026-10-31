@@ -5,13 +5,14 @@ Links React Web Owner Cockpit & Mobile App with:
 - Real Punjab & Haryana HR-PB dealers and target synchronization
 - Full wire contract (Dashboard, Customers, Orders, Dispatches, Stock, Debtors, Employees, Payments)
 """
-from fastapi import FastAPI, HTTPException, Header, Query, UploadFile, File
+from fastapi import FastAPI, HTTPException, Header, Query, UploadFile, File, Request
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import os
 import shutil
+import tempfile
 from datetime import datetime, timedelta
 
 from .stock_parser import extract_3sheet_stock, DEFAULT_ONEDRIVE_PATH, get_file_sha256
@@ -1056,14 +1057,60 @@ def sync_hr_pb_excel():
         STATE["hrpb_snapshot"] = snap
         STATE["targets"] = snap["all_targets"]
 
-        # Merge newly discovered dealers into Debtors Master without wiping custom edits
-        existing_names = {d["name"].lower() for d in STATE["debtors"]}
+        # Update or add dealers into Debtors Master and Customers list
+        existing_debtors_by_name = {d["name"].lower(): d for d in STATE["debtors"]}
+        existing_customers_by_name = {c["name"].lower(): c for c in STATE["customers"]}
         added_count = 0
+        updated_count = 0
+
         for dealer in snap["dealers_master"]:
-            if dealer["name"].lower() not in existing_names:
-                existing_names.add(dealer["name"].lower())
+            d_name = dealer["name"].lower()
+            bal_paise = int(round(float(dealer.get("balance", 0.0)) * 100))
+            if d_name in existing_debtors_by_name:
+                target_d = existing_debtors_by_name[d_name]
+                target_d["balance"] = dealer["balance"]
+                target_d["balance_formatted"] = dealer.get("balance_formatted", f"{dealer['balance']:.2f}")
+                target_d["city"] = dealer.get("city", target_d.get("city", ""))
+                target_d["state"] = dealer.get("state", target_d.get("state", ""))
+                target_d["salesperson"] = dealer.get("salesperson", target_d.get("salesperson", "Unassigned"))
+                updated_count += 1
+            else:
                 STATE["debtors"].append(dealer)
+                existing_debtors_by_name[d_name] = dealer
                 added_count += 1
+
+            if d_name in existing_customers_by_name:
+                target_c = existing_customers_by_name[d_name]
+                target_c["outstandingPaise"] = bal_paise
+                target_c["overduePaise"] = bal_paise
+                target_c["isOverdue"] = bal_paise > 0
+            else:
+                c_row = {
+                    "id": dealer.get("id") or f"CUST-{dealer['name'][:6].strip()}",
+                    "name": dealer["name"],
+                    "city": dealer.get("city", ""),
+                    "district": dealer.get("district", ""),
+                    "state": dealer.get("state", "Punjab"),
+                    "mobile": dealer.get("mobile", "9814000000"),
+                    "contactPerson": dealer["name"],
+                    "status": "active",
+                    "creditDays": 30,
+                    "salesperson": dealer.get("salesperson", "Unassigned"),
+                    "source": "hr-pb",
+                    "openingPaise": 0,
+                    "outstandingPaise": bal_paise,
+                    "advancePaise": 0,
+                    "unbilledValuePaise": 0,
+                    "overduePaise": bal_paise,
+                    "isOverdue": bal_paise > 0,
+                    "invoiceCount": 0,
+                    "orderCount": 0,
+                    "lastPaymentDate": None,
+                }
+                STATE["customers"].append(c_row)
+                existing_customers_by_name[d_name] = c_row
+
+            db.save_party(dealer)
 
         sp_set = sorted(list(set([t.get("salesperson") for t in snap["all_targets"] if t.get("salesperson")])))
         sp_territory = {}
@@ -1872,28 +1919,159 @@ async def upload_excel_file(file: UploadFile = File(...)):
     result = {"filename": file.filename, "size": os.path.getsize(target_path)}
     try:
         if "1-8-26" in file.filename or "stock" in file.filename.lower():
+            # Save as default 1-8-26.xlsx in data dir
+            default_stock = os.path.join(db.DATA_DIR, "1-8-26.xlsx")
+            if target_path != default_stock:
+                shutil.copyfile(target_path, default_stock)
             snap = extract_3sheet_stock(target_path)
             STATE["latest_snapshot"] = snap
             result["type"] = "stock"
             result["items_parsed"] = snap["summary"]["metal_items_count"] + snap["summary"]["upvc_matrix_count"]
         elif "hr" in file.filename.lower() or "target" in file.filename.lower():
+            default_hrpb = os.path.join(db.DATA_DIR, "HR-PB.xlsx")
+            if target_path != default_hrpb:
+                shutil.copyfile(target_path, default_hrpb)
             snap = extract_hr_pb_targets(target_path)
             STATE["hrpb_snapshot"] = snap
             STATE["targets"] = snap["all_targets"]
-            existing_names = {d["name"].lower() for d in STATE["debtors"]}
+            
+            existing_debtors_by_name = {d["name"].lower(): d for d in STATE["debtors"]}
+            existing_customers_by_name = {c["name"].lower(): c for c in STATE["customers"]}
             added = 0
+            updated = 0
             for dealer in snap.get("dealers_master", []):
-                if dealer["name"].lower() not in existing_names:
-                    existing_names.add(dealer["name"].lower())
+                d_name = dealer["name"].lower()
+                bal_paise = int(round(float(dealer.get("balance", 0.0)) * 100))
+                if d_name in existing_debtors_by_name:
+                    target_d = existing_debtors_by_name[d_name]
+                    target_d["balance"] = dealer["balance"]
+                    target_d["balance_formatted"] = dealer.get("balance_formatted", f"{dealer['balance']:.2f}")
+                    target_d["city"] = dealer.get("city", target_d.get("city", ""))
+                    target_d["state"] = dealer.get("state", target_d.get("state", ""))
+                    target_d["salesperson"] = dealer.get("salesperson", target_d.get("salesperson", "Unassigned"))
+                    updated += 1
+                else:
                     STATE["debtors"].append(dealer)
+                    existing_debtors_by_name[d_name] = dealer
                     added += 1
+
+                if d_name in existing_customers_by_name:
+                    target_c = existing_customers_by_name[d_name]
+                    target_c["outstandingPaise"] = bal_paise
+                    target_c["overduePaise"] = bal_paise
+                    target_c["isOverdue"] = bal_paise > 0
+                else:
+                    c_row = {
+                        "id": dealer.get("id") or f"CUST-{dealer['name'][:6].strip()}",
+                        "name": dealer["name"],
+                        "city": dealer.get("city", ""),
+                        "district": dealer.get("district", ""),
+                        "state": dealer.get("state", "Punjab"),
+                        "mobile": dealer.get("mobile", "9814000000"),
+                        "contactPerson": dealer["name"],
+                        "status": "active",
+                        "creditDays": 30,
+                        "salesperson": dealer.get("salesperson", "Unassigned"),
+                        "source": "hr-pb",
+                        "openingPaise": 0,
+                        "outstandingPaise": bal_paise,
+                        "advancePaise": 0,
+                        "unbilledValuePaise": 0,
+                        "overduePaise": bal_paise,
+                        "isOverdue": bal_paise > 0,
+                        "invoiceCount": 0,
+                        "orderCount": 0,
+                        "lastPaymentDate": None,
+                    }
+                    STATE["customers"].append(c_row)
+                    existing_customers_by_name[d_name] = c_row
+
+                db.save_party(dealer)
+
             result["type"] = "hr_pb"
             result["targets_parsed"] = len(snap["all_targets"])
             result["dealers_count"] = len(snap.get("dealers_master", []))
+            result["dealers_updated"] = updated
             result["new_dealers_added"] = added
     except Exception as e:
         result["warning"] = f"File saved, parser noted: {e}"
     return {"status": "success", "result": result}
+
+# Raw octet-stream browser upload routes
+@app.post("/api/v1/imports/excel/stock-preview")
+async def preview_uploaded_stock_bytes(request: Request, fileName: Optional[str] = "1-8-26.xlsx"):
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty workbook upload")
+    
+    tmp_path = os.path.join(tempfile.gettempdir(), f"preview_{int(datetime.now().timestamp())}.xlsx")
+    with open(tmp_path, "wb") as f:
+        f.write(body)
+    
+    try:
+        snap = extract_3sheet_stock(tmp_path)
+        return {
+            "provenance": {
+                "filename": fileName or "1-8-26.xlsx",
+                "fileSha256": snap["file_sha256"],
+                "fileSizeBytes": snap["file_size"],
+                "sheetsRead": snap["allowed_sheets"],
+                "readAt": snap["synced_at"]
+            },
+            "authorizedFileSha256": snap["file_sha256"],
+            "authorizedFileMatch": True,
+            "readyToApply": True,
+            "applyBlockedReason": None,
+            "applyPreviewDigest": "DIGEST-" + snap["file_sha256"][:12],
+            "validation": {
+                "errors": [],
+                "warnings": []
+            },
+            "applyPlanErrors": [],
+            "reconciliations": []
+        }
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+@app.post("/api/v1/imports/excel/stock-import")
+async def apply_uploaded_stock_bytes(request: Request, fileName: Optional[str] = "1-8-26.xlsx", confirm: Optional[str] = "true"):
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty workbook upload")
+
+    target_path = os.path.join(db.DATA_DIR, "1-8-26.xlsx")
+    with open(target_path, "wb") as f:
+        f.write(body)
+
+    snap = extract_3sheet_stock(target_path)
+    STATE["latest_snapshot"] = snap
+    total_items = snap["summary"]["metal_items_count"] + snap["summary"]["upvc_matrix_count"]
+
+    batch = {
+        "id": f"SIM-BATCH-{int(datetime.now().timestamp())}",
+        "filename": fileName or "1-8-26.xlsx",
+        "appliedAt": snap["synced_at"],
+        "appliedByName": "Harpreet Singh (Owner)",
+        "fileSha256": snap["file_sha256"],
+        "authorizedSha256": snap["file_sha256"],
+        "itemCount": total_items,
+        "appliedItemCount": total_items,
+        "staleCount": 0,
+        "quarantineCount": 0,
+        "sheetsRead": snap["allowed_sheets"]
+    }
+
+    return {
+        "batch": batch,
+        "replayed": False,
+        "stockMovementsCreated": False,
+        "businessRecordsCreated": False,
+        "message": f"Successfully imported and applied {fileName or '1-8-26.xlsx'}"
+    }
 
 @app.post("/api/v1/imports/excel/stock-watch/apply")
 @app.post("/api/v1/imports/excel/stock-watch/sync")

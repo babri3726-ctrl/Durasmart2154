@@ -1,36 +1,67 @@
 @echo off
 setlocal enabledelayedexpansion
 title Dura Smart - 1-Click Excel Cloud Sync
+color 0b
+
 echo ========================================================
-echo     Dura Smart - 1-Click Live Excel Cloud Sync
+echo       DURA SMART - 1-CLICK EXCEL CLOUD SYNC
 echo ========================================================
 echo.
-echo Syncing OneDrive workbooks to https://durasmart2154.onrender.com...
+echo Connecting to Cloud Service: https://durasmart2154.onrender.com
 echo.
 
 set "ONEDRIVE_DIR=%USERPROFILE%\OneDrive"
 set "STOCK_FILE=%ONEDRIVE_DIR%\1-8-26.xlsx"
 set "HRPB_FILE=%ONEDRIVE_DIR%\HR-PB.xlsx"
+set "CLOUD_URL=https://durasmart2154.onrender.com/api/v1/imports/excel/upload"
 
-if exist "%STOCK_FILE%" (
-    echo [1/2] Syncing Stock Workbook: 1-8-26.xlsx
-    curl.exe -s -X POST -F "file=@%STOCK_FILE%" "https://durasmart2154.onrender.com/api/v1/imports/excel/upload"
-    echo.
-) else (
-    echo [1/2] Stock file not found at: %STOCK_FILE%
-)
-
-if exist "%HRPB_FILE%" (
-    echo [2/2] Syncing HR-PB Targets and Dealers: HR-PB.xlsx
-    curl.exe -s -X POST -F "file=@%HRPB_FILE%" "https://durasmart2154.onrender.com/api/v1/imports/excel/upload"
-    echo.
-) else (
-    echo [2/2] HR-PB file not found at: %HRPB_FILE%
-)
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$stock = [System.IO.Path]::Combine($env:USERPROFILE, 'OneDrive', '1-8-26.xlsx');" ^
+    "$hrpb = [System.IO.Path]::Combine($env:USERPROFILE, 'OneDrive', 'HR-PB.xlsx');" ^
+    "$url = 'https://durasmart2154.onrender.com/api/v1/imports/excel/upload';" ^
+    "if (Test-Path $stock) {" ^
+    "    Write-Host '[1/2] Syncing Stock: 1-8-26.xlsx (handling active Excel lock)...' -ForegroundColor Cyan;" ^
+    "    $tmpStock = [System.IO.Path]::Combine($env:TEMP, 'sync_upload_stock.xlsx');" ^
+    "    Copy-Item -Path $stock -Destination $tmpStock -Force;" ^
+    "    $resp = curl.exe -s -X POST -F ('file=@' + $tmpStock + ';filename=1-8-26.xlsx') $url;" ^
+    "    Remove-Item $tmpStock -Force -ErrorAction SilentlyContinue;" ^
+    "    try {" ^
+    "        $json = $resp | ConvertFrom-Json;" ^
+    "        if ($json.status -eq 'success') {" ^
+    "            Write-Host ('   SUCCESS: ' + $json.result.items_parsed + ' stock items parsed and live on cloud!') -ForegroundColor Green;" ^
+    "        } else {" ^
+    "            Write-Host ('   NOTE: ' + $resp) -ForegroundColor Yellow;" ^
+    "        }" ^
+    "    } catch {" ^
+    "        Write-Host ('   RESPONSE: ' + $resp);" ^
+    "    }" ^
+    "} else {" ^
+    "    Write-Host '[1/2] Stock file not found at: ' $stock -ForegroundColor Red;" ^
+    "};" ^
+    "if (Test-Path $hrpb) {" ^
+    "    Write-Host '[2/2] Syncing Targets: HR-PB.xlsx (handling active Excel lock)...' -ForegroundColor Cyan;" ^
+    "    $tmpHrpb = [System.IO.Path]::Combine($env:TEMP, 'sync_upload_hrpb.xlsx');" ^
+    "    Copy-Item -Path $hrpb -Destination $tmpHrpb -Force;" ^
+    "    $resp = curl.exe -s -X POST -F ('file=@' + $tmpHrpb + ';filename=HR-PB.xlsx') $url;" ^
+    "    Remove-Item $tmpHrpb -Force -ErrorAction SilentlyContinue;" ^
+    "    try {" ^
+    "        $json = $resp | ConvertFrom-Json;" ^
+    "        if ($json.status -eq 'success') {" ^
+    "            Write-Host ('   SUCCESS: ' + $json.result.targets_parsed + ' targets ^& ' + $json.result.dealers_count + ' dealers synced!') -ForegroundColor Green;" ^
+    "        } else {" ^
+    "            Write-Host ('   NOTE: ' + $resp) -ForegroundColor Yellow;" ^
+    "        }" ^
+    "    } catch {" ^
+    "        Write-Host ('   RESPONSE: ' + $resp);" ^
+    "    }" ^
+    "} else {" ^
+    "    Write-Host '[2/2] HR-PB file not found at: ' $hrpb -ForegroundColor Red;" ^
+    "}"
 
 echo.
 echo ========================================================
-echo  Sync Complete! Check your live panel at:
+echo  Sync Process Complete!
+echo  View your live cockpit at:
 echo  https://durasmart2154.onrender.com
 echo ========================================================
 echo.
