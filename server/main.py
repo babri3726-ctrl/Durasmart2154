@@ -1814,8 +1814,18 @@ async def upload_excel_file(file: UploadFile = File(...)):
         elif "hr" in file.filename.lower() or "target" in file.filename.lower():
             snap = extract_hr_pb_targets(target_path)
             STATE["hrpb_snapshot"] = snap
+            STATE["targets"] = snap["all_targets"]
+            existing_names = {d["name"].lower() for d in STATE["debtors"]}
+            added = 0
+            for dealer in snap.get("dealers_master", []):
+                if dealer["name"].lower() not in existing_names:
+                    existing_names.add(dealer["name"].lower())
+                    STATE["debtors"].append(dealer)
+                    added += 1
             result["type"] = "hr_pb"
-            result["targets_parsed"] = len(snap["dealers"])
+            result["targets_parsed"] = len(snap["all_targets"])
+            result["dealers_count"] = len(snap.get("dealers_master", []))
+            result["new_dealers_added"] = added
     except Exception as e:
         result["warning"] = f"File saved, parser noted: {e}"
     return {"status": "success", "result": result}
