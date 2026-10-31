@@ -6,6 +6,7 @@ Links React Web Owner Cockpit & Mobile App with:
 - Full wire contract (Dashboard, Customers, Orders, Dispatches, Stock, Debtors, Employees, Payments)
 """
 from fastapi import FastAPI, HTTPException, Header, Query, UploadFile, File
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
@@ -29,7 +30,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
 @app.get("/health")
 def health_check():
     return {
@@ -2410,3 +2410,24 @@ def get_tasks():
 @app.get("/api/v1/tours")
 def get_tours():
     return {"items": STATE["tours"]}
+
+# ----------------- Single Page Application (SPA) Frontend Mount -----------------
+WEB_DIST_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web", "dist")
+
+if os.path.exists(WEB_DIST_DIR):
+    assets_dir = os.path.join(WEB_DIST_DIR, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="web_assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str = ""):
+        if full_path.startswith("api/") or full_path.startswith("docs") or full_path == "openapi.json" or full_path == "health":
+            raise HTTPException(status_code=404, detail="Not Found")
+        file_path = os.path.join(WEB_DIST_DIR, full_path)
+        if full_path and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        index_file = os.path.join(WEB_DIST_DIR, "index.html")
+        if os.path.exists(index_file):
+            return FileResponse(index_file)
+        raise HTTPException(status_code=404, detail="Frontend index.html not found")
+

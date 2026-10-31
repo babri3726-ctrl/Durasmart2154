@@ -12,6 +12,12 @@ class TestServerApi(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["status"], "healthy")
 
+    def test_00_spa_index(self):
+        r = self.client.get("/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("html", r.headers.get("content-type", "").lower())
+        self.assertIn("<div id=\"root\"></div>", r.text)
+
     def test_01_login(self):
         r = self.client.post("/api/v1/auth/login", json={"username": "owner", "password": "demo"})
         self.assertEqual(r.status_code, 200, f"Login failed: {r.text}")
