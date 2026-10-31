@@ -35,6 +35,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "durasmart-api",
+        "version": "v1.0.2-unified",
         "timestamp": datetime.utcnow().isoformat(),
         "database": "connected"
     }
@@ -2413,21 +2414,27 @@ def get_tours():
 
 # ----------------- Single Page Application (SPA) Frontend Mount -----------------
 WEB_DIST_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web", "dist")
+assets_dir = os.path.join(WEB_DIST_DIR, "assets")
+if os.path.exists(assets_dir):
+    app.mount("/assets", StaticFiles(directory=assets_dir), name="web_assets")
 
-if os.path.exists(WEB_DIST_DIR):
-    assets_dir = os.path.join(WEB_DIST_DIR, "assets")
-    if os.path.exists(assets_dir):
-        app.mount("/assets", StaticFiles(directory=assets_dir), name="web_assets")
-
-    @app.get("/{full_path:path}", include_in_schema=False)
-    async def serve_spa(full_path: str = ""):
-        if full_path.startswith("api/") or full_path.startswith("docs") or full_path == "openapi.json" or full_path == "health":
-            raise HTTPException(status_code=404, detail="Not Found")
-        file_path = os.path.join(WEB_DIST_DIR, full_path)
-        if full_path and os.path.isfile(file_path):
-            return FileResponse(file_path)
-        index_file = os.path.join(WEB_DIST_DIR, "index.html")
-        if os.path.exists(index_file):
-            return FileResponse(index_file)
-        raise HTTPException(status_code=404, detail="Frontend index.html not found")
+@app.get("/", include_in_schema=False)
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_spa(full_path: str = ""):
+    if full_path in ("health", "openapi.json") or full_path.startswith("api/") or full_path.startswith("docs"):
+        raise HTTPException(status_code=404, detail="Not Found")
+    file_path = os.path.join(WEB_DIST_DIR, full_path)
+    if full_path and os.path.isfile(file_path):
+        return FileResponse(file_path)
+    index_file = os.path.join(WEB_DIST_DIR, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    return {
+        "status": "online",
+        "service": "durasmart-api",
+        "web_dist_found": os.path.exists(WEB_DIST_DIR),
+        "web_dist_path": WEB_DIST_DIR,
+        "files_in_dir": os.listdir(os.path.dirname(WEB_DIST_DIR)) if os.path.exists(os.path.dirname(WEB_DIST_DIR)) else [],
+        "api_docs": "/docs"
+    }
 
