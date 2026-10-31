@@ -14,7 +14,10 @@
 
 import { mockRequest } from './mock/router';
 
-const RAW_BASE = ((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? '').trim();
+const RAW_BASE = (
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
+  'https://durasmart2154.onrender.com'
+).trim();
 
 export const API_BASE_URL = RAW_BASE.replace(/\/+$/, '');
 
