@@ -10,9 +10,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source code and default data/seed files
+# Copy source code, web frontend dist, and default data/seed files
 COPY server /app/server
 COPY data /app/data
+COPY web/dist /app/web/dist
 
 ENV PORT=8010
 EXPOSE 8010
