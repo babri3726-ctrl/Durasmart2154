@@ -441,6 +441,82 @@ class MockRepository extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool deleteOrder(String orderId) {
+    final idx = orders.indexWhere((o) => o.id == orderId);
+    if (idx != -1) {
+      final order = orders.removeAt(idx);
+      _pushNotification(
+        'Order deleted',
+        '${order.number} permanently deleted',
+      );
+      ApiSyncService.deleteOrder(orderId);
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  SalesOrder? updateOrder({
+    required String id,
+    String? customerId,
+    List<OrderItem>? items,
+    DateTime? dueDate,
+    String? paymentTerms,
+    DateTime? expectedDispatchDate,
+    String? notes,
+  }) {
+    final idx = orders.indexWhere((o) => o.id == id);
+    if (idx == -1) return null;
+    final old = orders[idx];
+    final custId = customerId ?? old.customerId;
+    final customer = customerById(custId);
+    final updated = SalesOrder(
+      id: old.id,
+      number: old.number,
+      customerId: custId,
+      salespersonId: customer?.salespersonId ?? old.salespersonId,
+      orderDate: old.orderDate,
+      items: items ?? old.items,
+      dueDate: dueDate ?? old.dueDate,
+      paymentTerms: paymentTerms ?? old.paymentTerms,
+      expectedDispatchDate: expectedDispatchDate ?? old.expectedDispatchDate,
+      notes: notes ?? old.notes,
+      status: old.status,
+      orderPhotos: old.orderPhotos,
+    );
+    orders[idx] = updated;
+
+    ApiSyncService.patchOrder(id, {
+      if (customerId != null) 'customerId': customerId,
+      if (paymentTerms != null) 'paymentTerms': paymentTerms,
+      if (expectedDispatchDate != null)
+        'expectedDispatchDate':
+            expectedDispatchDate.toIso8601String().substring(0, 10),
+      if (dueDate != null)
+        'dueDate': dueDate.toIso8601String().substring(0, 10),
+      if (notes != null) 'notes': notes,
+      if (items != null)
+        'lines': items
+            .map(
+              (i) => {
+                'product': i.product,
+                'quantity': i.quantity.toStringAsFixed(3),
+                'unit': i.unit,
+                'ratePaise': (i.rate * 100).round(),
+                'amountPaise': (i.lineTotal * 100).round(),
+              },
+            )
+            .toList(),
+    });
+
+    _pushNotification(
+      'Order updated',
+      '${updated.number} • ${customer?.name ?? updated.customerId}',
+    );
+    notifyListeners();
+    return updated;
+  }
+
   /// Records a dispatch and refreshes the order's dispatch state. An order is
   /// marked fully dispatched only when every item quantity is covered.
   Dispatch addDispatch({

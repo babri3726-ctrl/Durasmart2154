@@ -340,5 +340,68 @@ class TestServerApi(unittest.TestCase):
         t_data = res_t.json()
         self.assertIn("items", t_data)
 
+    def test_14_order_edit_and_delete(self):
+        # 1. Create order
+        order_payload = {
+            "customer_id": "DEBTOR-HR-001",
+            "date": "2026-11-02",
+            "lines": [
+                {
+                    "product": "UPVC Roofing Sheets",
+                    "quantity": "5.000",
+                    "unit": "MT",
+                    "rate": 60000.0
+                }
+            ],
+            "notes": "Original Note",
+            "paymentTerms": "15 days credit"
+        }
+        res_create = self.client.post("/api/v1/orders", json=order_payload)
+        self.assertEqual(res_create.status_code, 200)
+        o_id = res_create.json()["id"]
+
+        # 2. Edit order via PATCH
+        edit_payload = {
+            "notes": "Updated Note via Edit Option",
+            "paymentTerms": "45 days credit",
+            "lines": [
+                {
+                    "product": "UPVC Roofing Sheets Premium",
+                    "quantity": "8.000",
+                    "unit": "MT",
+                    "ratePaise": 6500000
+                }
+            ]
+        }
+        res_patch = self.client.patch(f"/api/v1/orders/{o_id}", json=edit_payload)
+        self.assertEqual(res_patch.status_code, 200)
+        patched = res_patch.json()
+        self.assertEqual(patched["notes"], "Updated Note via Edit Option")
+        self.assertEqual(patched["paymentTerms"], "45 days credit")
+        self.assertEqual(patched["orderedQuantity"], "8.000")
+        self.assertEqual(patched["lines"][0]["product"], "UPVC Roofing Sheets Premium")
+
+        # 3. Edit order via PUT
+        put_payload = {
+            "notes": "Updated Note via PUT Option",
+            "paymentTerms": "Cash on Delivery"
+        }
+        res_put = self.client.put(f"/api/v1/orders/{o_id}", json=put_payload)
+        self.assertEqual(res_put.status_code, 200)
+        put_data = res_put.json()
+        self.assertEqual(put_data["notes"], "Updated Note via PUT Option")
+        self.assertEqual(put_data["paymentTerms"], "Cash on Delivery")
+
+        # 4. Delete order
+        res_del = self.client.delete(f"/api/v1/orders/{o_id}")
+        self.assertEqual(res_del.status_code, 200)
+        del_data = res_del.json()
+        self.assertTrue(del_data["deleted"])
+        self.assertEqual(del_data["id"], o_id)
+
+        # 5. Verify order is deleted
+        res_get_deleted = self.client.get(f"/api/v1/orders/{o_id}")
+        self.assertEqual(res_get_deleted.status_code, 404)
+
 if __name__ == '__main__':
     unittest.main()

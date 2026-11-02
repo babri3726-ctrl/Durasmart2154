@@ -146,4 +146,36 @@ class ApiSyncService {
       return false;
     }
   }
+
+  /// Updates an order on the backend /api/v1/orders/$orderId
+  static Future<bool> patchOrder(String orderId, Map<String, dynamic> payload) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return false;
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.patchUrl(Uri.parse('$host/api/v1/orders/$orderId'));
+      req.headers.contentType = ContentType.json;
+      req.write(jsonEncode(payload));
+      final resp = await req.close();
+      return resp.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Deletes an order on the backend /api/v1/orders/$orderId
+  static Future<bool> deleteOrder(String orderId) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return false;
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.deleteUrl(Uri.parse('$host/api/v1/orders/$orderId'));
+      final resp = await req.close();
+      return resp.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
 }

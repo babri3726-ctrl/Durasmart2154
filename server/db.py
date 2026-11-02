@@ -363,6 +363,14 @@ def save_order(order: dict[str, Any]) -> dict[str, Any]:
 
     return order
 
+def delete_order(order_id: str) -> bool:
+    """Deletes order and associated order_lines from SQLite."""
+    with get_connection() as conn:
+        conn.execute("DELETE FROM order_lines WHERE order_id = ?", (order_id,))
+        cursor = conn.execute("DELETE FROM orders WHERE id = ?", (order_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
 def save_party(party: dict[str, Any]) -> dict[str, Any]:
     """Persists debtor/customer to SQLite."""
     now = datetime.now().isoformat()

@@ -557,10 +557,10 @@ export default function OrderNew() {
   }, [isOwner]);
 
   const loaded = draft.state === 'ready' ? draft.data : null;
-  const editing = loaded !== null && loaded.status === 'draft';
+  const editing = loaded !== null;
 
   useEffect(() => {
-    if (loaded === null || loaded.status !== 'draft') return;
+    if (loaded === null) return;
     versionRef.current = loaded.version;
     reset(formFromDraft(loaded));
     if (loaded.slipImageData) {
@@ -724,9 +724,10 @@ export default function OrderNew() {
           return;
         }
         setSavedNote(
-          `Draft saved. The backend's row version is now ${updated.version}, so the next save here writes over the row you just read — not the one you opened with.`,
+          `Order saved. The backend's row version is now ${updated.version}.`,
         );
-        toast.success('Draft saved on the backend');
+        toast.success(`Order ${updated.number ?? updated.id} updated on the backend`);
+        navigate(`/orders/${updated.id}`);
         return;
       }
 
@@ -790,24 +791,21 @@ export default function OrderNew() {
     );
   }
 
-  // A submitted order is not editable and the panel does not pretend otherwise: the backend answers
-  // 422 to a PATCH on anything but a draft, and rewriting the lines of an order that has already
-  // moved would rewrite a document the business acted on.
-  if (loaded !== null && !editing) {
+  if (loaded !== null && loaded.status === 'dispatched') {
     return (
       <div>
-        <PageHeader title="Edit draft order" />
+        <PageHeader title={`Order ${loaded.number ?? loaded.id}`} />
         <Card>
           <p className="text-[13px] font-bold text-ink">
-            <StatusBadge status={loaded.status} /> {loaded.number ? `Order ${loaded.number}` : 'Draft with no number'}
+            <StatusBadge status={loaded.status} /> {loaded.number ? `Order ${loaded.number}` : loaded.id}
           </p>
           <p className="mt-2 text-xs text-muted">
-            This order is {loaded.status} on the backend, and only a draft can be edited. Its lines change by booking
-            a new order or by moving its status, never by rewriting a submitted document.
+            This order has been completely dispatched and cannot be edited. If items were returned or cancelled,
+            void the relevant dispatch first.
           </p>
           <p className="mt-3 text-xs">
-            <Link to={`/orders/${loaded.id}`} className="font-bold text-brand-blue hover:underline">
-              Open the order
+            <Link to={`/orders/${loaded.id}`} className="btn-primary inline-block">
+              Open order details
             </Link>
           </p>
         </Card>
@@ -818,7 +816,7 @@ export default function OrderNew() {
   return (
     <div>
       <PageHeader
-        title={editing ? 'Edit draft order' : 'New Order'}
+        title={editing ? (loaded?.number ? `Edit Order ${loaded.number}` : 'Edit draft order') : 'New Order'}
         subtitle={
           editing
             ? `A saved draft on ${serverHost()} — saving sends the whole line list through PATCH /orders/{id} with the row version you read`

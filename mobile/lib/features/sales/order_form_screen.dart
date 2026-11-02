@@ -22,7 +22,8 @@ class _LineRow {
 }
 
 class OrderFormScreen extends StatefulWidget {
-  const OrderFormScreen({super.key});
+  const OrderFormScreen({super.key, this.existingOrder});
+  final SalesOrder? existingOrder;
 
   @override
   State<OrderFormScreen> createState() => _OrderFormScreenState();
@@ -39,6 +40,29 @@ class _OrderFormScreenState extends State<OrderFormScreen> {
   final List<_LineRow> _lines = [_LineRow()];
 
   static const _terms = ['30 days credit', 'Advance', 'COD', '15 days credit'];
+
+  @override
+  void initState() {
+    super.initState();
+    final o = widget.existingOrder;
+    if (o != null) {
+      _customerId = o.customerId;
+      _orderDate = o.orderDate;
+      _expectedDispatch = o.expectedDispatchDate;
+      _paymentTerms = o.paymentTerms;
+      _notes.text = o.notes;
+      _photos.addAll(o.orderPhotos);
+      if (o.items.isNotEmpty) {
+        _lines.clear();
+        for (final item in o.items) {
+          final row = _LineRow();
+          row.product = item.product;
+          row.qty.text = item.quantity.toStringAsFixed(3);
+          _lines.add(row);
+        }
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -126,7 +150,13 @@ class _OrderFormScreenState extends State<OrderFormScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: const Text('New Order')),
+      appBar: AppBar(
+        title: Text(
+          widget.existingOrder != null
+              ? 'Edit Order ${widget.existingOrder!.number}'
+              : 'New Order',
+        ),
+      ),
       body: Form(
         key: _formKey,
         child: ListView(
@@ -442,6 +472,22 @@ class _OrderFormScreenState extends State<OrderFormScreen> {
       return;
     }
     final items = _buildItems(repo);
+    if (widget.existingOrder != null) {
+      final updated = repo.updateOrder(
+        id: widget.existingOrder!.id,
+        customerId: _customerId,
+        items: items,
+        expectedDispatchDate: _expectedDispatch,
+        paymentTerms: _paymentTerms,
+        notes: _notes.text.trim(),
+      );
+      showDemoSnack(
+        context,
+        'Order updated: ${updated?.number ?? widget.existingOrder!.number}',
+      );
+      Navigator.of(context).pop();
+      return;
+    }
     final order = repo.addOrder(
       customerId: _customerId!,
       items: items,
@@ -459,6 +505,22 @@ class _OrderFormScreenState extends State<OrderFormScreen> {
   void _submit(MockRepository repo) {
     if (!_validate()) return;
     final items = _buildItems(repo);
+    if (widget.existingOrder != null) {
+      final updated = repo.updateOrder(
+        id: widget.existingOrder!.id,
+        customerId: _customerId,
+        items: items,
+        expectedDispatchDate: _expectedDispatch,
+        paymentTerms: _paymentTerms,
+        notes: _notes.text.trim(),
+      );
+      showDemoSnack(
+        context,
+        'Order updated: ${updated?.number ?? widget.existingOrder!.number}',
+      );
+      Navigator.of(context).pop();
+      return;
+    }
     final order = repo.addOrder(
       customerId: _customerId!,
       items: items,

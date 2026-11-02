@@ -6,6 +6,7 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock_repository.dart';
 import '../../data/models.dart';
+import 'order_form_screen.dart';
 
 class OrderDetailScreen extends StatelessWidget {
   const OrderDetailScreen({super.key, required this.orderId});
@@ -40,7 +41,44 @@ class OrderDetailScreen extends StatelessWidget {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(title: Text(order.number)),
+      appBar: AppBar(
+        title: Text(order.number),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.edit_outlined),
+            tooltip: 'Edit order',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => OrderFormScreen(existingOrder: order),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline, color: AppColors.red),
+            tooltip: 'Delete order',
+            onPressed: () async {
+              final confirmed = await ConfirmDialog.show(
+                context,
+                title: 'Delete order',
+                message:
+                    'Are you sure you want to permanently delete order ${order.number}?',
+                confirmLabel: 'Delete order',
+                danger: true,
+              );
+              if (confirmed && context.mounted) {
+                repo.deleteOrder(order.id);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Order ${order.number} deleted')),
+                );
+                Navigator.pop(context);
+              }
+            },
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [

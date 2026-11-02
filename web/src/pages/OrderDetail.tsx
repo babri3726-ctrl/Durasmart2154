@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { CheckCircle, Copy, Share2 } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { CheckCircle, Copy, Edit, Share2, Trash2 } from 'lucide-react';
 import { Card, CardHeader, PageHeader, Spinner, StatusBadge } from '../components/ui/Card';
 import { Modal } from '../components/ui/Overlays';
 import { LiveSyncBar } from '../components/ui/LiveSync';
@@ -14,6 +14,7 @@ import { invalidate, syncKeys, useSyncToken } from '../lib/syncStore';
 import { useResource } from '../lib/useResource';
 import { toast } from '../lib/toast';
 import {
+  deleteOrder,
   getCustomer,
   getDispatchBalance,
   getOrder,
@@ -82,16 +83,41 @@ function OrderActions({
   isOwner: boolean;
   onChanged: () => void;
 }) {
-  const [busy, setBusy] = useState<'' | OrderStatus>('');
+  const [busy, setBusy] = useState<'' | OrderStatus | 'deleted'>('');
   const [error, setError] = useState('');
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [reason, setReason] = useState('');
   const submitKey = useRef<KeyedSubmission | null>(null);
   const cancelKey = useRef<KeyedSubmission | null>(null);
+  const navigate = useNavigate();
 
   const cancelled = order.cancelledAt !== null || order.status === 'cancelled';
   const reasonRequired = cancelNeedsReason(order);
   const mayCancel = !cancelled && (isOwner || order.status === 'draft' || order.status === 'pending');
+  const mayEdit = !cancelled && order.dispatchStatus !== 'dispatched';
+  const mayDelete = isOwner || order.status === 'draft' || order.status === 'pending';
+
+  async function removeOrder() {
+    if (busy !== '') return;
+    setBusy('deleted');
+    setError('');
+    try {
+      await deleteOrder(order.id);
+      toast.success(`Order ${orderLabel(order)} permanently deleted.`);
+      onChanged();
+      navigate('/orders');
+    } catch (cause) {
+      setError(
+        cause instanceof ServerError
+          ? cause.message
+          : 'Failed to delete order from the backend.',
+      );
+    } finally {
+      setBusy('');
+      setDeleteOpen(false);
+    }
+  }
 
   async function move(to: OrderStatus, why?: string) {
     if (busy !== '') return;
@@ -144,9 +170,27 @@ function OrderActions({
           {busy === 'confirmed' ? 'Working…' : 'Confirm order'}
         </button>
       )}
+      {mayEdit && (
+        <Link
+          to={`/orders/${order.id}/edit`}
+          className="btn-secondary btn-sm inline-flex items-center gap-1 font-bold"
+        >
+          <Edit size={13} /> Edit order
+        </Link>
+      )}
       {mayCancel && (
         <button type="button" className="btn-danger btn-sm" disabled={busy !== ''} onClick={() => setCancelOpen(true)}>
           Cancel order
+        </button>
+      )}
+      {mayDelete && (
+        <button
+          type="button"
+          className="btn-danger btn-sm inline-flex items-center gap-1 !bg-red-700 hover:!bg-red-800"
+          disabled={busy !== ''}
+          onClick={() => setDeleteOpen(true)}
+        >
+          <Trash2 size={13} /> Delete order
         </button>
       )}
       {!isOwner && !cancelled && (
@@ -192,6 +236,29 @@ function OrderActions({
             onClick={() => void move('cancelled', reason)}
           >
             {busy === 'cancelled' ? 'Working…' : 'Cancel the order'}
+          </button>
+        </div>
+      </Modal>
+
+      <Modal open={deleteOpen} onClose={() => setDeleteOpen(false)} title="Delete order permanently">
+        <p className="text-sm font-semibold text-ink">
+          Are you sure you want to delete {order.number ? `Order ${order.number}` : 'this draft'} for {order.customerName}?
+        </p>
+        <p className="mt-2 text-xs text-muted">
+          This will permanently remove the order, its items, and references from the system. If this order has active dispatches,
+          void them first.
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" className="btn-ghost" onClick={() => setDeleteOpen(false)} disabled={busy !== ''}>
+            Keep order
+          </button>
+          <button
+            type="button"
+            className="btn-danger !bg-red-700 hover:!bg-red-800"
+            disabled={busy !== ''}
+            onClick={() => void removeOrder()}
+          >
+            {busy === 'deleted' ? 'Deleting…' : 'Delete permanently'}
           </button>
         </div>
       </Modal>

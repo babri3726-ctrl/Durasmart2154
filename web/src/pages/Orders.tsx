@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Camera, CheckCircle2, Clock, Filter, Plus, Truck } from 'lucide-react';
+import { Camera, CheckCircle2, Clock, Edit, Filter, Plus, Trash2, Truck } from 'lucide-react';
 import { Card, PageHeader, StatusBadge } from '../components/ui/Card';
 import { LiveSyncBar } from '../components/ui/LiveSync';
 import { Modal } from '../components/ui/Overlays';
@@ -9,7 +9,16 @@ import { exactRupees } from '../lib/entryRules';
 import { syncKeys, useSyncPrefix } from '../lib/syncStore';
 import { useLiveList } from '../lib/useLiveList';
 import { useResource } from '../lib/useResource';
-import { listEmployees, listOrders, serverHost, type DispatchStatusFilter } from '../lib/serverApi';
+import { toast } from '../lib/toast';
+import {
+  deleteOrder,
+  listEmployees,
+  listOrders,
+  serverHost,
+  ServerError,
+  type DispatchStatusFilter,
+  type ServerOrder,
+} from '../lib/serverApi';
 
 const PAGE_SIZE = 20;
 
@@ -19,6 +28,23 @@ export default function Orders() {
   const [salespersonFilter, setSalespersonFilter] = useState('');
   const [dispatchFilter, setDispatchFilter] = useState<'' | DispatchStatusFilter>('');
   const [slipModalImage, setSlipModalImage] = useState<{ url: string; title: string } | null>(null);
+  const [orderToDelete, setOrderToDelete] = useState<ServerOrder | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    if (!orderToDelete || deleting) return;
+    setDeleting(true);
+    try {
+      await deleteOrder(orderToDelete.id);
+      toast.success(`Order ${orderToDelete.number ?? orderToDelete.id} deleted successfully`);
+      sync.refresh();
+      setOrderToDelete(null);
+    } catch (cause) {
+      toast.error(cause instanceof ServerError ? cause.message : 'Failed to delete order');
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   const employees = useResource(useCallback(() => listEmployees({ activeOnly: true, pageSize: 200 }), []));
 
@@ -232,9 +258,26 @@ export default function Orders() {
                       </span>
                     )}
 
-                    <Link to={`/orders/${o.id}`} className="btn-ghost btn-sm !py-1 text-xs">
+                    <Link to={`/orders/${o.id}`} className="btn-ghost btn-sm !py-1 text-xs font-bold">
                       View
                     </Link>
+                    {o.dispatchStatus !== 'dispatched' && (
+                      <Link
+                        to={`/orders/${o.id}/edit`}
+                        className="btn-ghost btn-sm !py-1 text-xs text-brand-blue font-bold inline-flex items-center gap-1 hover:bg-brand-blue/10"
+                        title="Edit order"
+                      >
+                        <Edit size={12} /> Edit
+                      </Link>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setOrderToDelete(o)}
+                      className="btn-ghost btn-sm !py-1 text-xs text-brand-red font-bold hover:bg-brand-red/10 inline-flex items-center gap-1"
+                      title="Delete order"
+                    >
+                      <Trash2 size={12} /> Delete
+                    </button>
                   </div>
                 </div>
               ))}
@@ -259,6 +302,43 @@ export default function Orders() {
               className="max-h-[75vh] w-auto rounded-lg object-contain shadow-md border border-line"
             />
             <p className="mt-3 text-xs text-muted font-bold">{slipModalImage.title}</p>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal: Delete Order Confirmation */}
+      <Modal
+        open={orderToDelete !== null}
+        onClose={() => setOrderToDelete(null)}
+        title="Delete order permanently"
+      >
+        {orderToDelete && (
+          <div>
+            <p className="text-sm font-semibold text-ink">
+              Are you sure you want to delete {orderToDelete.number ? `Order ${orderToDelete.number}` : 'this draft'} for {orderToDelete.customerName}?
+            </p>
+            <p className="mt-2 text-xs text-muted">
+              This will permanently remove the order, its items, and references from the system. If this order has active dispatches,
+              void them first.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setOrderToDelete(null)}
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-danger !bg-red-700 hover:!bg-red-800"
+                disabled={deleting}
+                onClick={() => void handleDelete()}
+              >
+                {deleting ? 'Deleting…' : 'Delete permanently'}
+              </button>
+            </div>
           </div>
         )}
       </Modal>

@@ -1914,6 +1914,7 @@ def create_order(body: dict[str, Any]):
     STATE["orders"].insert(0, order)
     return order
 
+@app.put("/api/v1/orders/{order_id}")
 @app.patch("/api/v1/orders/{order_id}")
 def patch_order(order_id: str, body: dict[str, Any]):
     order = next((o for o in STATE["orders"] if o["id"] == order_id), None)
@@ -1944,21 +1945,29 @@ def patch_order(order_id: str, body: dict[str, Any]):
         raw_lines = body["lines"]
         processed_lines = []
         total_qty = 0.0
+        tot_dispatched = 0.0
+        old_lines = order.get("lines", [])
         for idx, l in enumerate(raw_lines):
             q = float(l.get("orderedQuantity") or l.get("quantity") or 0.0)
             total_qty += q
             unit = l.get("unit") or "MT"
             rate_paise = int(l.get("ratePaise") or 0)
             amount_paise = int(l.get("amountPaise") or round(q * rate_paise))
+            # Preserve existing dispatched quantity if matched
+            match_old = next((ol for ol in old_lines if ol.get("lineNo") == idx + 1 or ol.get("product") == l.get("product")), None)
+            disp_q = float(match_old.get("dispatchedQuantity", 0.0)) if match_old else float(l.get("dispatchedQuantity", 0.0))
+            tot_dispatched += disp_q
+            rem_q = max(0.0, q - disp_q)
             processed_lines.append({
                 "orderLineId": idx + 1,
                 "lineNo": idx + 1,
-                "productId": l.get("productId") or "PRD-CUSTOM",
-                "productName": l.get("productName") or "Steel Material",
+                "productId": l.get("productId") or (match_old.get("productId") if match_old else "PRD-CUSTOM"),
+                "productName": l.get("productName") or l.get("product") or "Steel Material",
+                "product": l.get("product") or l.get("productName") or "Steel Material",
                 "unit": unit,
                 "orderedQuantity": f"{q:.3f}",
-                "dispatchedQuantity": "0.000",
-                "remainingQuantity": f"{q:.3f}",
+                "dispatchedQuantity": f"{disp_q:.3f}",
+                "remainingQuantity": f"{rem_q:.3f}",
                 "ratePaise": rate_paise,
                 "amountPaise": amount_paise,
                 "valuePaise": amount_paise,
@@ -1967,12 +1976,41 @@ def patch_order(order_id: str, body: dict[str, Any]):
         order["lines"] = processed_lines
         order["lineCount"] = len(processed_lines)
         order["orderedQuantity"] = f"{total_qty:.3f}"
+        order["dispatchedQuantity"] = f"{tot_dispatched:.3f}"
         order["valuePaise"] = sum(l["valuePaise"] for l in processed_lines)
         order["orderBalancePaise"] = order["valuePaise"]
     
     order["version"] = order.get("version", 1) + 1
     db.save_order(order)
     return order
+
+@app.delete("/api/v1/orders/{order_id}")
+def delete_order_endpoint(
+    order_id: str,
+    x_user_role: str | None = Header(None, alias="X-User-Role")
+):
+    order_idx = next((i for i, o in enumerate(STATE["orders"]) if o["id"] == order_id), None)
+    if order_idx is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    order = STATE["orders"][order_idx]
+    
+    # Check if active unvoided dispatches exist for this order
+    active_dispatches = [
+        d for d in STATE.get("dispatches", [])
+        if d.get("orderId") == order_id and not d.get("voidedAt")
+    ]
+    if active_dispatches:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete order '{order.get('number', order_id)}' because it has {len(active_dispatches)} active dispatch consignment(s). Void the dispatches first."
+        )
+
+    # Remove from in-memory STATE
+    STATE["orders"].pop(order_idx)
+    # Remove from SQLite
+    db.delete_order(order_id)
+    return {"deleted": True, "id": order_id, "number": order.get("number")}
 
 @app.post("/api/v1/orders/{order_id}/status")
 def set_order_status(order_id: str, body: dict[str, Any]):

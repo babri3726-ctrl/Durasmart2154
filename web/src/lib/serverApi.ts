@@ -1033,6 +1033,14 @@ export function setOrderStatus(
   });
 }
 
+export function deleteOrder(
+  orderId: string,
+): Promise<{ deleted: boolean; id: string; number?: string }> {
+  return send<{ deleted: boolean; id: string; number?: string }>(`/orders/${encodeURIComponent(orderId)}`, {
+    method: 'DELETE',
+  });
+}
+
 // ── dispatches ───────────────────────────────────────────────────────────
 
 /** What the order view's `dispatchStatus` column can hold, derived from the dispatch rows: how
