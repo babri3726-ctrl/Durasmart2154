@@ -4,7 +4,9 @@ import sys
 sys.path.insert(0, os.path.abspath("."))
 
 from fastapi.testclient import TestClient
+
 from server.main import app
+
 
 def run_tests():
     client = TestClient(app)
@@ -101,7 +103,7 @@ def run_tests():
     detail = r.json()
     assert detail["slipImageData"] == slip_data
     assert detail["salespersonName"] == "Mozi Ram"
-    print(f"  -> Successfully retrieved order detail with verified slip photo data!")
+    print("  -> Successfully retrieved order detail with verified slip photo data!")
 
     # 7. Test Updating Order (PATCH)
     print("\n[7] Testing Order PATCH:")
@@ -139,7 +141,7 @@ def run_tests():
     assert dispatched_order["lines"][0]["dispatchedQuantity"] == dispatched_order["lines"][0]["orderedQuantity"]
     assert dispatched_order["lines"][0]["remainingQuantity"] == "0.000"
     print(f"  -> Order {order_id} dispatch status after: {dispatched_order['dispatchStatus']} (Dispatched / Done)")
-    print(f"  -> Vehicle assigned: PB 10 CT 4421, Consignment recorded successfully!")
+    print("  -> Vehicle assigned: PB 10 CT 4421, Consignment recorded successfully!")
 
     # 10. Test Orders Queue Filtering (by dispatchStatus and salespersonId)
     print("\n[10] Testing Orders Queue Filtering (by dispatchStatus and salespersonId):")

@@ -5,12 +5,13 @@ Extracts ONLY:
   2. UPVC TOTAL STOCK -> Roofing Sheet Matrix (Color x Length feet)
   3. UPVC ITEM        -> Accessories (Caps, Ridge, Jhallar)
 """
+import hashlib
 import os
 import shutil
 import subprocess
 import tempfile
-import hashlib
 from datetime import datetime
+
 import openpyxl
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -37,7 +38,7 @@ def make_safe_temp_copy(file_path: str) -> str:
     try:
         shutil.copy2(file_path, tmp_path)
     except Exception as e:
-        raise IOError(f"Failed to copy workbook: {e}")
+        raise OSError(f"Failed to copy workbook: {e}")
     return tmp_path
 
 def get_file_sha256(file_path: str) -> str:

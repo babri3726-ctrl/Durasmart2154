@@ -1,6 +1,9 @@
 import unittest
+
 from fastapi.testclient import TestClient
+
 from server.main import app
+
 
 class TestServerApi(unittest.TestCase):
     @classmethod

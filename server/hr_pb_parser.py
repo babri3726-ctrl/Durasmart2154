@@ -7,9 +7,10 @@ Dynamically maps headers:
 import os
 import unicodedata
 from datetime import datetime
+
 import openpyxl
 
-from .stock_parser import make_safe_temp_copy, get_file_sha256
+from .stock_parser import get_file_sha256, make_safe_temp_copy
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_FALLBACK_HRPB = os.path.join(BASE_DIR, "data", "HR-PB.xlsx")

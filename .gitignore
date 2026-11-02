@@ -29,3 +29,10 @@ android/.gradle/
 Thumbs.db
 *.swp
 *.bak
+# AI context manifest
+.codebase.json
+.codebase.cache.json
+
+# Prompt audit log (local only — may contain sensitive context)
+.codebase/prompts.jsonl
+.codebase/prompts.jsonl.*

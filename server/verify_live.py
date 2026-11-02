@@ -1,6 +1,6 @@
-import urllib.request
 import json
-import sys
+import urllib.request
+
 
 def test_api():
     base = 'http://127.0.0.1:8010/api/v1'

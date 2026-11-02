@@ -3,7 +3,7 @@ import os
 import re
 import sqlite3
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -21,7 +21,7 @@ def get_connection() -> sqlite3.Connection:
     conn.execute("PRAGMA busy_timeout = 5000;")
     return conn
 
-def init_db(seed_state: Optional[Dict[str, Any]] = None):
+def init_db(seed_state: dict[str, Any] | None = None):
     with get_connection() as conn:
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS parties (
@@ -172,7 +172,7 @@ def init_db(seed_state: Optional[Dict[str, Any]] = None):
                 )
             conn.commit()
 
-def save_slip_image(order_id: str, image_data: Optional[str]) -> Optional[str]:
+def save_slip_image(order_id: str, image_data: str | None) -> str | None:
     """Saves raw base64 image data to disk file and returns relative API URL."""
     if not image_data or not isinstance(image_data, str):
         return None
@@ -212,7 +212,7 @@ def get_next_order_id() -> str:
         cnt = cur.fetchone()["count"]
         return f"ORD-{cnt + 1001}"
 
-def save_order(order: Dict[str, Any]) -> Dict[str, Any]:
+def save_order(order: dict[str, Any]) -> dict[str, Any]:
     """Persists order and lines to SQLite. Handles slip image saving and party upsert."""
     now = datetime.now().isoformat()
     order_id = order.get("id") or get_next_order_id()
@@ -299,7 +299,7 @@ def save_order(order: Dict[str, Any]) -> Dict[str, Any]:
 
     return order
 
-def save_party(party: Dict[str, Any]) -> Dict[str, Any]:
+def save_party(party: dict[str, Any]) -> dict[str, Any]:
     """Persists debtor/customer to SQLite."""
     now = datetime.now().isoformat()
     party_id = party.get("id") or f"DEBTOR-MAN-{datetime.now().strftime('%H%M%S')}"
@@ -333,7 +333,7 @@ def save_party(party: Dict[str, Any]) -> Dict[str, Any]:
 
     return party
 
-def save_payment(payment: Dict[str, Any]) -> Dict[str, Any]:
+def save_payment(payment: dict[str, Any]) -> dict[str, Any]:
     """Persists payment and updates party balance using integer paise arithmetic."""
     now = datetime.now().isoformat()
     voucher_no = payment.get("voucherNo") or f"RCPT-2026-{datetime.now().strftime('%H%M%S')}"
@@ -380,7 +380,7 @@ def save_payment(payment: Dict[str, Any]) -> Dict[str, Any]:
 
     return payment
 
-def void_payment(payment_id: str) -> Optional[Dict[str, Any]]:
+def void_payment(payment_id: str) -> dict[str, Any] | None:
     """Marks a payment voided and reverses the balance deduction in SQLite."""
     now = datetime.now().isoformat()
     with get_connection() as conn:
@@ -414,7 +414,7 @@ def void_payment(payment_id: str) -> Optional[Dict[str, Any]]:
         payment["voidedAt"] = now
         return payment
 
-def save_dispatch(dispatch: Dict[str, Any]) -> Dict[str, Any]:
+def save_dispatch(dispatch: dict[str, Any]) -> dict[str, Any]:
     """Persists dispatch and dispatch lines."""
     now = datetime.now().isoformat()
     dispatch_id = dispatch.get("id") or f"DSP-{datetime.now().strftime('%H%M%S')}"
@@ -461,7 +461,7 @@ def save_dispatch(dispatch: Dict[str, Any]) -> Dict[str, Any]:
 
     return dispatch
 
-def load_all_persisted_state() -> Dict[str, Any]:
+def load_all_persisted_state() -> dict[str, Any]:
     """Hydrates orders, debtors, customers, payments from SQLite."""
     with get_connection() as conn:
         # Load parties

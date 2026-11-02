@@ -1,17 +1,70 @@
 <#
 .SYNOPSIS
-  Safe AGY / CLI Command Invoker with Timeout & Retry Policy.
-  Enforces hard execution timeout (default 120s) and max 2 retries on transient errors.
+  Safe AGY / CLI Command Invoker with Timeout, Retry Policy & JSON Schema Validation.
+  Enforces hard execution timeout (default 120s), max 2 retries on transient errors,
+  and validates AGY response schema.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true, Position=0)]
+    [Parameter(Position=0)]
     [string]$CommandLine,
 
     [int]$TimeoutSeconds = 120,
     [int]$MaxRetries = 2,
-    [string]$Phase = "execute"
+    [string]$Phase = "execute",
+
+    # Testing switch for direct schema validation
+    [string]$TestSchemaPayload = ""
 )
+
+function Test-AgyJsonSchema {
+    param([string]$JsonText)
+    try {
+        if ([string]::IsNullOrWhiteSpace($JsonText)) {
+            return @{ valid = $false; error = "Empty JSON payload" }
+        }
+        $obj = $JsonText | ConvertFrom-Json
+        if (-not $obj) { return @{ valid = $false; error = "Null parsed JSON payload" } }
+        
+        # Check required keys
+        $propNames = $obj.PSObject.Properties.Name
+        if ($propNames -notcontains 'status') {
+            return @{ valid = $false; error = "Missing required key: 'status'" }
+        }
+        if ($propNames -notcontains 'response' -and $propNames -notcontains 'structured_output') {
+            return @{ valid = $false; error = "Missing required key: 'response' or 'structured_output'" }
+        }
+        if ($propNames -notcontains 'usage') {
+            return @{ valid = $false; error = "Missing required key: 'usage'" }
+        }
+        
+        $validStatuses = @('SUCCESS', 'ERROR', 'CANCELED', 'INTERRUPTED')
+        if ($validStatuses -notcontains $obj.status) {
+            return @{ valid = $false; error = "Invalid status '$($obj.status)'. Expected one of: $($validStatuses -join ', ')" }
+        }
+        
+        return @{ valid = $true; object = $obj }
+    } catch {
+        return @{ valid = $false; error = "JSON parse error: $_" }
+    }
+}
+
+# Standalone schema testing mode
+if ($TestSchemaPayload) {
+    $res = Test-AgyJsonSchema -JsonText $TestSchemaPayload
+    if ($res.valid) {
+        Write-Output "SCHEMA_VALID"
+        exit 0
+    } else {
+        Write-Error "SCHEMA_INVALID: $($res.error)"
+        exit 1
+    }
+}
+
+if (-not $CommandLine) {
+    Write-Error "CommandLine parameter is required."
+    exit 1
+}
 
 $repoRoot = (git rev-parse --show-toplevel).Trim()
 $auditLogger = Join-Path $repoRoot ".harness\scripts\audit_logger.ps1"
@@ -57,18 +110,33 @@ while ($attempt -le $MaxRetries -and -not $success) {
             $stderr = $process.StandardError.ReadToEnd()
             $finalExitCode = $process.ExitCode
             
+            # Check JSON schema if JSON output expected
+            if ($CommandLine -match "--output-format\s+json" -and $finalExitCode -eq 0) {
+                $schemaCheck = Test-AgyJsonSchema -JsonText $stdout
+                if (-not $schemaCheck.valid) {
+                    Write-Error "[safe-exec] JSON schema validation failed: $($schemaCheck.error)"
+                    $finalExitCode = 1
+                    if (Test-Path $auditLogger) {
+                        & $auditLogger -Command $CommandLine -ExitCode 1 -Phase $Phase -DurationSeconds $duration -Details "Schema error: $($schemaCheck.error)"
+                    }
+                } else {
+                    $success = $true
+                }
+            } elseif ($finalExitCode -eq 0) {
+                $success = $true
+            }
+            
             if ($stdout) { Write-Output $stdout }
             if ($stderr -and $finalExitCode -ne 0) { Write-Error $stderr }
             
-            if ($finalExitCode -eq 0) {
-                $success = $true
+            if ($success) {
                 if (Test-Path $auditLogger) {
                     & $auditLogger -Command $CommandLine -ExitCode 0 -Phase $Phase -DurationSeconds $duration -Details "Success on attempt $attempt"
                 }
                 break
             } else {
                 Write-Warning "[safe-exec] Command failed with exit code $finalExitCode (Attempt $attempt)"
-                if (Test-Path $auditLogger) {
+                if (Test-Path $auditLogger -and $CommandLine -notmatch "--output-format\s+json") {
                     & $auditLogger -Command $CommandLine -ExitCode $finalExitCode -Phase $Phase -DurationSeconds $duration -Details "Failed attempt $attempt"
                 }
             }

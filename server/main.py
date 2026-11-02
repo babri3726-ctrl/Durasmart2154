@@ -5,21 +5,23 @@ Links React Web Owner Cockpit & Mobile App with:
 - Real Punjab & Haryana HR-PB dealers and target synchronization
 - Full wire contract (Dashboard, Customers, Orders, Dispatches, Stock, Debtors, Employees, Payments)
 """
-from fastapi import FastAPI, HTTPException, Header, Query, UploadFile, File, Request
-from fastapi.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+import hashlib
 import os
 import shutil
 import tempfile
-import hashlib
 from datetime import datetime, timedelta
+from typing import Any
 
-from .stock_parser import extract_3sheet_stock, DEFAULT_ONEDRIVE_PATH, get_file_sha256
-from .hr_pb_parser import extract_hr_pb_targets, DEFAULT_HRPB_PATH
+from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-import server.db as db
+from pydantic import BaseModel
+
+from server import db
+
+from .hr_pb_parser import DEFAULT_HRPB_PATH, extract_hr_pb_targets
+from .stock_parser import DEFAULT_ONEDRIVE_PATH, extract_3sheet_stock, get_file_sha256
 
 app = FastAPI(title="Operations API", version="1.0.0")
 
@@ -251,12 +253,12 @@ except Exception as e:
 
 # ----------------- Auth Models & Endpoints -----------------
 class LoginRequest(BaseModel):
-    identifier: Optional[str] = None
-    username: Optional[str] = None
+    identifier: str | None = None
+    username: str | None = None
     password: str
 
 class RefreshRequest(BaseModel):
-    refreshToken: Optional[str] = None
+    refreshToken: str | None = None
 
 @app.post("/api/v1/auth/login")
 def login(req: LoginRequest):
@@ -318,7 +320,7 @@ def login(req: LoginRequest):
     }
 
 @app.post("/api/v1/auth/refresh")
-def refresh_token(req: Optional[RefreshRequest] = None, authorization: Optional[str] = Header(None)):
+def refresh_token(req: RefreshRequest | None = None, authorization: str | None = Header(None)):
     token = req.refreshToken if req and req.refreshToken else authorization or ""
     is_owner = "owner" in token.lower() or not token
     role = "owner" if is_owner else "employee"
@@ -348,7 +350,7 @@ def logout():
     return {"success": True}
 
 @app.get("/api/v1/me")
-def get_current_user(authorization: Optional[str] = Header(None)):
+def get_current_user(authorization: str | None = Header(None)):
     token = (authorization or "").lower()
     is_owner = "employee" not in token and "sp-" not in token and "dsp-" not in token
     role = "owner" if is_owner else "employee"
@@ -392,7 +394,7 @@ def get_current_user(authorization: Optional[str] = Header(None)):
 
 # ----------------- Dashboard Summary Contract -----------------
 @app.get("/api/v1/dashboard/summary")
-def get_dashboard_summary(from_date: Optional[str] = Query(None, alias="from"), to_date: Optional[str] = Query(None, alias="to")):
+def get_dashboard_summary(from_date: str | None = Query(None, alias="from"), to_date: str | None = Query(None, alias="to")):
     if not isinstance(from_date, str):
         from_date = None
     if not isinstance(to_date, str):
@@ -464,9 +466,7 @@ def get_dashboard_summary(from_date: Optional[str] = Query(None, alias="from"), 
         order_date = o.get("orderDate") or o.get("date") or (o.get("createdAt", "")[:10] if o.get("createdAt") else None)
         
         is_delayed = False
-        if exp_date and str(exp_date)[:10] < today_str:
-            is_delayed = True
-        elif not exp_date and order_date and str(order_date)[:10] <= sla_cutoff:
+        if exp_date and str(exp_date)[:10] < today_str or not exp_date and order_date and str(order_date)[:10] <= sla_cutoff:
             is_delayed = True
             
         if is_delayed:
@@ -538,7 +538,7 @@ def get_dashboard_summary(from_date: Optional[str] = Query(None, alias="from"), 
     }
 
 @app.get("/api/v1/dashboard/cockpit")
-def get_dashboard_cockpit(from_date: Optional[str] = Query(None, alias="from"), to_date: Optional[str] = Query(None, alias="to")):
+def get_dashboard_cockpit(from_date: str | None = Query(None, alias="from"), to_date: str | None = Query(None, alias="to")):
     summary = get_dashboard_summary(from_date, to_date)
     
     # Recent orders (last 8)
@@ -612,10 +612,10 @@ def get_dashboard_cockpit(from_date: Optional[str] = Query(None, alias="from"), 
 @app.get("/api/v1/dashboard/salesperson-performance")
 @app.get("/api/v1/reporting/salesperson-performance")
 def get_salesperson_performance(
-    from_date: Optional[str] = Query(None, alias="from"),
-    to_date: Optional[str] = Query(None, alias="to"),
-    employeeId: Optional[str] = None,
-    productCategory: Optional[str] = None
+    from_date: str | None = Query(None, alias="from"),
+    to_date: str | None = Query(None, alias="to"),
+    employeeId: str | None = None,
+    productCategory: str | None = None
 ):
     if not STATE.get("targets") and os.path.exists(DEFAULT_HRPB_PATH):
         try:
@@ -689,11 +689,11 @@ def get_salesperson_performance(
 # ----------------- Customers Endpoints -----------------
 @app.get("/api/v1/customers")
 def get_customers(
-    q: Optional[str] = None,
-    city: Optional[str] = None,
-    salespersonId: Optional[str] = None,
-    status: Optional[str] = None,
-    state: Optional[str] = None,
+    q: str | None = None,
+    city: str | None = None,
+    salespersonId: str | None = None,
+    status: str | None = None,
+    state: str | None = None,
     page: int = 1,
     pageSize: int = 50
 ):
@@ -746,7 +746,7 @@ def get_customer(customer_id: str):
     return cust
 
 @app.post("/api/v1/customers")
-def create_customer(body: Dict[str, Any]):
+def create_customer(body: dict[str, Any]):
     new_id = f"CUST-{len(STATE['customers']) + 1:04d}"
     first_sp = STATE.get("employees", [{}])[0].get("id", "EMP-SP-01")
     cust = {
@@ -818,26 +818,26 @@ def get_customer_ledger(customer_id: str):
 # ----------------- Debtors Master & Sales Targets Endpoints -----------------
 class DebtorCreate(BaseModel):
     name: str
-    state: Optional[str] = "Punjab"
-    city: Optional[str] = ""
-    district: Optional[str] = ""
-    salesperson: Optional[str] = ""
-    balance: Optional[float] = 0.0
+    state: str | None = "Punjab"
+    city: str | None = ""
+    district: str | None = ""
+    salesperson: str | None = ""
+    balance: float | None = 0.0
 
 class DebtorUpdate(BaseModel):
-    name: Optional[str] = None
-    state: Optional[str] = None
-    city: Optional[str] = None
-    district: Optional[str] = None
-    salesperson: Optional[str] = None
-    balance: Optional[float] = None
-    status: Optional[str] = None
+    name: str | None = None
+    state: str | None = None
+    city: str | None = None
+    district: str | None = None
+    salesperson: str | None = None
+    balance: float | None = None
+    status: str | None = None
 
 @app.get("/api/v1/debtors")
 def get_debtors(
-    q: Optional[str] = None,
-    state: Optional[str] = None,
-    salesperson: Optional[str] = None,
+    q: str | None = None,
+    state: str | None = None,
+    salesperson: str | None = None,
     page: int = 1,
     pageSize: int = 50
 ):
@@ -1003,7 +1003,7 @@ def get_provisional_debtors(page: int = 1, pageSize: int = 20):
     return get_debtors(page=page, pageSize=pageSize)
 
 @app.get("/api/v1/debtors/provisional/summary")
-def get_provisional_debtors_summary(archived: Optional[str] = "active"):
+def get_provisional_debtors_summary(archived: str | None = "active"):
     dealers = STATE.get("debtors", [])
     total_debit = sum(int(float(d.get("balance", 0.0)) * 100) for d in dealers)
     return {
@@ -1023,7 +1023,7 @@ def get_provisional_debtors_summary(archived: Optional[str] = "active"):
     }
 
 @app.get("/api/v1/debtors/provisional")
-def list_provisional_debtors(page: int = 1, pageSize: int = 50, archived: Optional[str] = "active"):
+def list_provisional_debtors(page: int = 1, pageSize: int = 50, archived: str | None = "active"):
     dealers = STATE.get("debtors", [])
     start = (page - 1) * pageSize
     end = start + pageSize
@@ -1162,9 +1162,9 @@ def sync_hr_pb_excel():
 
 @app.get("/api/v1/sales/targets")
 def get_sales_targets(
-    state: Optional[str] = None,
-    salesperson: Optional[str] = None,
-    q: Optional[str] = None
+    state: str | None = None,
+    salesperson: str | None = None,
+    q: str | None = None
 ):
     if not STATE.get("targets") and os.path.exists(DEFAULT_HRPB_PATH):
         try:
@@ -1343,10 +1343,10 @@ def get_financial_analytics():
 # ----------------- Orders Endpoints -----------------
 @app.get("/api/v1/orders")
 def get_orders(
-    q: Optional[str] = None,
-    salespersonId: Optional[str] = None,
-    dispatchStatus: Optional[str] = None,
-    status: Optional[str] = None,
+    q: str | None = None,
+    salespersonId: str | None = None,
+    dispatchStatus: str | None = None,
+    status: str | None = None,
     page: int = 1,
     pageSize: int = 20
 ):
@@ -1378,7 +1378,7 @@ def get_orders(
     }
 
 @app.post("/api/v1/orders/{order_id}/quick-dispatch")
-def quick_dispatch_order(order_id: str, body: Optional[Dict[str, Any]] = None):
+def quick_dispatch_order(order_id: str, body: dict[str, Any] | None = None):
     body = body or {}
     order = next((o for o in STATE["orders"] if o["id"] == order_id), None)
     if not order:
@@ -1487,7 +1487,7 @@ def get_order_dispatch_balance(order_id: str):
     }
 
 @app.post("/api/v1/orders")
-def create_order(body: Dict[str, Any]):
+def create_order(body: dict[str, Any]):
     new_num = db.get_next_order_number()
     new_id = db.get_next_order_id()
     
@@ -1563,7 +1563,7 @@ def create_order(body: Dict[str, Any]):
     return order
 
 @app.patch("/api/v1/orders/{order_id}")
-def patch_order(order_id: str, body: Dict[str, Any]):
+def patch_order(order_id: str, body: dict[str, Any]):
     order = next((o for o in STATE["orders"] if o["id"] == order_id), None)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -1623,7 +1623,7 @@ def patch_order(order_id: str, body: Dict[str, Any]):
     return order
 
 @app.post("/api/v1/orders/{order_id}/status")
-def set_order_status(order_id: str, body: Dict[str, Any]):
+def set_order_status(order_id: str, body: dict[str, Any]):
     order = next((o for o in STATE["orders"] if o["id"] == order_id), None)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -1683,7 +1683,7 @@ def get_employees(page: int = 1, pageSize: int = 200):
     }
 
 @app.post("/api/v1/employees/{employee_id}/dispatch-capability")
-def set_dispatch_capability(employee_id: str, body: Dict[str, Any]):
+def set_dispatch_capability(employee_id: str, body: dict[str, Any]):
     emp = next((e for e in STATE["employees"] if e["id"] == employee_id), None)
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -1710,7 +1710,7 @@ def get_products(page: int = 1, pageSize: int = 50):
     }
 
 @app.get("/api/v1/payments")
-def get_payments(q: Optional[str] = None, page: int = 1, pageSize: int = 20):
+def get_payments(q: str | None = None, page: int = 1, pageSize: int = 20):
     all_items = STATE.get("payments", [])
     if q:
         ql = q.strip().lower()
@@ -1740,13 +1740,13 @@ def get_payments(q: Optional[str] = None, page: int = 1, pageSize: int = 20):
 
 class PaymentCreate(BaseModel):
     customerId: str
-    customerName: Optional[str] = None
-    amountPaise: Optional[int] = None
-    amount: Optional[float] = None
-    paymentDate: Optional[str] = None
-    method: Optional[str] = "NEFT"
-    reference: Optional[str] = ""
-    notes: Optional[str] = ""
+    customerName: str | None = None
+    amountPaise: int | None = None
+    amount: float | None = None
+    paymentDate: str | None = None
+    method: str | None = "NEFT"
+    reference: str | None = ""
+    notes: str | None = ""
 
 @app.post("/api/v1/payments")
 def create_payment(body: PaymentCreate):
@@ -2131,7 +2131,7 @@ async def upload_excel_file(file: UploadFile = File(...)):
 
 # Raw octet-stream browser upload routes
 @app.post("/api/v1/imports/excel/stock-preview")
-async def preview_uploaded_stock_bytes(request: Request, fileName: Optional[str] = "1-8-26.xlsx"):
+async def preview_uploaded_stock_bytes(request: Request, fileName: str | None = "1-8-26.xlsx"):
     body = await request.body()
     if not body:
         raise HTTPException(status_code=400, detail="Empty workbook upload")
@@ -2152,7 +2152,7 @@ async def preview_uploaded_stock_bytes(request: Request, fileName: Optional[str]
                 pass
 
 @app.post("/api/v1/debtors/imports/preview")
-async def preview_debtor_bytes(request: Request, fileName: Optional[str] = "HR-PB.xlsx"):
+async def preview_debtor_bytes(request: Request, fileName: str | None = "HR-PB.xlsx"):
     body = await request.body()
     if not body:
         raise HTTPException(status_code=400, detail="Empty debtor workbook upload")
@@ -2231,11 +2231,11 @@ async def preview_debtor_bytes(request: Request, fileName: Optional[str] = "HR-P
 @app.post("/api/v1/debtors/imports/apply")
 async def apply_debtor_bytes(
     request: Request,
-    fileSha256: Optional[str] = None,
-    previewDigest: Optional[str] = None,
-    confirm: Optional[str] = "true",
-    fileName: Optional[str] = "HR-PB.xlsx",
-    allowReplacement: Optional[str] = "false"
+    fileSha256: str | None = None,
+    previewDigest: str | None = None,
+    confirm: str | None = "true",
+    fileName: str | None = "HR-PB.xlsx",
+    allowReplacement: str | None = "false"
 ):
     body = await request.body()
     if not body:
@@ -2316,7 +2316,7 @@ async def apply_debtor_bytes(
     }
 
 @app.post("/api/v1/imports/excel/stock-import")
-async def apply_uploaded_stock_bytes(request: Request, fileName: Optional[str] = "1-8-26.xlsx", confirm: Optional[str] = "true"):
+async def apply_uploaded_stock_bytes(request: Request, fileName: str | None = "1-8-26.xlsx", confirm: str | None = "true"):
     body = await request.body()
     if not body:
         raise HTTPException(status_code=400, detail="Empty workbook upload")
@@ -2384,7 +2384,7 @@ def sync_stock_watch():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/imports/excel/stock-imports")
-def list_stock_imports(q: Optional[str] = None, page: int = 1, pageSize: int = 20):
+def list_stock_imports(q: str | None = None, page: int = 1, pageSize: int = 20):
     snap = STATE.get("latest_snapshot")
     if not snap:
         try:
@@ -2757,10 +2757,10 @@ def get_imported_stock():
 
 @app.get("/api/v1/stock/upvc")
 def get_upvc_stock(
-    type: Optional[str] = Query(None),
-    colour: Optional[str] = Query(None),
-    lengthFt: Optional[int] = Query(None),
-    q: Optional[str] = Query(None)
+    type: str | None = Query(None),
+    colour: str | None = Query(None),
+    lengthFt: int | None = Query(None),
+    q: str | None = Query(None)
 ):
     if hasattr(type, "default"):
         type = type.default
@@ -2949,7 +2949,7 @@ def get_stock_production():
     }
 
 @app.get("/api/v1/stock/balances")
-def get_stock_balances(q: Optional[str] = None, page: int = 1, pageSize: int = 20):
+def get_stock_balances(q: str | None = None, page: int = 1, pageSize: int = 20):
     return {
         "items": [
             {
