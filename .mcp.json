@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "codebase": {
+      "command": "npx",
+      "args": [
+        "codebase",
+        "mcp"
+      ],
+      "cwd": "C:\\NewProject_Frontend"
+    }
+  }
+}
