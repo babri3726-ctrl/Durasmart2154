@@ -256,7 +256,7 @@ try {
     $stateObj | ConvertTo-Json -Depth 4 | Set-Content -Path $stateFile -Encoding utf8
     
     $progressEntry = "- [" + $timestamp + "] " + $Command + " completed successfully (Stack: " + $targetStack + ", Skill: " + $selectedSkill + ")"
-    Add-Content -Path $progressFile -Value $progressEntry -Encoding utf8
+    if ($pol.Type -ne 'read-only') { Add-Content -Path $progressFile -Value $progressEntry -Encoding utf8 }
     Write-Host "[workflow] Phase state persisted to .harness/state.json and progress.md." -ForegroundColor DarkGray
 
     Write-Host "==================================================" -ForegroundColor Green
