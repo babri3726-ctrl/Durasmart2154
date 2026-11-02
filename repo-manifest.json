@@ -60,5 +60,33 @@
                                                             },
                                             "status":  "READY"
                                         }
-              }
+              },
+    "memory_layer":  {
+                         "toolnet-memory":  {
+                                                "version":  "0.6.2",
+                                                "installed":  true,
+                                                "doctor_status":  "PASS (0 failures, stores readable)"
+                                            },
+                         "codebase-ai":  {
+                                             "version":  "0.7.1",
+                                             "installed":  true,
+                                             "snapshot_generated":  "PASS (.codebase.json exists and valid JSON)"
+                                         }
+                     },
+    "safety_layer":  {
+                         "checkpoint_manager":  "PASS (creates stash/branch checkpoint, reverts cleanly)",
+                         "timeout_and_retry":  "PASS (hard timeout aborts, retries up to 2x, exits cleanly)",
+                         "audit_logger":  "PASS (records to .harness/audit.log with duration \u0026 exit code)",
+                         "secret_protection":  "PASS (redacts API keys, tokens, and secrets)",
+                         "human_approval_gate":  "PASS (hard-stop on destructive commands without APPROVE)",
+                         "resource_monitor":  "PASS (1 agent concurrency lock + RAM threshold \u003e 1 GB)"
+                     },
+    "e2e_verification":  {
+                             "task":  "list the entry points of this project",
+                             "crickets_plan_produced":  "PASS (.harness/PLAN.md)",
+                             "agentm_state_persisted":  "PASS (.harness/progress.md \u0026 .version)",
+                             "structural_context_provided":  "PASS (.codebase.json)",
+                             "audit_log_recorded":  "PASS (.harness/audit.log)",
+                             "zero_write_checkpoints":  "PASS (zero writes, no checkpoint triggered)"
+                         }
 }

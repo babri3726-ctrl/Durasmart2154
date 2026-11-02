@@ -1,0 +1,1 @@
+- [2026-11-02T10:01:00Z] Phase: plan | Task: list-entry-points | Status: done | Zero writes performed
