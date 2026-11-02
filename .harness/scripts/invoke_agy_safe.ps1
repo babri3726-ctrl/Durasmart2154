@@ -23,7 +23,13 @@ function Test-AgyJsonSchema {
         if ([string]::IsNullOrWhiteSpace($JsonText)) {
             return @{ valid = $false; error = "Empty JSON payload" }
         }
-        $obj = $JsonText | ConvertFrom-Json
+        $cleanJson = $JsonText
+        $firstBrace = $JsonText.IndexOf('{')
+        $lastBrace = $JsonText.LastIndexOf('}')
+        if ($firstBrace -ge 0 -and $lastBrace -gt $firstBrace) {
+            $cleanJson = $JsonText.Substring($firstBrace, ($lastBrace - $firstBrace + 1))
+        }
+        $obj = $cleanJson | ConvertFrom-Json
         if (-not $obj) { return @{ valid = $false; error = "Null parsed JSON payload" } }
         
         # Check required keys
@@ -79,9 +85,10 @@ while ($attempt -le $MaxRetries -and -not $success) {
     Write-Host "[safe-exec] Attempt $attempt / $($MaxRetries + 1): $CommandLine"
     
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $escapedCmd = $CommandLine.Replace('"', '\"')
     $pinfo = New-Object System.Diagnostics.ProcessStartInfo
     $pinfo.FileName = "powershell.exe"
-    $pinfo.Arguments = "-NoProfile -Command `"$CommandLine`""
+    $pinfo.Arguments = "-NoProfile -Command `"$escapedCmd`""
     $pinfo.RedirectStandardOutput = $true
     $pinfo.RedirectStandardError = $true
     $pinfo.UseShellExecute = $false
@@ -136,7 +143,7 @@ while ($attempt -le $MaxRetries -and -not $success) {
                 break
             } else {
                 Write-Warning "[safe-exec] Command failed with exit code $finalExitCode (Attempt $attempt)"
-                if (Test-Path $auditLogger -and $CommandLine -notmatch "--output-format\s+json") {
+                if ((Test-Path $auditLogger) -and ($CommandLine -notmatch "--output-format\s+json")) {
                     & $auditLogger -Command $CommandLine -ExitCode $finalExitCode -Phase $Phase -DurationSeconds $duration -Details "Failed attempt $attempt"
                 }
             }

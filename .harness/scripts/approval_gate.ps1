@@ -8,7 +8,9 @@ param(
     [Parameter(Mandatory=$true, Position=0)]
     [string]$Command,
 
-    [string]$ApprovalToken = ""
+    [string]$ApprovalToken = "",
+
+    [switch]$ForceRequireApproval
 )
 
 $destructivePatterns = @(
@@ -18,10 +20,11 @@ $destructivePatterns = @(
     'git\s+clean\s+(-f|-x|-d)',
     '(rm\s+-rf|rmdir\s+\/s|Remove-Item\s+.*-Recurse)',
     'git\s+merge\s+.*(main|master)',
-    'npm\s+publish'
+    'npm\s+publish',
+    '/release'
 )
 
-$isDestructive = $false
+$isDestructive = $ForceRequireApproval.IsPresent
 foreach ($p in $destructivePatterns) {
     if ($Command -match $p) {
         $isDestructive = $true
