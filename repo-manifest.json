@@ -1,0 +1,64 @@
+﻿{
+    "repos":  {
+                  "google-antigravity/antigravity-cli":  {
+                                                             "repo_url":  "https://github.com/google-antigravity/antigravity-cli.git",
+                                                             "pinned_commit":  "841f45db2226ce15f5d1f52c580e35181e74ff68",
+                                                             "version":  "1.4.12",
+                                                             "install_result":  "PASS (installed at AppData/Local/agy/bin/agy.exe)",
+                                                             "test_result":  {
+                                                                                 "version_check":  "PASS (1.4.12)",
+                                                                                 "json_status_success":  "PASS (status=SUCCESS, parsed JSON)",
+                                                                                 "ndjson_stream":  "PASS (valid NDJSON emitted)"
+                                                                             },
+                                                             "status":  "READY"
+                                                         },
+                  "alexherrero/agentm":  {
+                                             "repo_url":  "https://github.com/alexherrero/agentm.git",
+                                             "pinned_tag":  "v4.15.0",
+                                             "pinned_commit":  "8f42083d3cc98b2c0559dfc0ea0ee643863eb1d3",
+                                             "version":  "v4.15.0",
+                                             "install_result":  "PASS (install.ps1 -Hooks C:\\NewProject_Frontend)",
+                                             "test_result":  {
+                                                                 "commands_check":  "PASS (bugfix.md, plan.md, release.md, review.md, setup.md, work.md present)",
+                                                                 "harness_version_exists":  "PASS (.harness/.version = v4.15.0)",
+                                                                 "agents_md_exists":  "PASS (AGENTS.md present in root)"
+                                                             },
+                                             "status":  "READY"
+                                         },
+                  "alexherrero/crickets":  {
+                                               "repo_url":  "https://github.com/alexherrero/crickets.git",
+                                               "pinned_tag":  "v5.1.0",
+                                               "pinned_commit":  "090e7063505da246ad5b376439aa8351c8f286d3",
+                                               "version":  "v5.1.0",
+                                               "install_result":  "PASS (agy plugin install dist/antigravity/plugins/*)",
+                                               "test_result":  {
+                                                                   "plugin_list_check":  "PASS (development-lifecycle, developer-safety, code-review, maintenance, privacy, wiki present \u0026 enabled)",
+                                                                   "unsatisfied_requires_check":  "PASS (no unsatisfied requires reported)",
+                                                                   "phase_commands_resolvable":  "PASS (/setup, /plan, /work, /review, /release, /bugfix all resolvable)"
+                                                               },
+                                               "status":  "READY"
+                                           },
+                  "MiniMax-AI/skills":  {
+                                            "repo_url":  "https://github.com/MiniMax-AI/skills.git",
+                                            "pinned_commit":  "60aaae52bb2af8162732751a4332f62a5fef518b",
+                                            "version":  "1.0.0 (curated subset)",
+                                            "install_result":  "PASS (curated to .gemini/config/plugins/minimax-skills and project .claude/skills)",
+                                            "curated_skills":  [
+                                                                   "frontend-dev",
+                                                                   "fullstack-dev",
+                                                                   "flutter-dev",
+                                                                   "android-native-dev"
+                                                               ],
+                                            "test_result":  {
+                                                                "skill_md_checks":  {
+                                                                                        "frontend-dev":  "PASS (SKILL.md present)",
+                                                                                        "fullstack-dev":  "PASS (SKILL.md present)",
+                                                                                        "flutter-dev":  "PASS (SKILL.md present)",
+                                                                                        "android-native-dev":  "PASS (SKILL.md present)"
+                                                                                    },
+                                                                "exact_match":  "PASS (enabled skills match curated list exactly with 0 unwanted skills)"
+                                                            },
+                                            "status":  "READY"
+                                        }
+              }
+}
