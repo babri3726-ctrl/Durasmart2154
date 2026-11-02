@@ -36,3 +36,8 @@ Thumbs.db
 # Prompt audit log (local only — may contain sensitive context)
 .codebase/prompts.jsonl
 .codebase/prompts.jsonl.*
+
+# Git worktrees
+.worktrees/
+worktrees/
+
