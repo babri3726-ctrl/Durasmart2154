@@ -154,7 +154,7 @@ try:
         STATE["hrpb_snapshot"] = _hrpb
         STATE["targets"] = _hrpb["all_targets"]
         STATE["debtors"] = _hrpb["dealers_master"]
-        sp_set = sorted(list(set([t.get("salesperson") for t in _hrpb["all_targets"] if t.get("salesperson")])))
+        sp_set = sorted({t.get("salesperson") for t in _hrpb["all_targets"] if t.get("salesperson")})
         sp_territory = {}
         for t in _hrpb["all_targets"]:
             sp = t.get("salesperson")
@@ -439,7 +439,7 @@ def get_dashboard_summary(from_date: str | None = Query(None, alias="from"), to_
     debtors = STATE.get("debtors", [])
     customers = STATE.get("customers", [])
     
-    tot_debtor_bal = sum(int(round(float(d.get("balance", 0.0)) * 100)) for d in debtors)
+    tot_debtor_bal = sum(round(float(d.get("balance", 0.0)) * 100) for d in debtors)
     tot_cust_bal = sum(int(c.get("outstandingPaise", 0)) for c in customers)
     outstanding_paise = tot_debtor_bal if tot_debtor_bal > 0 else tot_cust_bal
 
@@ -898,7 +898,7 @@ def create_debtor(body: DebtorCreate):
     if not existing_c:
         sp_name = body.salesperson or "Unassigned"
         sp_id = next((e["id"] for e in STATE.get("employees", []) if e["name"].lower() == sp_name.lower()), "EMP-SP-01")
-        bal_paise = int(round(float(body.balance or 0.0) * 100))
+        bal_paise = round(float(body.balance or 0.0) * 100)
         cust = {
             "id": f"CUST-D-{len(STATE['customers']) + 1:04d}",
             "name": body.name.strip(),
@@ -973,7 +973,7 @@ def update_debtor(debtor_id: str, body: DebtorUpdate):
             if sp_match:
                 cust["salespersonId"] = sp_match
         if body.balance is not None:
-            bal_paise = int(round(float(body.balance) * 100))
+            bal_paise = round(float(body.balance) * 100)
             cust["openingPaise"] = bal_paise
             cust["outstandingPaise"] = bal_paise
 
@@ -1075,7 +1075,7 @@ def sync_hr_pb_excel():
 
         for dealer in snap["dealers_master"]:
             d_name = dealer["name"].lower()
-            bal_paise = int(round(float(dealer.get("balance", 0.0)) * 100))
+            bal_paise = round(float(dealer.get("balance", 0.0)) * 100)
             if d_name in existing_debtors_by_name:
                 target_d = existing_debtors_by_name[d_name]
                 target_d["balance"] = dealer["balance"]
@@ -1122,7 +1122,7 @@ def sync_hr_pb_excel():
 
             db.save_party(dealer)
 
-        sp_set = sorted(list(set([t.get("salesperson") for t in snap["all_targets"] if t.get("salesperson")])))
+        sp_set = sorted({t.get("salesperson") for t in snap["all_targets"] if t.get("salesperson")})
         sp_territory = {}
         for t in snap["all_targets"]:
             sp = t.get("salesperson")
@@ -1509,7 +1509,7 @@ def create_order(body: dict[str, Any]):
         total_qty += q
         unit = l.get("unit") or "MT"
         rate_paise = int(l.get("ratePaise") or 0)
-        amount_paise = int(l.get("amountPaise") or int(round(q * rate_paise)))
+        amount_paise = int(l.get("amountPaise") or round(q * rate_paise))
         processed_lines.append({
             "orderLineId": idx + 1,
             "lineNo": idx + 1,
@@ -1597,7 +1597,7 @@ def patch_order(order_id: str, body: dict[str, Any]):
             total_qty += q
             unit = l.get("unit") or "MT"
             rate_paise = int(l.get("ratePaise") or 0)
-            amount_paise = int(l.get("amountPaise") or int(round(q * rate_paise)))
+            amount_paise = int(l.get("amountPaise") or round(q * rate_paise))
             processed_lines.append({
                 "orderLineId": idx + 1,
                 "lineNo": idx + 1,
@@ -1756,7 +1756,7 @@ def create_payment(body: PaymentCreate):
         cust = next((d for d in STATE.get("debtors", []) if d["id"] == cust_id), None)
 
     cust_name = body.customerName or (cust.get("name") if cust else "Direct Dealer")
-    amt_paise = body.amountPaise if body.amountPaise is not None else int(round(float(body.amount or 0.0) * 100))
+    amt_paise = body.amountPaise if body.amountPaise is not None else round(float(body.amount or 0.0) * 100)
     pay_date = body.paymentDate or datetime.now().strftime("%Y-%m-%d")
     now_iso = datetime.now().isoformat()
 
@@ -2073,7 +2073,7 @@ async def upload_excel_file(file: UploadFile = File(...)):
             updated = 0
             for dealer in snap.get("dealers_master", []):
                 d_name = dealer["name"].lower()
-                bal_paise = int(round(float(dealer.get("balance", 0.0)) * 100))
+                bal_paise = round(float(dealer.get("balance", 0.0)) * 100)
                 if d_name in existing_debtors_by_name:
                     target_d = existing_debtors_by_name[d_name]
                     target_d["balance"] = dealer["balance"]
@@ -2257,7 +2257,7 @@ async def apply_debtor_bytes(
 
     for dealer in dealers:
         d_name = dealer["name"].lower()
-        bal_paise = int(round(float(dealer.get("balance", 0.0)) * 100))
+        bal_paise = round(float(dealer.get("balance", 0.0)) * 100)
         if d_name in existing_debtors_by_name:
             target_d = existing_debtors_by_name[d_name]
             target_d["balance"] = dealer["balance"]
@@ -2999,7 +2999,7 @@ if os.path.exists(assets_dir):
 @app.get("/", include_in_schema=False)
 @app.get("/{full_path:path}", include_in_schema=False)
 async def serve_spa(full_path: str = ""):
-    if full_path in ("health", "openapi.json") or full_path.startswith("api/") or full_path.startswith("docs"):
+    if full_path in ("health", "openapi.json") or full_path.startswith(("api/", "docs")):
         raise HTTPException(status_code=404, detail="Not Found")
     file_path = os.path.join(WEB_DIST_DIR, full_path)
     if full_path and os.path.isfile(file_path):

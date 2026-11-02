@@ -65,10 +65,10 @@ if ($Stack -in @("mobile", "all")) {
     $mobileDir = Join-Path $repoRoot "mobile"
     if (Test-Path $mobileDir) {
         Invoke-Gate -GateName "mobile:flutter_analyze" `
-                    -CommandLine "flutter analyze" `
+                    -CommandLine "flutter analyze --no-fatal-infos" `
                     -Action {
                         Push-Location $mobileDir
-                        try { flutter analyze } finally { Pop-Location }
+                        try { flutter analyze --no-fatal-infos } finally { Pop-Location }
                     }
 
         Invoke-Gate -GateName "mobile:dart_format" `

@@ -122,7 +122,7 @@ def init_db(seed_state: dict[str, Any] | None = None):
             now = datetime.now().isoformat()
             debtors = seed_state.get("debtors", [])
             for d in debtors:
-                bal_paise = int(round(float(d.get("balance", 0.0)) * 100))
+                bal_paise = round(float(d.get("balance", 0.0)) * 100)
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO parties 
@@ -176,7 +176,7 @@ def save_slip_image(order_id: str, image_data: str | None) -> str | None:
     """Saves raw base64 image data to disk file and returns relative API URL."""
     if not image_data or not isinstance(image_data, str):
         return None
-    if image_data.startswith("http://") or image_data.startswith("https://") or image_data.startswith("/api/v1/slips/"):
+    if image_data.startswith(("http://", "https://", "/api/v1/slips/")):
         return image_data
 
     # Strip data URI prefix if present (e.g. data:image/jpeg;base64,...)
@@ -304,7 +304,7 @@ def save_party(party: dict[str, Any]) -> dict[str, Any]:
     now = datetime.now().isoformat()
     party_id = party.get("id") or f"DEBTOR-MAN-{datetime.now().strftime('%H%M%S')}"
     party["id"] = party_id
-    bal_paise = int(round(float(party.get("balance", 0.0)) * 100)) if "balance" in party else party.get("outstandingPaise", 0)
+    bal_paise = round(float(party.get("balance", 0.0)) * 100) if "balance" in party else party.get("outstandingPaise", 0)
 
     with get_connection() as conn:
         conn.execute(
@@ -340,7 +340,7 @@ def save_payment(payment: dict[str, Any]) -> dict[str, Any]:
     payment_id = payment.get("id") or f"PAY-{datetime.now().strftime('%H%M%S')}"
     payment["id"] = payment_id
     payment["voucherNo"] = voucher_no
-    amount_paise = int(payment.get("amountPaise") or int(round(float(payment.get("amount", 0.0)) * 100)))
+    amount_paise = int(payment.get("amountPaise") or round(float(payment.get("amount", 0.0)) * 100))
     customer_id = payment.get("customerId", "")
 
     with get_connection() as conn:

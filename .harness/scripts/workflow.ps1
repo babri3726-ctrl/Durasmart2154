@@ -64,20 +64,26 @@ Write-Host "==================================================" -ForegroundColor
 
 # ----------------- STEP 1 & 2: CLASSIFY & PREFLIGHT -----------------
 # Assertion 2a: Task exists and is non-empty
-if ([string]::IsNullOrWhiteSpace($Prompt) -and $Command -ne "/release") {
-    Write-Host "[workflow] PREFLIGHT FAILED: Task prompt is empty." -ForegroundColor Red
-    if (Test-Path $auditLogger) { & $auditLogger -Command $Command -ExitCode 1 -Phase $Command -Details "Empty prompt" }
-    exit 1
+if ([string]::IsNullOrWhiteSpace($Prompt)) {
+    if ($Command -eq "/release") {
+        $Prompt = "prepare release artifacts"
+    } else {
+        Write-Host "[workflow] PREFLIGHT FAILED: Task prompt is empty." -ForegroundColor Red
+        if (Test-Path $auditLogger) { & $auditLogger -Command $Command -ExitCode 1 -Phase $Command -Details "Empty prompt" }
+        exit 1
+    }
 }
 
 # Auto-detect target stack if not explicitly set
 $targetStack = $Stack
-if ($targetStack -eq "auto") {
-    if ($Prompt -match "mobile|flutter|dart|apk|android") {
+if ($Command -eq "/release") {
+    $targetStack = "all"
+} elseif ($targetStack -eq "auto") {
+    if ($Prompt -match "\bmobile\b|\bflutter\b|\bdart\b|\bapk\b|\bandroid\b") {
         $targetStack = "mobile"
-    } elseif ($Prompt -match "web|react|frontend|vite|ts|tsx") {
+    } elseif ($Prompt -match "\bweb\b|\breact\b|\bfrontend\b|\bvite\b|\bts\b|\btsx\b") {
         $targetStack = "web"
-    } elseif ($Prompt -match "server|backend|fastapi|python|uvicorn|endpoint|api") {
+    } elseif ($Prompt -match "\bserver\b|\bbackend\b|\bfastapi\b|\bpython\b|\buvicorn\b|\bendpoint\b|\bapi\b") {
         $targetStack = "server"
     } else {
         $targetStack = "all"
@@ -187,7 +193,7 @@ try {
     } elseif ($DryRun) {
         Write-Host "[workflow] Dry run active - skipping external AGY invocation." -ForegroundColor DarkGray
     } else {
-        $agyCmd = "agy -p `"$Prompt`" --output-format json"
+        $agyCmd = "agy --output-format json -p `"$Prompt`""
         Write-Host "[workflow] Invoking safe AGY driver: $($Command)..." -ForegroundColor Cyan
         & $invokeAgySafe -CommandLine $agyCmd -Phase $Command -TimeoutSeconds 120 -MaxRetries 2
         if ($LASTEXITCODE -ne 0) {
