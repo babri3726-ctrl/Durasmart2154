@@ -38,6 +38,8 @@ Thumbs.db
 .codebase/prompts.jsonl.*
 
 # Git worktrees
+.worktrees
 .worktrees/
+worktrees
 worktrees/
 
