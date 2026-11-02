@@ -2012,13 +2012,13 @@ export function deleteDebtor(id: string): Promise<{ deleted: boolean; id: string
   });
 }
 
-export function syncHrPbTargets(): Promise<any> {
-  return send<any>('/imports/excel/hr-pb/sync', {
+export function syncHrPbTargets(): Promise<{ status: string; message: string; rows_processed?: number }> {
+  return send<{ status: string; message: string; rows_processed?: number }>('/imports/excel/hr-pb/sync', {
     method: 'POST',
   });
 }
 
-export async function uploadExcelWorkbook(file: File): Promise<any> {
+export async function uploadExcelWorkbook(file: File): Promise<Record<string, unknown>> {
   const formData = new FormData();
   formData.append('file', file);
   const resp = await fetch(`${API_BASE_URL}/api/v1/imports/excel/upload`, {
@@ -2032,16 +2032,16 @@ export async function uploadExcelWorkbook(file: File): Promise<any> {
   return resp.json();
 }
 
-export function listSalesTargets(params: { state?: string; salesperson?: string; q?: string } = {}): Promise<any> {
+export function listSalesTargets(params: { state?: string; salesperson?: string; q?: string } = {}): Promise<{ items?: Record<string, unknown>[]; salesperson_summary?: Record<string, unknown>[]; [key: string]: unknown }> {
   const query = new URLSearchParams();
   if (params.state) query.set('state', params.state);
   if (params.salesperson) query.set('salesperson', params.salesperson);
   if (params.q) query.set('q', params.q);
-  return send<any>(`/sales/targets?${query.toString()}`);
+  return send<{ items?: Record<string, unknown>[]; salesperson_summary?: Record<string, unknown>[]; [key: string]: unknown }>(`/sales/targets?${query.toString()}`);
 }
 
-export function getFinancialAnalytics(): Promise<any> {
-  return send<any>('/dashboard/financial-analytics');
+export function getFinancialAnalytics(): Promise<Record<string, unknown>> {
+  return send<Record<string, unknown>>('/dashboard/financial-analytics');
 }
 
 export type DebtorRowVerdict = 'resolved' | 'missing' | 'ambiguous' | 'invalid';

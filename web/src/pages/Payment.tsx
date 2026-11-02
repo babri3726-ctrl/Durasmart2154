@@ -126,8 +126,9 @@ export default function Payment() {
         syncKeys.dashboard,
         syncKeys.orderList(),
       );
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to record payment');
+    } catch (err: unknown) {
+      const errObj = err as { message?: string };
+      toast.error(errObj?.message || 'Failed to record payment');
     } finally {
       setSubmitting(false);
     }
@@ -150,8 +151,9 @@ export default function Payment() {
         syncKeys.dashboard,
         syncKeys.orderList(),
       );
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to void payment');
+    } catch (err: unknown) {
+      const errObj = err as { message?: string };
+      toast.error(errObj?.message || 'Failed to void payment');
     }
   };
 

@@ -82,8 +82,9 @@ export default function WatchedWorkbook() {
         syncKeys.stockImports,
       );
       await load();
-    } catch (err: any) {
-      setError(err?.message || 'Direct upload failed');
+    } catch (err: unknown) {
+      const errObj = err as { message?: string };
+      setError(errObj?.message || 'Direct upload failed');
     } finally {
       setDirectUploading(false);
       e.target.value = '';

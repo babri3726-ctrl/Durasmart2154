@@ -55,11 +55,10 @@ function CockpitSummary({ from, to }: { from: string; to: string }) {
   const stockToken = useSyncToken(syncKeys.stockSummary);
   const dispatchToken = useSyncPrefix(syncKeys.dispatchRegister);
 
-  const load = useCallback(
-    () => dashboardCockpit({ from: from || undefined, to: to || undefined }),
-    // Re-fetch automatically whenever order, debtor, customer, payment, dashboard, stock or dispatch sync tokens update
-    [from, to, orderToken, debtorToken, customerToken, paymentToken, dashboardToken, stockToken, dispatchToken]
-  );
+  const load = useCallback(() => {
+    void (orderToken || debtorToken || customerToken || paymentToken || dashboardToken || stockToken || dispatchToken);
+    return dashboardCockpit({ from: from || undefined, to: to || undefined });
+  }, [from, to, orderToken, debtorToken, customerToken, paymentToken, dashboardToken, stockToken, dispatchToken]);
   const { state, data, error, retry, sync } = useResource(load);
 
   // Background live update pulse (every 8 seconds + on window focus)

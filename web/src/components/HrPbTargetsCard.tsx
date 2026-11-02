@@ -40,8 +40,9 @@ export default function HrPbTargetsCard() {
       await uploadExcelWorkbook(file);
       setMessage('HR-PB.xlsx uploaded and synced successfully!');
       fetchTargets();
-    } catch (err: any) {
-      setMessage(err?.message || 'Upload failed');
+    } catch (err: unknown) {
+      const errObj = err as { message?: string };
+      setMessage(errObj?.message || 'Upload failed');
     } finally {
       setUploadingHrPb(false);
       e.target.value = '';
@@ -57,8 +58,8 @@ export default function HrPbTargetsCard() {
   const fetchTargets = async () => {
     try {
       const res = await listSalesTargets();
-      setTargets(res.items || []);
-      setSummary(res.salesperson_summary || []);
+      setTargets((res.items as unknown as SalesTargetRow[]) || []);
+      setSummary((res.salesperson_summary as unknown as SalespersonSummary[]) || []);
     } catch {
       // ignore
     }
@@ -75,8 +76,9 @@ export default function HrPbTargetsCard() {
       const res = await syncHrPbTargets();
       setMessage(res.message || 'HR-PB targets synced!');
       fetchTargets();
-    } catch (e: any) {
-      setMessage(e.message || 'Sync failed');
+    } catch (e: unknown) {
+      const errObj = e as { message?: string };
+      setMessage(errObj?.message || 'Sync failed');
     } finally {
       setSyncing(false);
     }
