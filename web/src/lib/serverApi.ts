@@ -2032,16 +2032,16 @@ export async function uploadExcelWorkbook(file: File): Promise<Record<string, un
   return resp.json();
 }
 
-export function listSalesTargets(params: { state?: string; salesperson?: string; q?: string } = {}): Promise<{ items?: Record<string, unknown>[]; salesperson_summary?: Record<string, unknown>[]; [key: string]: unknown }> {
+export function listSalesTargets<T = Record<string, unknown>>(params: { state?: string; salesperson?: string; q?: string } = {}): Promise<T> {
   const query = new URLSearchParams();
   if (params.state) query.set('state', params.state);
   if (params.salesperson) query.set('salesperson', params.salesperson);
   if (params.q) query.set('q', params.q);
-  return send<{ items?: Record<string, unknown>[]; salesperson_summary?: Record<string, unknown>[]; [key: string]: unknown }>(`/sales/targets?${query.toString()}`);
+  return send<T>(`/sales/targets?${query.toString()}`);
 }
 
-export function getFinancialAnalytics(): Promise<Record<string, unknown>> {
-  return send<Record<string, unknown>>('/dashboard/financial-analytics');
+export function getFinancialAnalytics<T = Record<string, unknown>>(): Promise<T> {
+  return send<T>('/dashboard/financial-analytics');
 }
 
 export type DebtorRowVerdict = 'resolved' | 'missing' | 'ambiguous' | 'invalid';

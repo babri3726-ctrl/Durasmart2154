@@ -14,6 +14,12 @@ interface TargetItem {
   achievement_percent: string;
 }
 
+interface SalesTargetsJson {
+  salesperson_summary?: TargetItem[];
+  total?: number;
+  [key: string]: unknown;
+}
+
 export default function SalesTargetKpis() {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<{
@@ -32,7 +38,7 @@ export default function SalesTargetKpis() {
   } | null>(null);
 
   useEffect(() => {
-    listSalesTargets()
+    listSalesTargets<SalesTargetsJson>()
       .then((json) => {
         const officers: TargetItem[] = json.salesperson_summary || [];
         const pbOfficers = officers.filter((o) => o.territory === 'Punjab');
@@ -55,7 +61,7 @@ export default function SalesTargetKpis() {
             total_dispatched: totalDisp,
             total_pending: totalTarget - totalDisp,
             overall_achievement: totalTarget > 0 ? (totalDisp / totalTarget) * 100 : 0,
-            parties_count: json.total || 137,
+            parties_count: json.total ?? 137,
           },
           territories: {
             punjab: {

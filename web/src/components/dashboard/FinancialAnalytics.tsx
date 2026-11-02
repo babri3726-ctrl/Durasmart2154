@@ -71,7 +71,7 @@ export default function FinancialAnalytics() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getFinancialAnalytics()
+    getFinancialAnalytics<AnalyticsData>()
       .then((json) => {
         setData(json);
         setLoading(false);
