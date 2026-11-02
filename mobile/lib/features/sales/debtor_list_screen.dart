@@ -24,9 +24,17 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
     final balCtrl = TextEditingController(text: '0.00');
     String stateVal = 'Punjab';
     final activeSalespeople = <String>[
-      'Mozi Ram', 'AJAY JI', 'GAURAV JI', 'PANKAJ JI', 'MUKESH JI',
-      'Amanpreet Singh', 'Harpreet Singh', 'Gurmeet Singh', 'Rajinder Kumar', 'Kuldeep Singh',
-      'Unassigned'
+      'Mozi Ram',
+      'AJAY JI',
+      'GAURAV JI',
+      'PANKAJ JI',
+      'MUKESH JI',
+      'Amanpreet Singh',
+      'Harpreet Singh',
+      'Gurmeet Singh',
+      'Rajinder Kumar',
+      'Kuldeep Singh',
+      'Unassigned',
     ];
     String selectedSp = 'Mozi Ram';
 
@@ -45,7 +53,9 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                 ),
                 TextField(
                   controller: cityCtrl,
-                  decoration: const InputDecoration(labelText: 'Station / City'),
+                  decoration: const InputDecoration(
+                    labelText: 'Station / City',
+                  ),
                 ),
                 TextField(
                   controller: disttCtrl,
@@ -60,13 +70,18 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                     for (final sp in activeSalespeople)
                       DropdownMenuItem(value: sp, child: Text(sp)),
                   ],
-                  onChanged: (v) => setDialogState(() => selectedSp = v ?? 'Unassigned'),
+                  onChanged: (v) =>
+                      setDialogState(() => selectedSp = v ?? 'Unassigned'),
                 ),
                 const SizedBox(height: 6),
                 TextField(
                   controller: balCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Initial Balance (₹)'),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Initial Balance (₹)',
+                  ),
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
@@ -75,7 +90,8 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                     DropdownMenuItem(value: 'Punjab', child: Text('Punjab')),
                     DropdownMenuItem(value: 'Haryana', child: Text('Haryana')),
                   ],
-                  onChanged: (v) => setDialogState(() => stateVal = v ?? 'Punjab'),
+                  onChanged: (v) =>
+                      setDialogState(() => stateVal = v ?? 'Punjab'),
                   decoration: const InputDecoration(labelText: 'State'),
                 ),
               ],
@@ -92,15 +108,17 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                 final repo = context.read<MockRepository>();
                 final newId = 'DEBTOR-MAN-${repo.debtors.length + 100}';
                 final bal = double.tryParse(balCtrl.text.trim()) ?? 0.0;
-                repo.addDebtor(DebtorItem(
-                  id: newId,
-                  name: nameCtrl.text.trim(),
-                  state: stateVal,
-                  city: cityCtrl.text.trim(),
-                  district: disttCtrl.text.trim(),
-                  salesperson: selectedSp,
-                  balance: bal,
-                ));
+                repo.addDebtor(
+                  DebtorItem(
+                    id: newId,
+                    name: nameCtrl.text.trim(),
+                    state: stateVal,
+                    city: cityCtrl.text.trim(),
+                    district: disttCtrl.text.trim(),
+                    salesperson: selectedSp,
+                    balance: bal,
+                  ),
+                );
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Debtor added successfully')),
@@ -118,17 +136,30 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
     final nameCtrl = TextEditingController(text: item.name);
     final cityCtrl = TextEditingController(text: item.city);
     final disttCtrl = TextEditingController(text: item.district);
-    final balCtrl = TextEditingController(text: item.balance.toStringAsFixed(2));
+    final balCtrl = TextEditingController(
+      text: item.balance.toStringAsFixed(2),
+    );
     String stateVal = item.state.isEmpty ? 'Punjab' : item.state;
     final activeSalespeople = <String>[
-      'Mozi Ram', 'AJAY JI', 'GAURAV JI', 'PANKAJ JI', 'MUKESH JI',
-      'Amanpreet Singh', 'Harpreet Singh', 'Gurmeet Singh', 'Rajinder Kumar', 'Kuldeep Singh',
-      'Unassigned'
+      'Mozi Ram',
+      'AJAY JI',
+      'GAURAV JI',
+      'PANKAJ JI',
+      'MUKESH JI',
+      'Amanpreet Singh',
+      'Harpreet Singh',
+      'Gurmeet Singh',
+      'Rajinder Kumar',
+      'Kuldeep Singh',
+      'Unassigned',
     ];
-    if (item.salesperson.isNotEmpty && !activeSalespeople.contains(item.salesperson)) {
+    if (item.salesperson.isNotEmpty &&
+        !activeSalespeople.contains(item.salesperson)) {
       activeSalespeople.insert(0, item.salesperson);
     }
-    String selectedSp = item.salesperson.isNotEmpty ? item.salesperson : 'Unassigned';
+    String selectedSp = item.salesperson.isNotEmpty
+        ? item.salesperson
+        : 'Unassigned';
 
     showDialog(
       context: context,
@@ -145,7 +176,9 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                 ),
                 TextField(
                   controller: cityCtrl,
-                  decoration: const InputDecoration(labelText: 'Station / City'),
+                  decoration: const InputDecoration(
+                    labelText: 'Station / City',
+                  ),
                 ),
                 TextField(
                   controller: disttCtrl,
@@ -160,12 +193,15 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                     for (final sp in activeSalespeople)
                       DropdownMenuItem(value: sp, child: Text(sp)),
                   ],
-                  onChanged: (v) => setDialogState(() => selectedSp = v ?? 'Unassigned'),
+                  onChanged: (v) =>
+                      setDialogState(() => selectedSp = v ?? 'Unassigned'),
                 ),
                 const SizedBox(height: 6),
                 TextField(
                   controller: balCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   decoration: const InputDecoration(labelText: 'Balance (₹)'),
                 ),
                 const SizedBox(height: 10),
@@ -175,7 +211,8 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                     DropdownMenuItem(value: 'Punjab', child: Text('Punjab')),
                     DropdownMenuItem(value: 'Haryana', child: Text('Haryana')),
                   ],
-                  onChanged: (v) => setDialogState(() => stateVal = v ?? 'Punjab'),
+                  onChanged: (v) =>
+                      setDialogState(() => stateVal = v ?? 'Punjab'),
                   decoration: const InputDecoration(labelText: 'State'),
                 ),
               ],
@@ -195,7 +232,8 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                 item.district = disttCtrl.text.trim();
                 item.salesperson = selectedSp;
                 item.state = stateVal;
-                item.balance = double.tryParse(balCtrl.text.trim()) ?? item.balance;
+                item.balance =
+                    double.tryParse(balCtrl.text.trim()) ?? item.balance;
                 repo.updateDebtor(item);
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -215,7 +253,9 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Debtor?'),
-        content: Text('Are you sure you want to delete ${item.name}? This will remove it from the Debtor Master.'),
+        content: Text(
+          'Are you sure you want to delete ${item.name}? This will remove it from the Debtor Master.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -226,9 +266,9 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
             onPressed: () {
               context.read<MockRepository>().deleteDebtor(item.id);
               Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Debtor deleted')),
-              );
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text('Debtor deleted')));
             },
             child: const Text('Delete', style: TextStyle(color: Colors.white)),
           ),
@@ -241,7 +281,8 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
   Widget build(BuildContext context) {
     final repo = context.watch<MockRepository>();
     final items = repo.debtors.where((d) {
-      if (_selectedTerritory != 'All' && d.state.toLowerCase() != _selectedTerritory.toLowerCase()) {
+      if (_selectedTerritory != 'All' &&
+          d.state.toLowerCase() != _selectedTerritory.toLowerCase()) {
         return false;
       }
       if (_query.isNotEmpty) {
@@ -263,7 +304,9 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
             tooltip: '1-Click Sync HR-PB',
             onPressed: () {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('HR-PB Dealers synced with initial ₹0 balance')),
+                const SnackBar(
+                  content: Text('HR-PB Dealers synced with initial ₹0 balance'),
+                ),
               );
             },
           ),
@@ -321,17 +364,29 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(item.name, style: AppText.body.copyWith(fontWeight: FontWeight.bold)),
+                                  Text(
+                                    item.name,
+                                    style: AppText.body.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
                                   const SizedBox(height: 3),
                                   Text(
                                     '${item.city.isNotEmpty ? item.city : item.district} (${item.state}) • Rep: ${item.salesperson}',
-                                    style: AppText.caption.copyWith(color: AppColors.muted),
+                                    style: AppText.caption.copyWith(
+                                      color: AppColors.muted,
+                                    ),
                                   ),
                                   const SizedBox(height: 6),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 2,
+                                    ),
                                     decoration: BoxDecoration(
-                                      color: item.balance == 0.0 ? AppColors.background : const Color(0xFFFFEEEE),
+                                      color: item.balance == 0.0
+                                          ? AppColors.background
+                                          : const Color(0xFFFFEEEE),
                                       borderRadius: BorderRadius.circular(6),
                                       border: Border.all(color: AppColors.line),
                                     ),
@@ -339,7 +394,9 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                                       'Balance: ${item.balanceFormatted}',
                                       style: AppText.caption.copyWith(
                                         fontWeight: FontWeight.bold,
-                                        color: item.balance == 0.0 ? AppColors.muted : AppColors.red,
+                                        color: item.balance == 0.0
+                                            ? AppColors.muted
+                                            : AppColors.red,
                                       ),
                                     ),
                                   ),
@@ -350,14 +407,22 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 IconButton(
-                                  icon: const Icon(Icons.edit_outlined, size: 20),
+                                  icon: const Icon(
+                                    Icons.edit_outlined,
+                                    size: 20,
+                                  ),
                                   color: AppColors.muted,
-                                  onPressed: () => _showEditDebtorDialog(context, item),
+                                  onPressed: () =>
+                                      _showEditDebtorDialog(context, item),
                                 ),
                                 IconButton(
-                                  icon: const Icon(Icons.delete_outline_rounded, size: 20),
+                                  icon: const Icon(
+                                    Icons.delete_outline_rounded,
+                                    size: 20,
+                                  ),
                                   color: AppColors.red,
-                                  onPressed: () => _showDeleteConfirmDialog(context, item),
+                                  onPressed: () =>
+                                      _showDeleteConfirmDialog(context, item),
                                 ),
                               ],
                             ),

@@ -159,7 +159,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Expanded(
                 child: Text(
                   'Active Backend Host',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.ink),
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.ink,
+                  ),
                 ),
               ),
             ],
@@ -167,7 +171,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 8),
           Text(
             current,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 13, color: AppColors.blue, fontWeight: FontWeight.w600),
+            style: const TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 13,
+              color: AppColors.blue,
+              fontWeight: FontWeight.w600,
+            ),
           ),
           const SizedBox(height: 12),
           const Text(
@@ -186,7 +195,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _showServerHostDialog() {
-    final controller = TextEditingController(text: ApiSyncService.userCustomHost ?? '');
+    final controller = TextEditingController(
+      text: ApiSyncService.userCustomHost ?? '',
+    );
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -226,7 +237,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Navigator.pop(ctx);
               setState(() {});
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Server endpoint updated to: ${ApiSyncService.currentHost ?? "Auto"}')),
+                SnackBar(
+                  content: Text(
+                    'Server endpoint updated to: ${ApiSyncService.currentHost ?? "Auto"}',
+                  ),
+                ),
               );
             },
             child: const Text('Save'),

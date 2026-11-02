@@ -26,7 +26,8 @@ class _StockHomeScreenState extends State<StockHomeScreen>
 
   // Snapshot provenance
   String _filename = '1-8-26.xlsx';
-  String _fileSha256 = 'ab5e51aefc65378bca58092c9a7db41f04c26f10df569ff8177ba19240f6f20d';
+  String _fileSha256 =
+      'ab5e51aefc65378bca58092c9a7db41f04c26f10df569ff8177ba19240f6f20d';
   String _syncedAt = '2026-10-26T10:52:40';
   int _itemCount = 73;
   List<String> _sheetsRead = ['TOTAL STOCK', 'UPVC TOTAL STOCK', 'UPVC ITEM'];
@@ -87,8 +88,11 @@ class _StockHomeScreenState extends State<StockHomeScreen>
   Future<String?> _resolveWorkingHost() async {
     if (_activeHost != null) {
       try {
-        final client = HttpClient()..connectionTimeout = const Duration(seconds: 1);
-        final req = await client.getUrl(Uri.parse('$_activeHost/api/v1/stock/summary'));
+        final client = HttpClient()
+          ..connectionTimeout = const Duration(seconds: 1);
+        final req = await client.getUrl(
+          Uri.parse('$_activeHost/api/v1/stock/summary'),
+        );
         final resp = await req.close();
         if (resp.statusCode == 200) return _activeHost;
       } catch (_) {}
@@ -96,8 +100,11 @@ class _StockHomeScreenState extends State<StockHomeScreen>
 
     for (final host in _candidateHosts) {
       try {
-        final client = HttpClient()..connectionTimeout = const Duration(milliseconds: 1200);
-        final req = await client.getUrl(Uri.parse('$host/api/v1/stock/summary'));
+        final client = HttpClient()
+          ..connectionTimeout = const Duration(milliseconds: 1200);
+        final req = await client.getUrl(
+          Uri.parse('$host/api/v1/stock/summary'),
+        );
         final resp = await req.close();
         if (resp.statusCode == 200) {
           _activeHost = host;
@@ -121,16 +128,20 @@ class _StockHomeScreenState extends State<StockHomeScreen>
         if (mounted) {
           setState(() {
             _isLoading = false;
-            _errorMessage = 'Offline mode: displaying authorized OneDrive snapshot';
+            _errorMessage =
+                'Offline mode: displaying authorized OneDrive snapshot';
           });
         }
         return;
       }
 
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 4);
 
       // 1. Fetch Summary
-      final reqSummary = await client.getUrl(Uri.parse('$host/api/v1/stock/summary'));
+      final reqSummary = await client.getUrl(
+        Uri.parse('$host/api/v1/stock/summary'),
+      );
       final respSummary = await reqSummary.close();
       if (respSummary.statusCode == 200) {
         final bodyStr = await respSummary.transform(utf8.decoder).join();
@@ -141,9 +152,13 @@ class _StockHomeScreenState extends State<StockHomeScreen>
           _filename = snap['filename']?.toString() ?? '1-8-26.xlsx';
           _fileSha256 = snap['fileSha256']?.toString() ?? _fileSha256;
           _syncedAt = snap['appliedAt']?.toString() ?? _syncedAt;
-          _itemCount = snap['itemCount'] is int ? snap['itemCount'] as int : _itemCount;
+          _itemCount = snap['itemCount'] is int
+              ? snap['itemCount'] as int
+              : _itemCount;
           if (snap['sheetsRead'] is List) {
-            _sheetsRead = (snap['sheetsRead'] as List).map((e) => e.toString()).toList();
+            _sheetsRead = (snap['sheetsRead'] as List)
+                .map((e) => e.toString())
+                .toList();
           }
         }
 
@@ -155,10 +170,14 @@ class _StockHomeScreenState extends State<StockHomeScreen>
               final rawQty = cat['quantity']?.toString() ?? '1444769.000';
               final parts = rawQty.split('.');
               final wholeFormatted = _formatWithCommas(parts[0]);
-              _metalQty = parts.length > 1 ? '$wholeFormatted.${parts[1].substring(0, 3)}' : wholeFormatted;
+              _metalQty = parts.length > 1
+                  ? '$wholeFormatted.${parts[1].substring(0, 3)}'
+                  : wholeFormatted;
               _metalItemCount = (cat['figureCount'] as num?)?.toInt() ?? 42;
             } else if (key == 'upvc-roofing') {
-              _upvcPieces = _formatWithCommas(cat['pieces']?.toString() ?? '2043');
+              _upvcPieces = _formatWithCommas(
+                cat['pieces']?.toString() ?? '2043',
+              );
               final ftStr = cat['footage']?.toString() ?? '24500';
               _upvcFootage = _formatWithCommas(ftStr.split('.').first);
               _upvcItemCount = (cat['figureCount'] as num?)?.toInt() ?? 28;
@@ -174,13 +193,19 @@ class _StockHomeScreenState extends State<StockHomeScreen>
               .toList();
 
           _accessoryItems = materials
-              .where((m) => m['categoryKey'] == 'upvc-item' || m['categoryKey'] == 'upvc-accessories')
+              .where(
+                (m) =>
+                    m['categoryKey'] == 'upvc-item' ||
+                    m['categoryKey'] == 'upvc-accessories',
+              )
               .map((m) => Map<String, dynamic>.from(m as Map))
               .toList();
 
           int r = 0, j = 0, c = 0, hr = 0;
           for (final m in _accessoryItems) {
-            final label = (m['sourceLabel'] ?? m['label'] ?? '').toString().toUpperCase();
+            final label = (m['sourceLabel'] ?? m['label'] ?? '')
+                .toString()
+                .toUpperCase();
             final qty = int.tryParse(m['quantity']?.toString() ?? '0') ?? 0;
             if (label.contains('HIRA RIDGE')) {
               hr += qty;
@@ -207,7 +232,9 @@ class _StockHomeScreenState extends State<StockHomeScreen>
         final upvcData = jsonDecode(bodyStr) as Map<String, dynamic>;
         final rows = upvcData['rows'] as List<dynamic>?;
         if (rows != null) {
-          _upvcRows = rows.map((r) => Map<String, dynamic>.from(r as Map)).toList();
+          _upvcRows = rows
+              .map((r) => Map<String, dynamic>.from(r as Map))
+              .toList();
         }
       }
 
@@ -234,15 +261,19 @@ class _StockHomeScreenState extends State<StockHomeScreen>
 
     try {
       final host = await _resolveWorkingHost() ?? 'http://127.0.0.1:8010';
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
-      final req = await client.postUrl(Uri.parse('$host/api/v1/imports/excel/stock-watch/sync'));
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 15);
+      final req = await client.postUrl(
+        Uri.parse('$host/api/v1/imports/excel/stock-watch/sync'),
+      );
       final resp = await req.close();
 
       if (resp.statusCode == 200) {
         await _fetchLiveStock();
 
         final now = DateTime.now();
-        final timeStr = '${now.hour}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+        final timeStr =
+            '${now.hour}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
 
         setState(() {
           _isSyncing = false;
@@ -252,7 +283,9 @@ class _StockHomeScreenState extends State<StockHomeScreen>
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('1-Click Stock Sync completed: 3 sheets verified at $timeStr'),
+              content: Text(
+                '1-Click Stock Sync completed: 3 sheets verified at $timeStr',
+              ),
               backgroundColor: AppColors.green,
               behavior: SnackBarBehavior.floating,
             ),
@@ -313,7 +346,10 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                 ? const SizedBox(
                     width: 18,
                     height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.blue),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.blue,
+                    ),
                   )
                 : const Icon(Icons.refresh_rounded),
             tooltip: 'Refresh Snapshot',
@@ -323,11 +359,7 @@ class _StockHomeScreenState extends State<StockHomeScreen>
       ),
       body: TabBarView(
         controller: _tabController,
-        children: [
-          _buildOverviewTab(),
-          _buildSteelCoilsTab(),
-          _buildUpvcTab(),
-        ],
+        children: [_buildOverviewTab(), _buildSteelCoilsTab(), _buildUpvcTab()],
       ),
     );
   }
@@ -349,12 +381,19 @@ class _StockHomeScreenState extends State<StockHomeScreen>
               ),
               child: Row(
                 children: [
-                  Icon(Icons.info_outline_rounded, color: Colors.amber.shade800, size: 20),
+                  Icon(
+                    Icons.info_outline_rounded,
+                    color: Colors.amber.shade800,
+                    size: 20,
+                  ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       _errorMessage!,
-                      style: TextStyle(color: Colors.amber.shade900, fontSize: 12),
+                      style: TextStyle(
+                        color: Colors.amber.shade900,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
                 ],
@@ -380,7 +419,11 @@ class _StockHomeScreenState extends State<StockHomeScreen>
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.cloud_sync_rounded, color: Colors.white, size: 26),
+                    const Icon(
+                      Icons.cloud_sync_rounded,
+                      color: Colors.white,
+                      size: 26,
+                    ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Column(
@@ -396,13 +439,19 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                           ),
                           Text(
                             _filename,
-                            style: const TextStyle(color: Colors.white70, fontSize: 12),
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                            ),
                           ),
                         ],
                       ),
                     ),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.white24,
                         borderRadius: BorderRadius.circular(8),
@@ -421,7 +470,11 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                 const SizedBox(height: 10),
                 const Text(
                   'Instantly parses authorized sheets: TOTAL STOCK, UPVC TOTAL STOCK, and UPVC ITEM.',
-                  style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.3),
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    height: 1.3,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 SizedBox(
@@ -432,19 +485,29 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                       backgroundColor: Colors.white,
                       foregroundColor: AppColors.blue,
                       elevation: 0,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                     onPressed: _isSyncing ? null : _trigger1ClickSync,
                     icon: _isSyncing
                         ? const SizedBox(
                             width: 18,
                             height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.blue),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppColors.blue,
+                            ),
                           )
                         : const Icon(Icons.sync_rounded),
                     label: Text(
-                      _isSyncing ? 'Syncing from OneDrive...' : '1-Click Sync Now',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      _isSyncing
+                          ? 'Syncing from OneDrive...'
+                          : '1-Click Sync Now',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
                     ),
                   ),
                 ),
@@ -511,25 +574,44 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                 Row(
                   children: [
                     const Expanded(
-                      child: Text('Accessories (UPVC ITEM)', style: AppText.heading),
+                      child: Text(
+                        'Accessories (UPVC ITEM)',
+                        style: AppText.heading,
+                      ),
                     ),
                     StatusChip(
-                      label: '4 groups (${_formatWithCommas((_ridgePieces + _jhallarPieces + _capsPieces + _hiraRidgePieces).toString())} pcs)',
+                      label:
+                          '4 groups (${_formatWithCommas((_ridgePieces + _jhallarPieces + _capsPieces + _hiraRidgePieces).toString())} pcs)',
                       color: AppColors.teal,
                     ),
                   ],
                 ),
                 const SizedBox(height: 14),
-                _accessoryRow('RIDGE', '${_formatWithCommas(_ridgePieces.toString())} pcs'),
+                _accessoryRow(
+                  'RIDGE',
+                  '${_formatWithCommas(_ridgePieces.toString())} pcs',
+                ),
                 const Divider(height: 18),
-                _accessoryRow('JHALLAR', '${_formatWithCommas(_jhallarPieces.toString())} pcs'),
+                _accessoryRow(
+                  'JHALLAR',
+                  '${_formatWithCommas(_jhallarPieces.toString())} pcs',
+                ),
                 const Divider(height: 18),
-                _accessoryRow('CAPS', '${_formatWithCommas(_capsPieces.toString())} pcs'),
+                _accessoryRow(
+                  'CAPS',
+                  '${_formatWithCommas(_capsPieces.toString())} pcs',
+                ),
                 const Divider(height: 18),
-                _accessoryRow('HIRA RIDGE', '${_formatWithCommas(_hiraRidgePieces.toString())} pcs'),
+                _accessoryRow(
+                  'HIRA RIDGE',
+                  '${_formatWithCommas(_hiraRidgePieces.toString())} pcs',
+                ),
                 if (_accessoryItems.isNotEmpty) ...[
                   const Divider(height: 22),
-                  const Text('Colour Breakdown (Synchronized)', style: AppText.caption),
+                  const Text(
+                    'Colour Breakdown (Synchronized)',
+                    style: AppText.caption,
+                  ),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 6,
@@ -538,7 +620,10 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                       final name = item['label'] ?? '';
                       final qty = item['quantity'] ?? '0';
                       return Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: AppColors.background,
                           borderRadius: BorderRadius.circular(6),
@@ -546,7 +631,11 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                         ),
                         child: Text(
                           '$name: ${_formatWithCommas(qty.toString())} Nos',
-                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.ink),
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.ink,
+                          ),
                         ),
                       );
                     }).toList(),
@@ -570,10 +659,17 @@ class _StockHomeScreenState extends State<StockHomeScreen>
               children: [
                 const Row(
                   children: [
-                    Icon(Icons.verified_user_rounded, color: AppColors.green, size: 20),
+                    Icon(
+                      Icons.verified_user_rounded,
+                      color: AppColors.green,
+                      size: 20,
+                    ),
                     SizedBox(width: 8),
                     Expanded(
-                      child: Text('Authorized Sheets Verification', style: AppText.heading),
+                      child: Text(
+                        'Authorized Sheets Verification',
+                        style: AppText.heading,
+                      ),
                     ),
                   ],
                 ),
@@ -582,7 +678,10 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                 _provenanceRow('SHA256', '${_fileSha256.substring(0, 16)}...'),
                 _provenanceRow('Sheets Read', _sheetsRead.join(', ')),
                 _provenanceRow('Total Items', '$_itemCount validated rows'),
-                _provenanceRow('Applied At', _syncedAt.replaceAll('T', ' ').split('.').first),
+                _provenanceRow(
+                  'Applied At',
+                  _syncedAt.replaceAll('T', ' ').split('.').first,
+                ),
               ],
             ),
           ),
@@ -622,7 +721,10 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                 borderRadius: BorderRadius.circular(12),
                 borderSide: const BorderSide(color: AppColors.line),
               ),
-              contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+              contentPadding: const EdgeInsets.symmetric(
+                vertical: 10,
+                horizontal: 14,
+              ),
             ),
             onChanged: (val) {
               setState(() {
@@ -638,11 +740,19 @@ class _StockHomeScreenState extends State<StockHomeScreen>
             children: [
               Text(
                 'Showing ${filtered.length} of ${_steelCoils.isNotEmpty ? _steelCoils.length : _metalItemCount} slit coils',
-                style: const TextStyle(fontSize: 12, color: AppColors.muted, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.muted,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               Text(
                 'Total: $_metalQty kg',
-                style: const TextStyle(fontSize: 12, color: AppColors.blue, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.blue,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ],
           ),
@@ -654,10 +764,16 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.inventory_2_outlined, size: 48, color: AppColors.muted),
+                      const Icon(
+                        Icons.inventory_2_outlined,
+                        size: 48,
+                        color: AppColors.muted,
+                      ),
                       const SizedBox(height: 8),
                       Text(
-                        _steelSearchTerm.isEmpty ? 'Loading steel coils...' : 'No coils match "$_steelSearchTerm"',
+                        _steelSearchTerm.isEmpty
+                            ? 'Loading steel coils...'
+                            : 'No coils match "$_steelSearchTerm"',
                         style: const TextStyle(color: AppColors.muted),
                       ),
                     ],
@@ -666,7 +782,8 @@ class _StockHomeScreenState extends State<StockHomeScreen>
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                   itemCount: filtered.length,
-                  separatorBuilder: (context, index) => const SizedBox(height: 8),
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(height: 8),
                   itemBuilder: (context, idx) {
                     final item = filtered[idx];
                     final company = (item['company'] ?? 'STEEL').toString();
@@ -676,7 +793,8 @@ class _StockHomeScreenState extends State<StockHomeScreen>
 
                     Color companyColor = AppColors.blue;
                     if (company == 'JSW') companyColor = AppColors.purple;
-                    if (company.contains('KAM')) companyColor = AppColors.orange;
+                    if (company.contains('KAM'))
+                      companyColor = AppColors.orange;
                     if (company == 'APL') companyColor = AppColors.teal;
 
                     return Container(
@@ -689,7 +807,10 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                       child: Row(
                         children: [
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
                             decoration: BoxDecoration(
                               color: companyColor.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(6),
@@ -710,12 +831,18 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                               children: [
                                 Text(
                                   label,
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
                                 ),
                                 if (coord.isNotEmpty)
                                   Text(
                                     'TOTAL STOCK ($coord)',
-                                    style: const TextStyle(fontSize: 10, color: AppColors.muted),
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      color: AppColors.muted,
+                                    ),
                                   ),
                               ],
                             ),
@@ -783,11 +910,19 @@ class _StockHomeScreenState extends State<StockHomeScreen>
             children: [
               Text(
                 'Showing ${filtered.length} of ${_upvcRows.isNotEmpty ? _upvcRows.length : _upvcItemCount} items',
-                style: const TextStyle(fontSize: 12, color: AppColors.muted, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.muted,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               Text(
                 'Total: $_upvcPieces pcs (~$_upvcFootage ft)',
-                style: const TextStyle(fontSize: 12, color: AppColors.green, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.green,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ],
           ),
@@ -799,10 +934,16 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.roofing_rounded, size: 48, color: AppColors.muted),
+                      const Icon(
+                        Icons.roofing_rounded,
+                        size: 48,
+                        color: AppColors.muted,
+                      ),
                       const SizedBox(height: 8),
                       Text(
-                        _selectedUpvcColor == 'ALL' ? 'Loading UPVC matrix...' : 'No UPVC items for $_selectedUpvcColor',
+                        _selectedUpvcColor == 'ALL'
+                            ? 'Loading UPVC matrix...'
+                            : 'No UPVC items for $_selectedUpvcColor',
                         style: const TextStyle(color: AppColors.muted),
                       ),
                     ],
@@ -811,12 +952,14 @@ class _StockHomeScreenState extends State<StockHomeScreen>
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                   itemCount: filtered.length,
-                  separatorBuilder: (context, index) => const SizedBox(height: 8),
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(height: 8),
                   itemBuilder: (context, idx) {
                     final item = filtered[idx];
                     final color = (item['colour'] ?? '').toString();
                     final lengthFt = item['lengthFt']?.toString() ?? '';
-                    final label = (item['label'] ?? 'UPVC $color ${lengthFt}ft').toString();
+                    final label = (item['label'] ?? 'UPVC $color ${lengthFt}ft')
+                        .toString();
                     final pieces = (item['pieces'] ?? '0').toString();
                     final footage = (item['footage'] ?? '0.000').toString();
 
@@ -838,7 +981,10 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                       child: Row(
                         children: [
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
                             decoration: BoxDecoration(
                               color: badgeColor.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(6),
@@ -859,11 +1005,17 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                               children: [
                                 Text(
                                   label,
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
                                 ),
                                 Text(
                                   'Length: ${lengthFt}ft • Approx $footage running ft',
-                                  style: const TextStyle(fontSize: 10, color: AppColors.muted),
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    color: AppColors.muted,
+                                  ),
                                 ),
                               ],
                             ),
@@ -890,8 +1042,18 @@ class _StockHomeScreenState extends State<StockHomeScreen>
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-        Text(qty, style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.blue, fontSize: 13)),
+        Text(
+          label,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+        ),
+        Text(
+          qty,
+          style: const TextStyle(
+            fontWeight: FontWeight.w700,
+            color: AppColors.blue,
+            fontSize: 13,
+          ),
+        ),
       ],
     );
   }
@@ -906,13 +1068,21 @@ class _StockHomeScreenState extends State<StockHomeScreen>
             width: 90,
             child: Text(
               label,
-              style: const TextStyle(fontSize: 11, color: AppColors.muted, fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                fontSize: 11,
+                color: AppColors.muted,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(fontSize: 11, color: AppColors.ink, fontWeight: FontWeight.w500),
+              style: const TextStyle(
+                fontSize: 11,
+                color: AppColors.ink,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
         ],

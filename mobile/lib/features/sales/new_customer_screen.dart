@@ -71,7 +71,6 @@ class _NewCustomerScreenState extends State<NewCustomerScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            
             const SizedBox(height: 14),
             WhitePanel(
               child: Column(

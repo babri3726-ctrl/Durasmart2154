@@ -7,13 +7,13 @@ import 'package:provider/provider.dart';
 Widget _wrap(Widget child, MockRepository repo) =>
     ChangeNotifierProvider<MockRepository>.value(
       value: repo,
-      child: MaterialApp(
-        home: child,
-      ),
+      child: MaterialApp(home: child),
     );
 
 void main() {
-  testWidgets('StockHomeScreen renders tabs, 1-Click Sync, and KPIs', (tester) async {
+  testWidgets('StockHomeScreen renders tabs, 1-Click Sync, and KPIs', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(411, 891);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);

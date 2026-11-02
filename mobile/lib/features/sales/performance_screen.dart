@@ -236,54 +236,74 @@ class PerformanceScreen extends StatelessWidget {
           subtitle: 'Punjab & Haryana territory check',
         ),
         const SizedBox(height: 10),
-        ...repo.salesTargets.map((t) => Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.line),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Text(
-                      t.partyName,
-                      style: AppText.body.copyWith(fontWeight: FontWeight.bold),
+        ...repo.salesTargets.map(
+          (t) => Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.line),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        t.partyName,
+                        style: AppText.body.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
-                  ),
-                  Text(
-                    t.state,
-                    style: AppText.caption,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                t.station + ' • Rep: ' + t.salesperson,
-                style: AppText.caption,
-              ),
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 12,
-                runSpacing: 4,
-                children: [
-                  Text('Target: ' + t.targetMt + ' MT', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-                  Text('Dispatched: ' + t.dispatchedMt + ' MT', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.green)),
-                  Text('Pending: ' + t.pendingMt + ' MT', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.orange)),
-                ],
-              ),
-            ],
+                    Text(t.state, style: AppText.caption),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  t.station + ' • Rep: ' + t.salesperson,
+                  style: AppText.caption,
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 4,
+                  children: [
+                    Text(
+                      'Target: ' + t.targetMt + ' MT',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      'Dispatched: ' + t.dispatchedMt + ' MT',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.green,
+                      ),
+                    ),
+                    Text(
+                      'Pending: ' + t.pendingMt + ' MT',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.orange,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        )),
+        ),
       ],
     );
   }
-
 }
 
 class _SalespersonDetailScreen extends StatelessWidget {

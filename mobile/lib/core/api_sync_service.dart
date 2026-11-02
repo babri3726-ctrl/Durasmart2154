@@ -5,20 +5,24 @@ import 'dart:io';
 class ApiSyncService {
   /// Allows injecting a backend host at compile time via:
   /// flutter build apk --dart-define=BACKEND_URL=http://100.x.y.z:8010
-  static const String envBackendUrl = String.fromEnvironment('BACKEND_URL', defaultValue: '');
+  static const String envBackendUrl = String.fromEnvironment(
+    'BACKEND_URL',
+    defaultValue: '',
+  );
 
   /// Runtime custom host entered by the user (e.g. Tailscale IP, Cloudflare Tunnel, or LAN IP)
   static String? userCustomHost;
 
   /// Ordered list of candidate hosts to probe for live connectivity
   static List<String> get candidateHosts => [
-    if (userCustomHost != null && userCustomHost!.trim().isNotEmpty) userCustomHost!.trim(),
+    if (userCustomHost != null && userCustomHost!.trim().isNotEmpty)
+      userCustomHost!.trim(),
     if (envBackendUrl.isNotEmpty) envBackendUrl.trim(),
     'https://durasmart2154.onrender.com', // Permanent 24/7 Cloud Backend (Render.com)
-    'http://100.95.241.124:8010',         // Tailscale Mesh IP
-    'http://192.168.29.86:8010',          // Local WiFi LAN IP
-    'http://10.0.2.2:8010',               // Android Emulator Host Loopback
-    'http://127.0.0.1:8010',              // Localhost
+    'http://100.95.241.124:8010', // Tailscale Mesh IP
+    'http://192.168.29.86:8010', // Local WiFi LAN IP
+    'http://10.0.2.2:8010', // Android Emulator Host Loopback
+    'http://127.0.0.1:8010', // Localhost
     'http://localhost:8010',
   ];
 
@@ -39,14 +43,20 @@ class ApiSyncService {
   }
 
   /// The host currently in use
-  static String? get currentHost => _cachedWorkingHost ?? userCustomHost ?? (envBackendUrl.isNotEmpty ? envBackendUrl : null);
+  static String? get currentHost =>
+      _cachedWorkingHost ??
+      userCustomHost ??
+      (envBackendUrl.isNotEmpty ? envBackendUrl : null);
 
   /// Discovers which host is currently reachable.
   static Future<String?> resolveWorkingHost() async {
     if (_cachedWorkingHost != null) {
       try {
-        final client = HttpClient()..connectionTimeout = const Duration(milliseconds: 1000);
-        final req = await client.getUrl(Uri.parse('$_cachedWorkingHost/api/v1/stock/summary'));
+        final client = HttpClient()
+          ..connectionTimeout = const Duration(milliseconds: 1000);
+        final req = await client.getUrl(
+          Uri.parse('$_cachedWorkingHost/api/v1/stock/summary'),
+        );
         final resp = await req.close();
         if (resp.statusCode == 200) return _cachedWorkingHost;
       } catch (_) {}
@@ -54,8 +64,11 @@ class ApiSyncService {
 
     for (final host in candidateHosts) {
       try {
-        final client = HttpClient()..connectionTimeout = const Duration(milliseconds: 1200);
-        final req = await client.getUrl(Uri.parse('$host/api/v1/stock/summary'));
+        final client = HttpClient()
+          ..connectionTimeout = const Duration(milliseconds: 1200);
+        final req = await client.getUrl(
+          Uri.parse('$host/api/v1/stock/summary'),
+        );
         final resp = await req.close();
         if (resp.statusCode == 200) {
           _cachedWorkingHost = host;
@@ -71,7 +84,8 @@ class ApiSyncService {
     try {
       final host = await resolveWorkingHost();
       if (host == null) return false;
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 4);
       final req = await client.postUrl(Uri.parse('$host/api/v1/orders'));
       req.headers.contentType = ContentType.json;
       req.write(jsonEncode(orderPayload));
@@ -87,7 +101,8 @@ class ApiSyncService {
     try {
       final host = await resolveWorkingHost();
       if (host == null) return false;
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 4);
       final req = await client.postUrl(Uri.parse('$host/api/v1/debtors'));
       req.headers.contentType = ContentType.json;
       req.write(jsonEncode(debtorPayload));
@@ -103,7 +118,8 @@ class ApiSyncService {
     try {
       final host = await resolveWorkingHost();
       if (host == null) return false;
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 4);
       final req = await client.postUrl(Uri.parse('$host/api/v1/payments'));
       req.headers.contentType = ContentType.json;
       req.write(jsonEncode(paymentPayload));

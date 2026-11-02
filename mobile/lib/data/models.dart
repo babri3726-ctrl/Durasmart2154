@@ -377,7 +377,6 @@ class AppNotification {
   bool read;
 }
 
-
 class DebtorItem {
   DebtorItem({
     required this.id,
@@ -417,15 +416,15 @@ class DebtorItem {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'state': state,
-        'city': city,
-        'district': district,
-        'salesperson': salesperson,
-        'balance': balance,
-        'status': status,
-      };
+    'id': id,
+    'name': name,
+    'state': state,
+    'city': city,
+    'district': district,
+    'salesperson': salesperson,
+    'balance': balance,
+    'status': status,
+  };
 }
 
 class SalesTargetItem {
@@ -455,7 +454,8 @@ class SalesTargetItem {
     return SalesTargetItem(
       id: json['id']?.toString() ?? '',
       state: json['state']?.toString() ?? '',
-      partyName: json['party_name']?.toString() ?? json['partyName']?.toString() ?? '',
+      partyName:
+          json['party_name']?.toString() ?? json['partyName']?.toString() ?? '',
       station: json['station']?.toString() ?? '',
       district: json['district']?.toString() ?? '',
       salesperson: json['salesperson']?.toString() ?? 'Unassigned',
