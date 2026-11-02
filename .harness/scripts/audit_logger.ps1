@@ -25,8 +25,8 @@ if (Test-Path $redactorScript) {
     function Redact-Secrets($s) { return $s }
 }
 
-$cleanCommand = Redact-Secrets $Command
-$cleanDetails = Redact-Secrets $Details
+$cleanCommand = Redact-Secrets -InputText $Command
+$cleanDetails = if ([string]::IsNullOrEmpty($Details)) { "" } else { Redact-Secrets -InputText $Details }
 $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 $status = if ($ExitCode -eq 0) { "SUCCESS" } else { "FAILURE" }
 

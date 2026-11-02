@@ -5,9 +5,14 @@
 #>
 function Redact-Secrets {
     param(
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true)]
-        [string]$InputText
+        [AllowEmptyString()]
+        [Parameter(Mandatory=$false, ValueFromPipeline=$true)]
+        [string]$InputText = ""
     )
+
+    if ([string]::IsNullOrEmpty($InputText)) {
+        return ""
+    }
 
     $patterns = @(
         'ghp_[a-zA-Z0-9]{30,}',

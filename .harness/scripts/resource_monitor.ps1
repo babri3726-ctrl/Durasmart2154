@@ -8,7 +8,8 @@ param(
     [ValidateSet('acquire', 'release', 'check', 'status')]
     [string]$Action = 'check',
 
-    [int]$MinFreeRamMB = 1024
+    [int]$MinFreeRamMB = 1024,
+    [int]$ProcessId = 0
 )
 
 $repoRoot = (git rev-parse --show-toplevel).Trim()
@@ -37,10 +38,8 @@ switch ($Action) {
         exit 0
     }
     'acquire' {
-        # Check memory first
         if (-not (Test-MemoryAdequate)) { exit 1 }
         
-        # Check lock
         if (Test-Path $lockFile) {
             $lockContent = Get-Content $lockFile -Raw
             try {
@@ -58,13 +57,13 @@ switch ($Action) {
             }
         }
         
-        $myPid = $PID
+        $targetPid = if ($ProcessId -gt 0) { $ProcessId } else { $PID }
         $lockPayload = @{
-            pid = $myPid
+            pid = $targetPid
             acquired_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
         } | ConvertTo-Json
         Set-Content -Path $lockFile -Value $lockPayload -Encoding UTF8
-        Write-Output "[LOCK_ACQUIRED] Process PID $myPid holds agent lock."
+        Write-Output "[LOCK_ACQUIRED] Process PID $targetPid holds agent lock."
         exit 0
     }
     'release' {
