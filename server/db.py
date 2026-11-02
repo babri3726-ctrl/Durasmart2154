@@ -115,6 +115,24 @@ def init_db(seed_state: dict[str, Any] | None = None):
             source TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS stock_movements (
+            id TEXT PRIMARY KEY,
+            product_id TEXT NOT NULL,
+            sku TEXT DEFAULT '',
+            product_name TEXT DEFAULT '',
+            kind TEXT NOT NULL,
+            delta_quantity TEXT NOT NULL,
+            unit TEXT DEFAULT 'MT',
+            batch_no TEXT DEFAULT '',
+            warehouse TEXT DEFAULT '',
+            reference TEXT DEFAULT '',
+            reason TEXT DEFAULT '',
+            movement_date TEXT NOT NULL,
+            source TEXT DEFAULT '',
+            source_ref TEXT DEFAULT '',
+            created_at TEXT NOT NULL
+        );
         """)
 
         # Schema migrations
@@ -756,6 +774,8 @@ def load_all_persisted_state() -> dict[str, Any]:
                     else:
                         cust["advancePaise"] = cust.get("advancePaise", 0) + ob["amountPaise"]
 
+        stock_movements = load_stock_movements()
+
         return {
             "debtors": debtors,
             "customers": customers,
@@ -763,7 +783,63 @@ def load_all_persisted_state() -> dict[str, Any]:
             "payments": payments,
             "dispatches": dispatches,
             "opening_balances": opening_balances,
+            "stock_movements": stock_movements,
         }
+
+def save_stock_movement(entry: dict[str, Any]) -> dict[str, Any]:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO stock_movements (
+                id, product_id, sku, product_name, kind, delta_quantity,
+                unit, batch_no, warehouse, reference, reason, movement_date,
+                source, source_ref, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            entry.get("id", ""),
+            entry.get("productId", ""),
+            entry.get("sku", ""),
+            entry.get("productName", ""),
+            entry.get("kind", "dispatch"),
+            str(entry.get("deltaQuantity", "0.000")),
+            entry.get("unit", "MT"),
+            entry.get("batchNo", ""),
+            entry.get("warehouse", ""),
+            entry.get("reference", ""),
+            entry.get("reason", ""),
+            entry.get("movementDate", datetime.now().strftime("%Y-%m-%d")),
+            entry.get("source", "dispatch"),
+            entry.get("sourceRef", ""),
+            entry.get("createdAt", datetime.now().isoformat())
+        ))
+        conn.commit()
+        return entry
+
+def load_stock_movements() -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM stock_movements ORDER BY created_at DESC")
+        rows = cursor.fetchall()
+        result = []
+        for r in rows:
+            result.append({
+                "id": r["id"],
+                "productId": r["product_id"],
+                "sku": r["sku"],
+                "productName": r["product_name"],
+                "kind": r["kind"],
+                "deltaQuantity": r["delta_quantity"],
+                "unit": r["unit"],
+                "batchNo": r["batch_no"],
+                "warehouse": r["warehouse"],
+                "reference": r["reference"],
+                "reason": r["reason"],
+                "movementDate": r["movement_date"],
+                "source": r["source"],
+                "sourceRef": r["source_ref"],
+                "createdAt": r["created_at"]
+            })
+        return result
 
 def save_opening_balance(entry: dict[str, Any]) -> dict[str, Any]:
     with get_connection() as conn:

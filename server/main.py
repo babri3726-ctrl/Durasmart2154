@@ -233,6 +233,8 @@ try:
         STATE["dispatches"] = _persisted["dispatches"]
     if _persisted.get("opening_balances"):
         STATE["opening_balances"] = _persisted["opening_balances"]
+    if _persisted.get("stock_movements"):
+        STATE["stock_movements"] = _persisted["stock_movements"]
     if _persisted.get("debtors"):
         _existing_d_ids = {d["id"] for d in STATE.get("debtors", [])}
         for _d in _persisted["debtors"]:
@@ -2191,7 +2193,7 @@ def create_dispatch(
     # Record stock movement out
     movs = STATE.setdefault("stock_movements", [])
     for cl in created_lines:
-        movs.insert(0, {
+        mov_entry = {
             "id": f"MOV-{len(movs) + 1:04d}",
             "productId": cl.get("productId", "PRD-CUSTOM"),
             "sku": cl.get("productId", "PRD-CUSTOM"),
@@ -2207,7 +2209,9 @@ def create_dispatch(
             "source": "dispatch",
             "sourceRef": dispatch_entry["id"],
             "createdAt": datetime.now().isoformat() + "+05:30"
-        })
+        }
+        movs.insert(0, mov_entry)
+        db.save_stock_movement(mov_entry)
 
     return dispatch_entry
 
@@ -2307,7 +2311,7 @@ def void_dispatch(
     movs = STATE.setdefault("stock_movements", [])
     today_str = datetime.now().strftime("%Y-%m-%d")
     for dl in dsp.get("lines", []):
-        movs.insert(0, {
+        mov_entry = {
             "id": f"MOV-{len(movs) + 1:04d}",
             "productId": dl.get("productId", "PRD-CUSTOM"),
             "sku": dl.get("productId", "PRD-CUSTOM"),
@@ -2323,7 +2327,9 @@ def void_dispatch(
             "source": "void_dispatch",
             "sourceRef": dsp["id"],
             "createdAt": datetime.now().isoformat() + "+05:30"
-        })
+        }
+        movs.insert(0, mov_entry)
+        db.save_stock_movement(mov_entry)
 
     db.save_dispatch(dsp)
     return dsp
@@ -3695,11 +3701,14 @@ def get_stock_balances(q: str | None = None, page: int = 1, pageSize: int = 20):
 
 @app.get("/api/v1/stock/movements")
 def get_stock_movements(page: int = 1, pageSize: int = 20):
+    movs = STATE.get("stock_movements", [])
+    start = (page - 1) * pageSize
+    end = start + pageSize
     return {
-        "items": [],
+        "items": movs[start:end],
         "page": page,
         "pageSize": pageSize,
-        "total": 0,
+        "total": len(movs),
         "nextCursor": None
     }
 

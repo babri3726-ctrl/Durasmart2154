@@ -235,5 +235,110 @@ class TestServerApi(unittest.TestCase):
         cc = r.headers.get("cache-control", "").lower()
         self.assertTrue("no-cache" in cc or "no-store" in cc, f"Cache-Control must be set to no-cache, got {cc}")
 
+    def test_12_dispatch_crud_order_flow_and_stock_movements(self):
+        # Create an order first
+        order_payload = {
+            "customer_id": "DEBTOR-HR-001",
+            "date": "2026-11-02",
+            "lines": [
+                {
+                    "product": "Steel Material",
+                    "quantity": "10.000",
+                    "unit": "MT",
+                    "rate": 50000.0
+                }
+            ],
+            "notes": "Test Order for Dispatch"
+        }
+        res_o = self.client.post("/api/v1/orders", json=order_payload)
+        self.assertEqual(res_o.status_code, 200)
+        order = res_o.json()
+        order_id = order["id"]
+
+        # 1. Partial dispatch 4.000 MT
+        disp_payload = {
+            "orderId": order_id,
+            "dispatchDate": "2026-11-02",
+            "vehicle": "PB 10 CT 1122",
+            "driver": "Driver A",
+            "transportName": "Express",
+            "notes": "First partial load",
+            "lines": [
+                {
+                    "orderLineId": 1,
+                    "quantity": "4.000",
+                    "unit": "MT",
+                    "warehouse": "Main Yard"
+                }
+            ]
+        }
+        res_d1 = self.client.post("/api/v1/dispatches", json=disp_payload)
+        self.assertEqual(res_d1.status_code, 200)
+        disp1 = res_d1.json()
+        disp1_id = disp1["id"]
+
+        # Check order status is now partial
+        res_o_check = self.client.get(f"/api/v1/orders/{order_id}")
+        self.assertEqual(res_o_check.status_code, 200)
+        o_data = res_o_check.json()
+        self.assertEqual(o_data["dispatchStatus"], "partial")
+        self.assertEqual(o_data["dispatchedQuantity"], "4.000")
+        self.assertEqual(o_data["lines"][0]["remainingQuantity"], "6.000")
+
+        # Check stock movements
+        res_mov = self.client.get("/api/v1/stock/movements")
+        self.assertEqual(res_mov.status_code, 200)
+        mov_data = res_mov.json()
+        self.assertGreaterEqual(mov_data["total"], 1)
+        latest_mov = mov_data["items"][0]
+        self.assertEqual(latest_mov["kind"], "dispatch")
+        self.assertEqual(latest_mov["deltaQuantity"], "-4.000")
+
+        # 2. Void dispatch and ensure stock and order are restored
+        res_void = self.client.post(f"/api/v1/dispatches/{disp1_id}/void")
+        self.assertEqual(res_void.status_code, 200)
+
+        # Check order restored to pending
+        res_o_restored = self.client.get(f"/api/v1/orders/{order_id}")
+        o_restored = res_o_restored.json()
+        self.assertEqual(o_restored["dispatchStatus"], "pending")
+        self.assertEqual(o_restored["dispatchedQuantity"], "0.000")
+        self.assertEqual(o_restored["lines"][0]["remainingQuantity"], "10.000")
+
+        # Check reversing stock movement
+        res_mov2 = self.client.get("/api/v1/stock/movements")
+        mov2_data = res_mov2.json()
+        self.assertEqual(mov2_data["items"][0]["kind"], "void_dispatch")
+        self.assertEqual(mov2_data["items"][0]["deltaQuantity"], "+4.000")
+
+    def test_13_opening_balances_ledger_and_targets(self):
+        cust_id = "DEBTOR-HR-001"
+        # 1. Add opening balance
+        ob_payload = {
+            "asOf": "2026-04-01",
+            "amountPaise": 5000000,
+            "direction": "owes",
+            "source": "manual"
+        }
+        res_ob = self.client.post(f"/api/v1/customers/{cust_id}/opening-balances", json=ob_payload)
+        self.assertEqual(res_ob.status_code, 200)
+        ob_data = res_ob.json()
+        self.assertEqual(ob_data["amountPaise"], 5000000)
+
+        # 2. Get customer ledger
+        res_ledg = self.client.get(f"/api/v1/customers/{cust_id}/ledger")
+        self.assertEqual(res_ledg.status_code, 200)
+        ledger = res_ledg.json()
+        self.assertIn("items", ledger)
+        self.assertIn("total", ledger)
+        self.assertGreaterEqual(ledger["total"], 1)
+        self.assertIn("balancePaise", ledger["items"][0])
+
+        # 3. Targets endpoint
+        res_t = self.client.get("/api/v1/targets")
+        self.assertEqual(res_t.status_code, 200)
+        t_data = res_t.json()
+        self.assertIn("items", t_data)
+
 if __name__ == '__main__':
     unittest.main()
