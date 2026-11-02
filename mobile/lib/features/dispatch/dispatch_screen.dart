@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../data/mock_repository.dart';
 import '../../data/models.dart';
 import '../../core/formatters.dart';
+import '../../core/api_sync_service.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 
@@ -192,6 +193,26 @@ class _DispatchScreenState extends State<DispatchScreen> {
       notes: _notes.text.trim(),
       photos: _photos,
     );
+
+    // Asynchronously synchronize dispatch to FastAPI backend cloud & local server
+    ApiSyncService.postDispatch({
+      'orderId': order.id,
+      'dispatchDate': _dispatchDate.toIso8601String().split('T').first,
+      'vehicle': _vehicle.text.trim(),
+      'driver': _driver.text.trim(),
+      'transportName': _transport.text.trim(),
+      'notes': _notes.text.trim(),
+      'lines': lines
+          .map(
+            (l) => {
+              'product': l.product,
+              'quantity': l.quantity.toStringAsFixed(3),
+              'unit': l.unit,
+            },
+          )
+          .toList(),
+    });
+
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(

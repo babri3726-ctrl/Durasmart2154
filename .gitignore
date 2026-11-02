@@ -43,3 +43,9 @@ Thumbs.db
 worktrees
 worktrees/
 
+# Harness local state
+.harness/*.json
+.harness/*.log
+!.harness/agy.version
+
+

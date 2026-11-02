@@ -105,13 +105,52 @@ def init_db(seed_state: dict[str, Any] | None = None):
             quantity TEXT NOT NULL,
             unit TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS opening_balances (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id TEXT NOT NULL,
+            as_of TEXT NOT NULL,
+            amount_paise INTEGER NOT NULL,
+            direction TEXT NOT NULL,
+            source TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
         """)
 
-        # Schema migrations for payments
-        try:
-            conn.execute("ALTER TABLE payments ADD COLUMN voided_at TEXT")
-        except Exception:
-            pass
+        # Schema migrations
+        for query in [
+            "ALTER TABLE payments ADD COLUMN voided_at TEXT",
+            "ALTER TABLE orders ADD COLUMN dispatch_status TEXT DEFAULT 'pending'",
+            "ALTER TABLE orders ADD COLUMN dispatched_quantity TEXT DEFAULT '0.000'",
+            "ALTER TABLE orders ADD COLUMN dispatch_count INTEGER DEFAULT 0",
+            "ALTER TABLE orders ADD COLUMN last_dispatch_date TEXT DEFAULT ''",
+            "ALTER TABLE order_lines ADD COLUMN dispatched_quantity TEXT DEFAULT '0.000'",
+            "ALTER TABLE dispatches ADD COLUMN number TEXT DEFAULT ''",
+            "ALTER TABLE dispatches ADD COLUMN customer_name TEXT DEFAULT ''",
+            "ALTER TABLE dispatches ADD COLUMN driver_phone TEXT DEFAULT ''",
+            "ALTER TABLE dispatches ADD COLUMN delivery_status TEXT DEFAULT 'pending'",
+            "ALTER TABLE dispatches ADD COLUMN delivered_at TEXT",
+            "ALTER TABLE dispatches ADD COLUMN version INTEGER DEFAULT 1",
+            "ALTER TABLE dispatches ADD COLUMN source TEXT DEFAULT 'panel'",
+            "ALTER TABLE dispatches ADD COLUMN source_ref TEXT",
+            "ALTER TABLE dispatches ADD COLUMN created_by TEXT",
+            "ALTER TABLE dispatches ADD COLUMN created_by_name TEXT",
+            "ALTER TABLE dispatches ADD COLUMN voided_at TEXT",
+            "ALTER TABLE dispatches ADD COLUMN voided_by TEXT",
+            "ALTER TABLE dispatches ADD COLUMN voided_by_name TEXT",
+            "ALTER TABLE dispatches ADD COLUMN reviewed_at TEXT",
+            "ALTER TABLE dispatches ADD COLUMN reviewed_by TEXT",
+            "ALTER TABLE dispatches ADD COLUMN reviewed_by_name TEXT",
+            "ALTER TABLE dispatches ADD COLUMN line_count INTEGER DEFAULT 0",
+            "ALTER TABLE dispatch_lines ADD COLUMN order_line_id INTEGER DEFAULT 0",
+            "ALTER TABLE dispatch_lines ADD COLUMN product_id TEXT DEFAULT ''",
+            "ALTER TABLE dispatch_lines ADD COLUMN batch_no TEXT DEFAULT ''",
+            "ALTER TABLE dispatch_lines ADD COLUMN warehouse TEXT DEFAULT ''",
+        ]:
+            try:
+                conn.execute(query)
+            except Exception:
+                pass
 
         # Check if parties table is empty and seed if available
         cur = conn.cursor()
@@ -208,9 +247,10 @@ def get_next_order_number() -> str:
 def get_next_order_id() -> str:
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) as count FROM orders")
-        cnt = cur.fetchone()["count"]
-        return f"ORD-{cnt + 1001}"
+        cur.execute("SELECT MAX(CAST(SUBSTR(id, 5) AS INTEGER)) as max_num FROM orders")
+        row = cur.fetchone()
+        next_num = (row["max_num"] or 0) + 1 if row else 1
+        return f"ORD-{next_num:04d}"
 
 def save_order(order: dict[str, Any]) -> dict[str, Any]:
     """Persists order and lines to SQLite. Handles slip image saving and party upsert."""
@@ -253,8 +293,9 @@ def save_order(order: dict[str, Any]) -> dict[str, Any]:
             """
             INSERT OR REPLACE INTO orders 
             (id, order_number, customer_id, customer_name, salesperson_name, salesperson_id, state, 
-             order_date, due_date, expected_dispatch_date, payment_terms, status, notes, slip_image_url, total_paise, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             order_date, due_date, expected_dispatch_date, payment_terms, status, notes, slip_image_url, total_paise,
+             dispatch_status, dispatched_quantity, dispatch_count, last_dispatch_date, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 order_id,
@@ -272,6 +313,10 @@ def save_order(order: dict[str, Any]) -> dict[str, Any]:
                 order.get("notes", ""),
                 slip_url,
                 total_paise,
+                order.get("dispatchStatus", "pending"),
+                order.get("dispatchedQuantity", "0.000"),
+                order.get("dispatchCount", 0),
+                order.get("lastDispatchDate", ""),
                 now,
             ),
         )
@@ -282,8 +327,8 @@ def save_order(order: dict[str, Any]) -> dict[str, Any]:
         for idx, line in enumerate(lines):
             conn.execute(
                 """
-                INSERT INTO order_lines (order_id, line_no, product, quantity, unit, rate_paise, amount_paise)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO order_lines (order_id, line_no, product, quantity, unit, rate_paise, amount_paise, dispatched_quantity)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     order_id,
@@ -293,6 +338,7 @@ def save_order(order: dict[str, Any]) -> dict[str, Any]:
                     line.get("unit", "MT"),
                     int(line.get("ratePaise", 0)),
                     int(line.get("amountPaise") or line.get("valuePaise", 0)),
+                    str(line.get("dispatchedQuantity", "0.000")),
                 ),
             )
         conn.commit()
@@ -424,21 +470,40 @@ def save_dispatch(dispatch: dict[str, Any]) -> dict[str, Any]:
         conn.execute(
             """
             INSERT OR REPLACE INTO dispatches 
-            (id, order_id, order_number, customer_id, dispatch_date, vehicle_number, driver_name, transport_name, notes, slip_image_url, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, number, order_id, order_number, customer_id, customer_name, dispatch_date, vehicle_number, driver_name, driver_phone,
+             transport_name, notes, delivery_status, delivered_at, version, source, source_ref, created_by, created_by_name,
+             voided_at, voided_by, voided_by_name, reviewed_at, reviewed_by, reviewed_by_name, line_count, slip_image_url, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 dispatch_id,
+                dispatch.get("number") or f"DSP-2026-{dispatch_id}",
                 dispatch.get("orderId", ""),
                 dispatch.get("orderNumber", ""),
                 dispatch.get("customerId", ""),
+                dispatch.get("customerName", ""),
                 dispatch.get("dispatchDate", now[:10]),
-                dispatch.get("vehicleNumber", ""),
-                dispatch.get("driverName", ""),
+                dispatch.get("vehicleNumber") or dispatch.get("vehicle", ""),
+                dispatch.get("driverName") or dispatch.get("driver", ""),
+                dispatch.get("driverPhone", ""),
                 dispatch.get("transportName", ""),
                 dispatch.get("notes", ""),
+                dispatch.get("deliveryStatus", "pending"),
+                dispatch.get("deliveredAt"),
+                dispatch.get("version", 1),
+                dispatch.get("source", "panel"),
+                dispatch.get("sourceRef"),
+                dispatch.get("createdBy"),
+                dispatch.get("createdByName"),
+                dispatch.get("voidedAt"),
+                dispatch.get("voidedBy"),
+                dispatch.get("voidedByName"),
+                dispatch.get("reviewedAt"),
+                dispatch.get("reviewedBy"),
+                dispatch.get("reviewedByName"),
+                len(dispatch.get("lines", [])),
                 dispatch.get("slipImageUrl"),
-                now,
+                dispatch.get("createdAt", now),
             ),
         )
 
@@ -446,15 +511,19 @@ def save_dispatch(dispatch: dict[str, Any]) -> dict[str, Any]:
         for idx, line in enumerate(dispatch.get("lines", [])):
             conn.execute(
                 """
-                INSERT INTO dispatch_lines (dispatch_id, line_no, product, quantity, unit)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO dispatch_lines (dispatch_id, line_no, order_line_id, product_id, product, quantity, unit, batch_no, warehouse)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     dispatch_id,
                     idx + 1,
-                    line.get("product", ""),
+                    int(line.get("orderLineId") or line.get("lineNo") or idx + 1),
+                    line.get("productId", "PRD-CUSTOM"),
+                    line.get("product") or line.get("productName", ""),
                     str(line.get("quantity", "0.000")),
                     line.get("unit", "MT"),
+                    line.get("batchNo", ""),
+                    line.get("warehouse", ""),
                 ),
             )
         conn.commit()
@@ -462,7 +531,7 @@ def save_dispatch(dispatch: dict[str, Any]) -> dict[str, Any]:
     return dispatch
 
 def load_all_persisted_state() -> dict[str, Any]:
-    """Hydrates orders, debtors, customers, payments from SQLite."""
+    """Hydrates orders, debtors, customers, payments, dispatches, opening balances from SQLite."""
     with get_connection() as conn:
         # Load parties
         cur = conn.cursor()
@@ -532,14 +601,19 @@ def load_all_persisted_state() -> dict[str, Any]:
                     "unit": l["unit"],
                     "quantity": l["quantity"],
                     "orderedQuantity": l["quantity"],
-                    "dispatchedQuantity": "0.000",
-                    "remainingQuantity": l["quantity"],
+                    "dispatchedQuantity": l["dispatched_quantity"] if "dispatched_quantity" in l.keys() else "0.000",
+                    "remainingQuantity": str(max(0.0, float(l["quantity"]) - float(l["dispatched_quantity"] if "dispatched_quantity" in l.keys() else 0.0))),
                     "ratePaise": l["rate_paise"],
                     "amountPaise": l["amount_paise"],
                     "valuePaise": l["amount_paise"],
                 }
                 for l in line_rows
             ]
+
+            disp_status = o["dispatch_status"] if "dispatch_status" in o.keys() and o["dispatch_status"] else "pending"
+            disp_qty_str = o["dispatched_quantity"] if "dispatched_quantity" in o.keys() and o["dispatched_quantity"] else "0.000"
+            disp_cnt = o["dispatch_count"] if "dispatch_count" in o.keys() and o["dispatch_count"] is not None else 0
+            last_disp_date = o["last_dispatch_date"] if "last_dispatch_date" in o.keys() else ""
 
             orders.append({
                 "id": o["id"],
@@ -555,6 +629,10 @@ def load_all_persisted_state() -> dict[str, Any]:
                 "expectedDispatchDate": o["expected_dispatch_date"],
                 "paymentTerms": o["payment_terms"],
                 "status": o["status"],
+                "dispatchStatus": disp_status,
+                "dispatchedQuantity": disp_qty_str,
+                "dispatchCount": disp_cnt,
+                "lastDispatchDate": last_disp_date,
                 "notes": o["notes"],
                 "slipImageUrl": o["slip_image_url"],
                 "totalPaise": o["total_paise"],
@@ -593,9 +671,135 @@ def load_all_persisted_state() -> dict[str, Any]:
             for py in payment_rows
         ]
 
+        # Load dispatches and their lines
+        cur.execute("SELECT * FROM dispatches ORDER BY created_at DESC")
+        dispatch_rows = cur.fetchall()
+        dispatches = []
+        for d in dispatch_rows:
+            dsp_id = d["id"]
+            cur.execute("SELECT * FROM dispatch_lines WHERE dispatch_id = ? ORDER BY line_no ASC", (dsp_id,))
+            dl_rows = cur.fetchall()
+            d_lines = [
+                {
+                    "dispatchLineId": dl["line_no"],
+                    "orderLineId": dl["order_line_id"] if "order_line_id" in dl.keys() else dl["line_no"],
+                    "lineNo": dl["line_no"],
+                    "productId": dl["product_id"] if "product_id" in dl.keys() else "PRD-CUSTOM",
+                    "productName": dl["product"],
+                    "product": dl["product"],
+                    "quantity": dl["quantity"],
+                    "unit": dl["unit"],
+                    "batchNo": dl["batch_no"] if "batch_no" in dl.keys() else "",
+                    "warehouse": dl["warehouse"] if "warehouse" in dl.keys() else "",
+                }
+                for dl in dl_rows
+            ]
+
+            dispatches.append({
+                "id": d["id"],
+                "number": d["number"] if "number" in d.keys() and d["number"] else f"DSP-2026-{d['id']}",
+                "orderId": d["order_id"],
+                "orderNumber": d["order_number"],
+                "customerId": d["customer_id"],
+                "customerName": d["customer_name"] if "customer_name" in d.keys() and d["customer_name"] else "",
+                "dispatchDate": d["dispatch_date"],
+                "vehicle": d["vehicle_number"] if "vehicle_number" in d.keys() else "",
+                "vehicleNumber": d["vehicle_number"] if "vehicle_number" in d.keys() else "",
+                "driver": d["driver_name"] if "driver_name" in d.keys() else "",
+                "driverName": d["driver_name"] if "driver_name" in d.keys() else "",
+                "driverPhone": d["driver_phone"] if "driver_phone" in d.keys() else "",
+                "transportName": d["transport_name"] if "transport_name" in d.keys() else "",
+                "notes": d["notes"] if "notes" in d.keys() else "",
+                "deliveryStatus": d["delivery_status"] if "delivery_status" in d.keys() and d["delivery_status"] else "pending",
+                "deliveredAt": d["delivered_at"] if "delivered_at" in d.keys() else None,
+                "version": d["version"] if "version" in d.keys() and d["version"] else 1,
+                "source": d["source"] if "source" in d.keys() and d["source"] else "panel",
+                "sourceRef": d["source_ref"] if "source_ref" in d.keys() else None,
+                "createdAt": d["created_at"],
+                "createdBy": d["created_by"] if "created_by" in d.keys() else None,
+                "createdByName": d["created_by_name"] if "created_by_name" in d.keys() else None,
+                "voidedAt": d["voided_at"] if "voided_at" in d.keys() else None,
+                "voidedBy": d["voided_by"] if "voided_by" in d.keys() else None,
+                "voidedByName": d["voided_by_name"] if "voided_by_name" in d.keys() else None,
+                "reviewedAt": d["reviewed_at"] if "reviewed_at" in d.keys() else None,
+                "reviewedBy": d["reviewed_by"] if "reviewed_by" in d.keys() else None,
+                "reviewedByName": d["reviewed_by_name"] if "reviewed_by_name" in d.keys() else None,
+                "lineCount": len(d_lines),
+                "lines": d_lines,
+            })
+
+        # Load opening balances
+        cur.execute("SELECT id, customer_id, as_of, amount_paise, direction, source, created_at FROM opening_balances ORDER BY id ASC")
+        ob_rows = cur.fetchall()
+        opening_balances: dict[str, list[dict[str, Any]]] = {}
+        for ob in ob_rows:
+            c_id = ob["customer_id"]
+            if c_id not in opening_balances:
+                opening_balances[c_id] = []
+            opening_balances[c_id].append({
+                "id": ob["id"],
+                "customerId": c_id,
+                "asOf": ob["as_of"],
+                "amountPaise": ob["amount_paise"],
+                "direction": ob["direction"],
+                "source": ob["source"],
+                "createdAt": ob["created_at"]
+            })
+
+        for cust in customers:
+            c_id = cust["id"]
+            if c_id in opening_balances:
+                for ob in opening_balances[c_id]:
+                    if ob["direction"] == "owes":
+                        cust["openingPaise"] = cust.get("openingPaise", 0) + ob["amountPaise"]
+                        cust["outstandingPaise"] = cust.get("outstandingPaise", 0) + ob["amountPaise"]
+                    else:
+                        cust["advancePaise"] = cust.get("advancePaise", 0) + ob["amountPaise"]
+
         return {
             "debtors": debtors,
             "customers": customers,
             "orders": orders,
             "payments": payments,
+            "dispatches": dispatches,
+            "opening_balances": opening_balances,
         }
+
+def save_opening_balance(entry: dict[str, Any]) -> dict[str, Any]:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            entry.get("customerId", ""),
+            entry.get("asOf", ""),
+            int(entry.get("amountPaise", 0)),
+            entry.get("direction", "owes"),
+            entry.get("source", "panel"),
+            entry.get("createdAt", datetime.now().isoformat())
+        ))
+        conn.commit()
+        entry["id"] = cursor.lastrowid
+        return entry
+
+def load_opening_balances() -> dict[str, list[dict[str, Any]]]:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, customer_id, as_of, amount_paise, direction, source, created_at FROM opening_balances ORDER BY id ASC")
+        rows = cursor.fetchall()
+        result: dict[str, list[dict[str, Any]]] = {}
+        for r in rows:
+            cust_id = r["customer_id"]
+            if cust_id not in result:
+                result[cust_id] = []
+            result[cust_id].append({
+                "id": r["id"],
+                "customerId": cust_id,
+                "asOf": r["as_of"],
+                "amountPaise": r["amount_paise"],
+                "direction": r["direction"],
+                "source": r["source"],
+                "createdAt": r["created_at"]
+            })
+        return result

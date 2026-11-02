@@ -14,7 +14,7 @@ from typing import Any
 
 from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -144,6 +144,9 @@ STATE = {
     "tours": [],
     "debtors": [],
     "targets": [],
+    "employee_targets": [],
+    "stock_movements": [],
+    "opening_balances": {},
     "hrpb_snapshot": None
 }
 
@@ -226,6 +229,10 @@ try:
         STATE["orders"] = _persisted["orders"]
     if _persisted.get("payments"):
         STATE["payments"] = _persisted["payments"]
+    if _persisted.get("dispatches"):
+        STATE["dispatches"] = _persisted["dispatches"]
+    if _persisted.get("opening_balances"):
+        STATE["opening_balances"] = _persisted["opening_balances"]
     if _persisted.get("debtors"):
         _existing_d_ids = {d["id"] for d in STATE.get("debtors", [])}
         for _d in _persisted["debtors"]:
@@ -778,6 +785,10 @@ def create_customer(body: dict[str, Any]):
         "approvedAt": datetime.now().isoformat() + "+05:30"
     }
     STATE["customers"].append(cust)
+    try:
+        db.save_party(cust)
+    except Exception as e:
+        print(f"Warning: Failed to save party to db: {e}")
     return cust
 
 @app.post("/api/v1/customers/{customer_id}/approve")
@@ -799,21 +810,173 @@ def reject_customer(customer_id: str):
     return cust
 
 @app.get("/api/v1/customers/{customer_id}/ledger")
-def get_customer_ledger(customer_id: str):
-    orders = [o for o in STATE.get("orders", []) if o.get("customerId") == customer_id]
-    entries = []
-    for idx, o in enumerate(orders):
+def get_customer_ledger(
+    customer_id: str,
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = None,
+    page: int = 1,
+    pageSize: int = 50
+):
+    cust = next((c for c in STATE.get("customers", []) if c["id"] == customer_id), None)
+    cust_name = cust.get("name", "").lower() if cust else ""
+
+    entries: list[dict[str, Any]] = []
+
+    # 1. Opening balances
+    obs = STATE.get("opening_balances", {}).get(customer_id, [])
+    for ob in obs:
+        is_owes = ob.get("direction") == "owes"
         entries.append({
+            "entryId": f"OB-{ob['id']}",
+            "entryDate": ob.get("asOf", "2026-04-01"),
+            "kind": "opening_balance",
+            "reference": "Opening Balance",
+            "orderId": None,
+            "debitPaise": ob["amountPaise"] if is_owes else 0,
+            "creditPaise": 0 if is_owes else ob["amountPaise"],
+            "source": ob.get("source", "panel")
+        })
+
+    # 2. Orders & Invoices
+    orders = [
+        o for o in STATE.get("orders", [])
+        if o.get("customerId") == customer_id or (cust_name and o.get("customerName", "").lower() == cust_name)
+    ]
+    for o in orders:
+        entries.append({
+            "entryId": f"ORD-{o['id']}",
             "entryDate": o.get("orderDate", "2026-10-26"),
             "kind": "invoice" if o.get("status") in ["confirmed", "dispatched"] else "order",
             "reference": o.get("number") or o["id"],
-            "entryId": f"ENT-{idx + 101}",
             "orderId": o["id"],
             "debitPaise": o.get("valuePaise", 0),
             "creditPaise": 0,
             "source": o.get("source", "panel")
         })
-    return entries
+
+    # 3. Payments
+    payments = [
+        p for p in STATE.get("payments", [])
+        if not p.get("voidedAt") and (p.get("customerId") == customer_id or (cust_name and p.get("customerName", "").lower() == cust_name))
+    ]
+    for p in payments:
+        entries.append({
+            "entryId": f"PAY-{p.get('id') or p.get('voucherNo')}",
+            "entryDate": p.get("paymentDate", p.get("date", "2026-10-26")),
+            "kind": "payment",
+            "reference": p.get("voucherNo") or p.get("reference") or "Payment Received",
+            "orderId": p.get("orderId"),
+            "debitPaise": 0,
+            "creditPaise": p.get("amountPaise", 0),
+            "source": p.get("source", "panel")
+        })
+
+    # Date filtering
+    if from_:
+        entries = [e for e in entries if e["entryDate"] >= from_]
+    if to:
+        entries = [e for e in entries if e["entryDate"] <= to]
+
+    # Chronological sort
+    entries.sort(key=lambda x: (x["entryDate"], x["entryId"]))
+
+    # Running balance
+    curr_bal = 0
+    for e in entries:
+        curr_bal += (e["debitPaise"] - e["creditPaise"])
+        e["balancePaise"] = curr_bal
+
+    total = len(entries)
+    start = (page - 1) * pageSize
+    end = start + pageSize
+    paginated = entries[start:end]
+
+    return {
+        "items": paginated,
+        "total": total,
+        "page": page,
+        "pageSize": pageSize
+    }
+
+class OpeningBalanceCreate(BaseModel):
+    asOf: str
+    amountPaise: int
+    direction: str = "owes"
+    source: str | None = "panel"
+
+@app.get("/api/v1/customers/{customer_id}/opening-balances")
+def get_customer_opening_balances(customer_id: str, page: int = 1, pageSize: int = 200):
+    obs = STATE.get("opening_balances", {}).get(customer_id, [])
+    start = (page - 1) * pageSize
+    end = start + pageSize
+    return {
+        "items": obs[start:end],
+        "total": len(obs),
+        "page": page,
+        "pageSize": pageSize,
+        "nextCursor": None
+    }
+
+@app.post("/api/v1/customers/{customer_id}/opening-balances")
+def create_customer_opening_balance(customer_id: str, body: OpeningBalanceCreate):
+    cust = next((c for c in STATE["customers"] if c["id"] == customer_id), None)
+    if not cust:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    if body.direction not in ("owes", "advance"):
+        raise HTTPException(status_code=422, detail="Direction must be owes or advance")
+
+    entry = {
+        "id": 0,
+        "customerId": customer_id,
+        "asOf": body.asOf,
+        "amountPaise": body.amountPaise,
+        "direction": body.direction,
+        "source": body.source or "panel",
+        "createdAt": datetime.now().isoformat() + "+05:30"
+    }
+
+    try:
+        entry = db.save_opening_balance(entry)
+    except Exception as e:
+        print(f"Warning: Failed to save opening balance to db: {e}")
+        entry["id"] = len(STATE.get("opening_balances", {}).get(customer_id, [])) + 1
+
+    if customer_id not in STATE.get("opening_balances", {}):
+        STATE.setdefault("opening_balances", {})[customer_id] = []
+    STATE["opening_balances"][customer_id].append(entry)
+
+    # Adjust customer opening balance figures
+    if body.direction == "owes":
+        cust["openingPaise"] = cust.get("openingPaise", 0) + body.amountPaise
+        cust["outstandingPaise"] = cust.get("outstandingPaise", 0) + body.amountPaise
+    else:
+        cust["advancePaise"] = cust.get("advancePaise", 0) + body.amountPaise
+
+    try:
+        db.save_party(cust)
+    except Exception:
+        pass
+
+    return entry
+
+@app.get("/api/v1/customers/{customer_id}/opening-balances/history")
+def get_customer_opening_balance_history(customer_id: str):
+    obs = STATE.get("opening_balances", {}).get(customer_id, [])
+    history = []
+    for ob in obs:
+        history.append({
+            "id": f"AUDIT-OB-{ob['id']}",
+            "at": ob["createdAt"],
+            "action": "opening_balance.created",
+            "actorKind": "owner",
+            "actorUserId": "USR-OWNER",
+            "actorName": "Owner Desk",
+            "recordType": "opening_balance",
+            "recordId": customer_id,
+            "summary": f"{ob['asOf']} {ob['direction']} {ob['amountPaise']}"
+        })
+    return history
 
 # ----------------- Debtors Master & Sales Targets Endpoints -----------------
 class DebtorCreate(BaseModel):
@@ -1057,6 +1220,102 @@ def list_provisional_runs(pageSize: int = 20):
         "pageSize": pageSize
     }
 
+@app.post("/api/v1/debtors/provisional/preview")
+def preview_provisional_debtors():
+    return {
+        "filename": "HR-PB.xlsx",
+        "fileSha256": "506a936b89c80ed3b0c74c2109a0ce547ef6eee32cf80a3587acba24ce83868a",
+        "sizeBytes": 102400,
+        "sheetName": "HR-PB",
+        "sheetNames": ["HR-PB"],
+        "label": "PROVISIONAL — NOT VERIFIED TALLY IDENTITIES",
+        "identityState": "provisional",
+        "headerRowNumber": 1,
+        "partyColumnLabel": "Party Name",
+        "debitColumnLabel": "Debit",
+        "creditColumnLabel": "Credit",
+        "ledgerIdColumnLabel": "Ledger ID",
+        "asOf": "2026-04-01",
+        "asOfVerified": False,
+        "asOfSource": "owner-selected",
+        "dateWarning": "The source workbook's reporting period is 1-Apr-26 to 31-Oct-26.",
+        "periodText": "1-Apr-26 to 31-Oct-26",
+        "partyRowCount": len(STATE.get("debtors", [])),
+        "storedCount": len(STATE.get("debtors", [])),
+        "newCount": 0,
+        "changedCount": 0,
+        "unchangedCount": len(STATE.get("debtors", [])),
+        "missingCount": 0,
+        "blockedRowCount": 0,
+        "conflictCount": 0,
+        "archivedCount": 0,
+        "rowsListed": len(STATE.get("debtors", [])),
+        "rowsTruncated": False,
+        "rows": [],
+        "warnings": [],
+        "blockers": [],
+        "syncAvailable": True,
+        "syncPreviewDigest": "506a936b89c80ed3b0c74c2109a0ce547ef6eee32cf80a3587acba24ce83868a",
+        "syncBlockedReason": "",
+        "businessRecordsCreated": False,
+        "databaseRowsWritten": False,
+        "verifiedDebtorRowsTouched": False,
+        "disclaimer": "Provisional unverified records"
+    }
+
+@app.post("/api/v1/debtors/provisional/sync")
+def sync_provisional_debtors():
+    return {
+        "batch": {
+            "id": "PROV-SYNC-001",
+            "state": "applied",
+            "appliedAt": datetime.now().isoformat() + "+05:30"
+        },
+        "databaseRowsWritten": True,
+        "businessRecordsCreated": False,
+        "verifiedDebtorRowsTouched": False
+    }
+
+@app.get("/api/v1/debtors/provisional/export")
+def export_provisional_debtors():
+    dealers = STATE.get("debtors", [])
+    csv_lines = ["Party Name,State,City,Balance,Salesperson"]
+    for d in dealers:
+        csv_lines.append(f"\"{d['name']}\",\"{d.get('state','')}\",\"{d.get('city','')}\",{d.get('balance',0.0)},\"{d.get('salesperson','')}\"")
+    return Response(content="\n".join(csv_lines), media_type="text/csv")
+
+@app.get("/api/v1/debtors/provisional/{source_ref}/history")
+def get_provisional_history(source_ref: str):
+    return {
+        "sourceRef": source_ref,
+        "history": []
+    }
+
+@app.post("/api/v1/debtors/provisional/{source_ref}/edit")
+@app.patch("/api/v1/debtors/provisional/{source_ref}")
+def edit_provisional(source_ref: str, body: dict[str, Any] | None = None):
+    return {"status": "ok", "sourceRef": source_ref}
+
+@app.post("/api/v1/debtors/provisional/{source_ref}/archive")
+def archive_provisional(source_ref: str):
+    return {"status": "archived", "sourceRef": source_ref}
+
+@app.post("/api/v1/debtors/provisional/{source_ref}/restore")
+def restore_provisional(source_ref: str):
+    return {"status": "restored", "sourceRef": source_ref}
+
+@app.post("/api/v1/debtors/provisional/{source_ref}/assignment")
+def assign_provisional(source_ref: str, body: dict[str, Any] | None = None):
+    return {"status": "assigned", "sourceRef": source_ref}
+
+@app.post("/api/v1/debtors/provisional/{source_ref}/review")
+def review_provisional(source_ref: str):
+    return {"status": "reviewed", "sourceRef": source_ref}
+
+@app.post("/api/v1/debtors/provisional/{source_ref}/conflict")
+def resolve_provisional_conflict(source_ref: str, body: dict[str, Any] | None = None):
+    return {"status": "resolved", "sourceRef": source_ref}
+
 # ----------------- 1-Click HR-PB Sales Targets & Dealers Sync -----------------
 @app.post("/api/v1/imports/excel/hr-pb/sync")
 def sync_hr_pb_excel():
@@ -1223,6 +1482,73 @@ def get_sales_targets(
         "synced_at": STATE.get("hrpb_snapshot", {}).get("synced_at", None)
     }
 
+class TargetUpsert(BaseModel):
+    employeeId: str
+    periodStart: str
+    periodEnd: str
+    productCategory: str | None = None
+    quantity: str
+    unit: str = "MT"
+
+@app.get("/api/v1/targets")
+def list_targets(
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = None,
+    employeeId: str | None = None,
+    page: int = 1,
+    pageSize: int = 50
+):
+    tgts = STATE.get("employee_targets", [])
+    if employeeId:
+        tgts = [t for t in tgts if t.get("employeeId") == employeeId]
+    if from_:
+        tgts = [t for t in tgts if t.get("periodStart", "") >= from_]
+    if to:
+        tgts = [t for t in tgts if t.get("periodEnd", "") <= to]
+    start = (page - 1) * pageSize
+    end = start + pageSize
+    return {
+        "items": tgts[start:end],
+        "total": len(tgts),
+        "page": page,
+        "pageSize": pageSize
+    }
+
+@app.put("/api/v1/targets")
+@app.post("/api/v1/targets")
+def put_target(body: TargetUpsert):
+    emp = next((e for e in STATE.get("employees", []) if e["id"] == body.employeeId), None)
+    emp_name = emp.get("name", "Employee") if emp else "Employee"
+
+    tgts = STATE.setdefault("employee_targets", [])
+    existing = next(
+        (t for t in tgts if t["employeeId"] == body.employeeId and t["periodStart"] == body.periodStart and t["periodEnd"] == body.periodEnd),
+        None
+    )
+    now_iso = datetime.now().isoformat() + "+05:30"
+    if existing:
+        existing["quantity"] = body.quantity
+        existing["unit"] = body.unit
+        existing["productCategory"] = body.productCategory
+        existing["updatedAt"] = now_iso
+        return existing
+
+    new_tgt = {
+        "id": f"TGT-{len(tgts) + 1:04d}",
+        "employeeId": body.employeeId,
+        "employeeName": emp_name,
+        "periodStart": body.periodStart,
+        "periodEnd": body.periodEnd,
+        "productCategory": body.productCategory,
+        "quantity": body.quantity,
+        "unit": body.unit,
+        "setBy": "USR-OWNER",
+        "createdAt": now_iso,
+        "updatedAt": now_iso
+    }
+    tgts.append(new_tgt)
+    return new_tgt
+
 @app.get("/api/v1/dashboard/financial-analytics")
 def get_financial_analytics():
     if not STATE.get("targets") and os.path.exists(DEFAULT_HRPB_PATH):
@@ -1362,7 +1688,10 @@ def get_orders(
     if salespersonId:
         items = [o for o in items if o.get("salespersonId") == salespersonId]
     if dispatchStatus:
-        items = [o for o in items if o.get("dispatchStatus") == dispatchStatus]
+        if dispatchStatus == "pending":
+            items = [o for o in items if o.get("dispatchStatus") in ["pending", None, ""]]
+        else:
+            items = [o for o in items if o.get("dispatchStatus") == dispatchStatus]
     if status:
         items = [o for o in items if o.get("status") == status]
     total = len(items)
@@ -1438,6 +1767,27 @@ def quick_dispatch_order(order_id: str, body: dict[str, Any] | None = None):
     STATE["dispatches"].insert(0, dispatch_entry)
     db.save_order(order)
     db.save_dispatch(dispatch_entry)
+
+    # Record stock movement out
+    movs = STATE.setdefault("stock_movements", [])
+    for pl in processed_lines:
+        movs.insert(0, {
+            "id": f"MOV-{len(movs) + 1:04d}",
+            "productId": pl.get("productId", "PRD-CUSTOM"),
+            "sku": pl.get("productId", "PRD-CUSTOM"),
+            "productName": pl.get("productName", "Steel Material"),
+            "kind": "dispatch",
+            "deltaQuantity": f"-{float(pl.get('quantity', 1.0)):.3f}",
+            "unit": pl.get("unit", "MT"),
+            "batchNo": "",
+            "warehouse": "Main Godown",
+            "reference": dsp_num,
+            "reason": f"Dispatched order {order.get('number') or order['id']}",
+            "movementDate": dispatch_date,
+            "source": "dispatch",
+            "sourceRef": dsp_id,
+            "createdAt": datetime.now().isoformat() + "+05:30"
+        })
 
     return order
 
@@ -1635,16 +1985,388 @@ def set_order_status(order_id: str, body: dict[str, Any]):
     return order
 
 # ----------------- Dispatches Endpoints -----------------
+class DispatchLineCreate(BaseModel):
+    orderLineId: int | None = None
+    productId: str | None = None
+    productName: str | None = None
+    product: str | None = None
+    quantity: str
+    unit: str = "MT"
+    batchNo: str | None = ""
+    warehouse: str | None = ""
+
+class DispatchCreate(BaseModel):
+    orderId: str
+    dispatchDate: str | None = None
+    vehicle: str | None = None
+    vehicleNumber: str | None = None
+    driver: str | None = None
+    driverName: str | None = None
+    driverPhone: str | None = None
+    transportName: str | None = None
+    notes: str | None = None
+    lines: list[DispatchLineCreate]
+
 @app.get("/api/v1/dispatches")
-def get_dispatches(page: int = 1, pageSize: int = 20):
+def get_dispatches(
+    orderId: str | None = None,
+    customerId: str | None = None,
+    q: str | None = None,
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = None,
+    deliveryStatus: str | None = None,
+    page: int = 1,
+    pageSize: int = 20
+):
     items = STATE["dispatches"]
+    if orderId:
+        items = [d for d in items if d.get("orderId") == orderId]
+    if customerId:
+        items = [d for d in items if d.get("customerId") == customerId]
+    if deliveryStatus:
+        items = [d for d in items if d.get("deliveryStatus") == deliveryStatus]
+    if from_:
+        items = [d for d in items if d.get("dispatchDate", "") >= from_]
+    if to:
+        items = [d for d in items if d.get("dispatchDate", "") <= to]
+    if q:
+        query = q.lower().strip()
+        items = [
+            d for d in items
+            if query in d.get("number", "").lower()
+            or query in d.get("customerName", "").lower()
+            or query in d.get("vehicle", "").lower()
+            or query in d.get("vehicleNumber", "").lower()
+            or query in d.get("driver", "").lower()
+            or query in d.get("driverName", "").lower()
+            or query in d.get("transportName", "").lower()
+        ]
+
+    total = len(items)
+    start = (page - 1) * pageSize
+    end = start + pageSize
+
     return {
-        "items": items,
+        "items": items[start:end],
         "page": page,
         "pageSize": pageSize,
-        "total": len(items),
+        "total": total,
         "nextCursor": None
     }
+
+@app.post("/api/v1/dispatches")
+def create_dispatch(
+    body: DispatchCreate,
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
+    x_user_id: str | None = Header(None, alias="X-User-Id")
+):
+    order = next((o for o in STATE["orders"] if o["id"] == body.orderId), None)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if order.get("status") in ["draft", "cancelled"]:
+        raise HTTPException(status_code=400, detail=f"Cannot dispatch an order in '{order.get('status')}' status.")
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    dispatch_date = body.dispatchDate or today_str
+    vehicle = (body.vehicle or body.vehicleNumber or "PB 10 CT 4421").strip()
+    driver = (body.driver or body.driverName or "Yard Driver").strip()
+    driver_phone = (body.driverPhone or "").strip()
+    transport_name = (body.transportName or "").strip()
+    notes = (body.notes or "").strip()
+
+    if not body.lines:
+        raise HTTPException(status_code=422, detail="Dispatch must contain at least one consignment line.")
+
+    created_lines = []
+    tot_dispatched_this_consignment = 0.0
+
+    for idx, dl in enumerate(body.lines):
+        match_ol = None
+        for ol in order.get("lines", []):
+            if dl.orderLineId and (ol.get("lineNo") == dl.orderLineId or ol.get("orderLineId") == dl.orderLineId):
+                match_ol = ol
+                break
+            prod_query = dl.product or dl.productName or dl.productId
+            if prod_query and (str(prod_query).lower() in (ol.get("productDescription") or ol.get("product") or "").lower() or (ol.get("productDescription") or ol.get("product") or "").lower() in str(prod_query).lower()):
+                match_ol = ol
+                break
+        if not match_ol and order.get("lines"):
+            match_ol = order["lines"][min(idx, len(order["lines"]) - 1)]
+
+        if not match_ol:
+            raise HTTPException(status_code=422, detail=f"Line reference {dl.orderLineId} not found in order.")
+
+        try:
+            req_qty = float(dl.quantity)
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid quantity '{dl.quantity}'. Must be decimal number.")
+
+        if req_qty <= 0:
+            raise HTTPException(status_code=422, detail="Dispatched quantity must be strictly greater than 0.")
+
+        rem_q = float(match_ol.get("remainingQuantity") or 0.0)
+        if req_qty > rem_q + 0.0001:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Line quantity ({req_qty:.3f}) exceeds remaining order balance ({rem_q:.3f}). Over-dispatch refused."
+            )
+
+        new_disp_q = float(match_ol.get("dispatchedQuantity") or 0.0) + req_qty
+        new_rem_q = max(0.0, rem_q - req_qty)
+        match_ol["dispatchedQuantity"] = f"{new_disp_q:.3f}"
+        match_ol["remainingQuantity"] = f"{new_rem_q:.3f}"
+        tot_dispatched_this_consignment += req_qty
+
+        created_lines.append({
+            "dispatchLineId": idx + 1,
+            "orderLineId": match_ol.get("lineNo", idx + 1),
+            "lineNo": idx + 1,
+            "productId": match_ol.get("productId", dl.productId or "PRD-CUSTOM"),
+            "productName": match_ol.get("productName", dl.productName or "Steel Material"),
+            "product": match_ol.get("productName", dl.productName or "Steel Material"),
+            "quantity": f"{req_qty:.3f}",
+            "unit": dl.unit or match_ol.get("unit", "MT"),
+            "batchNo": (dl.batchNo or "").strip(),
+            "warehouse": (dl.warehouse or "").strip(),
+        })
+
+    tot_dispatched = sum(float(l.get("dispatchedQuantity") or 0.0) for l in order.get("lines", []))
+    tot_remaining = sum(float(l.get("remainingQuantity") or 0.0) for l in order.get("lines", []))
+
+    order["dispatchedQuantity"] = f"{tot_dispatched:.3f}"
+    order["lastDispatchDate"] = dispatch_date
+    order["dispatchCount"] = order.get("dispatchCount", 0) + 1
+    order["version"] = order.get("version", 1) + 1
+
+    if tot_remaining <= 0.0001:
+        order["dispatchStatus"] = "dispatched"
+        order["status"] = "dispatched"
+    else:
+        order["dispatchStatus"] = "partial"
+
+    dsp_seq = len(STATE["dispatches"]) + 1
+    dsp_id = f"DSP-{dsp_seq:04d}"
+    dsp_num = f"DSP-2026-{dsp_seq:04d}"
+
+    current_user_name = "Managing Director (Owner)" if x_user_role == "owner" else "Yard Dispatch Desk"
+
+    dispatch_entry = {
+        "id": dsp_id,
+        "number": dsp_num,
+        "orderId": order["id"],
+        "orderNumber": order.get("number"),
+        "customerId": order.get("customerId"),
+        "customerName": order.get("customerName"),
+        "dispatchDate": dispatch_date,
+        "vehicle": vehicle,
+        "vehicleNumber": vehicle,
+        "driver": driver,
+        "driverName": driver,
+        "driverPhone": driver_phone,
+        "transportName": transport_name,
+        "notes": notes,
+        "deliveryStatus": "pending",
+        "deliveredAt": None,
+        "version": 1,
+        "source": "panel",
+        "sourceRef": None,
+        "createdAt": datetime.now().isoformat() + "+05:30",
+        "createdBy": x_user_id or "USR-DISPATCH",
+        "createdByName": current_user_name,
+        "voidedAt": None,
+        "voidedBy": None,
+        "voidedByName": None,
+        "reviewedAt": None,
+        "reviewedBy": None,
+        "reviewedByName": None,
+        "lineCount": len(created_lines),
+        "lines": created_lines
+    }
+
+    STATE["dispatches"].insert(0, dispatch_entry)
+    db.save_order(order)
+    db.save_dispatch(dispatch_entry)
+
+    # Record stock movement out
+    movs = STATE.setdefault("stock_movements", [])
+    for cl in created_lines:
+        movs.insert(0, {
+            "id": f"MOV-{len(movs) + 1:04d}",
+            "productId": cl.get("productId", "PRD-CUSTOM"),
+            "sku": cl.get("productId", "PRD-CUSTOM"),
+            "productName": cl.get("productName", "Steel Material"),
+            "kind": "dispatch",
+            "deltaQuantity": f"-{float(cl.get('quantity', 1.0)):.3f}",
+            "unit": cl.get("unit", "MT"),
+            "batchNo": cl.get("batchNo", ""),
+            "warehouse": cl.get("warehouse", "Main Godown"),
+            "reference": dispatch_entry.get("number") or dispatch_entry["id"],
+            "reason": f"Dispatched order {order.get('number') or order['id']}",
+            "movementDate": dispatch_date,
+            "source": "dispatch",
+            "sourceRef": dispatch_entry["id"],
+            "createdAt": datetime.now().isoformat() + "+05:30"
+        })
+
+    return dispatch_entry
+
+@app.patch("/api/v1/dispatches/{dispatch_id}")
+def patch_dispatch(
+    dispatch_id: str,
+    body: dict[str, Any],
+    if_match: str | None = Header(None, alias="If-Match"),
+    x_user_role: str | None = Header(None, alias="X-User-Role")
+):
+    dsp = next((d for d in STATE["dispatches"] if d["id"] == dispatch_id), None)
+    if not dsp:
+        raise HTTPException(status_code=404, detail="Dispatch not found")
+
+    if dsp.get("voidedAt"):
+        raise HTTPException(status_code=409, detail="already_voided")
+    if dsp.get("reviewedAt") and x_user_role != "owner":
+        raise HTTPException(status_code=409, detail="reviewed_locked")
+
+    if if_match is not None:
+        try:
+            expected_v = int(if_match.strip('"'))
+            if dsp.get("version", 1) != expected_v:
+                raise HTTPException(status_code=409, detail="version_conflict")
+        except ValueError:
+            pass
+
+    for f in ["dispatchDate", "vehicle", "driver", "driverPhone", "transportName", "notes"]:
+        if f in body:
+            dsp[f] = body[f]
+            if f == "vehicle":
+                dsp["vehicleNumber"] = body[f]
+            elif f == "driver":
+                dsp["driverName"] = body[f]
+
+    dsp["version"] = dsp.get("version", 1) + 1
+    db.save_dispatch(dsp)
+    return dsp
+
+@app.post("/api/v1/dispatches/{dispatch_id}/void")
+def void_dispatch(
+    dispatch_id: str,
+    body: dict[str, Any] | None = None,
+    if_match: str | None = Header(None, alias="If-Match"),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
+    x_user_id: str | None = Header(None, alias="X-User-Id")
+):
+    dsp = next((d for d in STATE["dispatches"] if d["id"] == dispatch_id), None)
+    if not dsp:
+        raise HTTPException(status_code=404, detail="Dispatch not found")
+    if dsp.get("voidedAt"):
+        raise HTTPException(status_code=409, detail="already_voided")
+
+    now_iso = datetime.now().isoformat() + "+05:30"
+    user_name = "Managing Director (Owner)" if x_user_role == "owner" else "Yard Dispatch Manager"
+    dsp["voidedAt"] = now_iso
+    dsp["voidedBy"] = x_user_id or "USR-OWNER"
+    dsp["voidedByName"] = user_name
+    dsp["version"] = dsp.get("version", 1) + 1
+
+    # Revert quantities on order
+    order = next((o for o in STATE["orders"] if o["id"] == dsp.get("orderId")), None)
+    if order:
+        for dl in dsp.get("lines", []):
+            ol_id = dl.get("orderLineId")
+            match_ol = next(
+                (l for l in order.get("lines", []) if l.get("lineNo") == ol_id or l.get("orderLineId") == ol_id),
+                None
+            )
+            if match_ol:
+                q_val = float(dl.get("quantity", 0.0))
+                disp_val = max(0.0, float(match_ol.get("dispatchedQuantity", 0.0)) - q_val)
+                ord_val = float(match_ol.get("orderedQuantity") or match_ol.get("quantity") or 0.0)
+                rem_val = max(0.0, ord_val - disp_val)
+                match_ol["dispatchedQuantity"] = f"{disp_val:.3f}"
+                match_ol["remainingQuantity"] = f"{rem_val:.3f}"
+
+        tot_ordered = sum(float(l.get("orderedQuantity") or l.get("quantity") or 0.0) for l in order.get("lines", []))
+        tot_dispatched = sum(float(l.get("dispatchedQuantity") or 0.0) for l in order.get("lines", []))
+        tot_remaining = sum(float(l.get("remainingQuantity") or 0.0) for l in order.get("lines", []))
+
+        if tot_remaining >= tot_ordered - 0.0001:
+            order["dispatchStatus"] = "pending"
+            if order.get("status") == "dispatched":
+                order["status"] = "confirmed"
+        elif tot_remaining > 0.0001:
+            order["dispatchStatus"] = "partial"
+        else:
+            order["dispatchStatus"] = "dispatched"
+
+        order["dispatchedQuantity"] = f"{tot_dispatched:.3f}"
+        order["dispatchCount"] = max(0, order.get("dispatchCount", 1) - 1)
+        order["version"] = order.get("version", 1) + 1
+        db.save_order(order)
+
+    # Record reversing stock movement
+    movs = STATE.setdefault("stock_movements", [])
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    for dl in dsp.get("lines", []):
+        movs.insert(0, {
+            "id": f"MOV-{len(movs) + 1:04d}",
+            "productId": dl.get("productId", "PRD-CUSTOM"),
+            "sku": dl.get("productId", "PRD-CUSTOM"),
+            "productName": dl.get("productName", dl.get("product", "Steel Material")),
+            "kind": "void_dispatch",
+            "deltaQuantity": f"+{float(dl.get('quantity', 1.0)):.3f}",
+            "unit": dl.get("unit", "MT"),
+            "batchNo": dl.get("batchNo", ""),
+            "warehouse": dl.get("warehouse", "Main Godown"),
+            "reference": dsp.get("number") or dsp["id"],
+            "reason": f"Voided consignment {dsp.get('number') or dsp['id']}",
+            "movementDate": today_str,
+            "source": "void_dispatch",
+            "sourceRef": dsp["id"],
+            "createdAt": datetime.now().isoformat() + "+05:30"
+        })
+
+    db.save_dispatch(dsp)
+    return dsp
+
+@app.patch("/api/v1/dispatches/{dispatch_id}/delivery-status")
+def patch_delivery_status(
+    dispatch_id: str,
+    body: dict[str, Any],
+    if_match: str | None = Header(None, alias="If-Match")
+):
+    dsp = next((d for d in STATE["dispatches"] if d["id"] == dispatch_id), None)
+    if not dsp:
+        raise HTTPException(status_code=404, detail="Dispatch not found")
+
+    to_status = body.get("to") or body.get("deliveryStatus") or "delivered"
+    if to_status not in ["pending", "inTransit", "partial", "delivered"]:
+        raise HTTPException(status_code=422, detail="Invalid delivery status")
+
+    dsp["deliveryStatus"] = to_status
+    if to_status == "delivered":
+        dsp["deliveredAt"] = datetime.now().isoformat() + "+05:30"
+    dsp["version"] = dsp.get("version", 1) + 1
+    db.save_dispatch(dsp)
+    return dsp
+
+@app.post("/api/v1/dispatches/{dispatch_id}/review")
+def review_dispatch(
+    dispatch_id: str,
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
+    x_user_id: str | None = Header(None, alias="X-User-Id")
+):
+    dsp = next((d for d in STATE["dispatches"] if d["id"] == dispatch_id), None)
+    if not dsp:
+        raise HTTPException(status_code=404, detail="Dispatch not found")
+    if dsp.get("voidedAt"):
+        raise HTTPException(status_code=409, detail="already_voided")
+
+    dsp["reviewedAt"] = datetime.now().isoformat() + "+05:30"
+    dsp["reviewedBy"] = x_user_id or "USR-OWNER"
+    dsp["reviewedByName"] = "Managing Director (Owner)" if x_user_role == "owner" else "Desk Reviewer"
+    dsp["version"] = dsp.get("version", 1) + 1
+    db.save_dispatch(dsp)
+    return dsp
 
 @app.get("/api/v1/dispatches/balance")
 def get_dispatch_balance():

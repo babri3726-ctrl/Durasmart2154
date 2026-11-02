@@ -129,4 +129,21 @@ class ApiSyncService {
       return false;
     }
   }
+
+  /// Synchronizes a dispatch to the backend /api/v1/dispatches
+  static Future<bool> postDispatch(Map<String, dynamic> dispatchPayload) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return false;
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.postUrl(Uri.parse('$host/api/v1/dispatches'));
+      req.headers.contentType = ContentType.json;
+      req.write(jsonEncode(dispatchPayload));
+      final resp = await req.close();
+      return resp.statusCode == 200 || resp.statusCode == 201;
+    } catch (_) {
+      return false;
+    }
+  }
 }

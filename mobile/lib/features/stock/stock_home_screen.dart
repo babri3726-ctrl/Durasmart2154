@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 
+import '../../core/api_sync_service.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 
@@ -86,31 +87,10 @@ class _StockHomeScreenState extends State<StockHomeScreen>
   }
 
   Future<String?> _resolveWorkingHost() async {
-    if (_activeHost != null) {
-      try {
-        final client = HttpClient()
-          ..connectionTimeout = const Duration(seconds: 1);
-        final req = await client.getUrl(
-          Uri.parse('$_activeHost/api/v1/stock/summary'),
-        );
-        final resp = await req.close();
-        if (resp.statusCode == 200) return _activeHost;
-      } catch (_) {}
-    }
-
-    for (final host in _candidateHosts) {
-      try {
-        final client = HttpClient()
-          ..connectionTimeout = const Duration(milliseconds: 1200);
-        final req = await client.getUrl(
-          Uri.parse('$host/api/v1/stock/summary'),
-        );
-        final resp = await req.close();
-        if (resp.statusCode == 200) {
-          _activeHost = host;
-          return host;
-        }
-      } catch (_) {}
+    final host = await ApiSyncService.resolveWorkingHost();
+    if (host != null) {
+      _activeHost = host;
+      return host;
     }
     return null;
   }
