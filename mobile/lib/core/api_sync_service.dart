@@ -178,4 +178,52 @@ class ApiSyncService {
       return false;
     }
   }
+
+  /// Updates order status on the backend /api/v1/orders/$orderId/status
+  static Future<bool> postOrderStatus(
+    String orderId,
+    String toStatus, {
+    String? reason,
+  }) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return false;
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.postUrl(
+        Uri.parse('$host/api/v1/orders/$orderId/status'),
+      );
+      req.headers.contentType = ContentType.json;
+      req.write(
+        jsonEncode({'to': toStatus, if (reason != null) 'reason': reason}),
+      );
+      final resp = await req.close();
+      return resp.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Quick dispatches order on the backend /api/v1/orders/$orderId/quick-dispatch
+  static Future<bool> quickDispatchOrder(
+    String orderId, {
+    String vehicleNo = 'PB 10 CT 4421',
+    String notes = 'Quick dispatch',
+  }) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return false;
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.postUrl(
+        Uri.parse('$host/api/v1/orders/$orderId/quick-dispatch'),
+      );
+      req.headers.contentType = ContentType.json;
+      req.write(jsonEncode({'vehicleNo': vehicleNo, 'notes': notes}));
+      final resp = await req.close();
+      return resp.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
 }

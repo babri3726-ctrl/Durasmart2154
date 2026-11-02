@@ -30,6 +30,11 @@ class AppUser {
   final String phone;
 
   bool get isOwner => role == UserRole.owner;
+  bool get isDispatch =>
+      department.toLowerCase() == 'dispatch' ||
+      email.toLowerCase().contains('dispatch');
+  bool get isSalesperson =>
+      !isOwner && !isDispatch && department.toLowerCase() == 'sales';
   String get initials {
     final parts = name.trim().split(RegExp(r'\s+'));
     return parts

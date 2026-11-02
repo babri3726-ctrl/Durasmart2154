@@ -234,6 +234,120 @@ class OrderDetailScreen extends StatelessWidget {
               ],
             ),
           ),
+          if (repo.currentUser?.isOwner == true ||
+              repo.currentUser?.isDispatch == true) ...[
+            const SizedBox(height: 14),
+            WhitePanel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Dispatch & Order Authority',
+                    style: AppText.heading,
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Authority to mark dispatched (tick), set pending, or cancel orders.',
+                    style: AppText.caption,
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (order.status != OrderStatus.dispatched)
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.green,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: () {
+                            repo.quickDispatchOrder(order.id);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Order marked as Fully Dispatched (Tick)',
+                                ),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.check_circle_outline, size: 16),
+                          label: const Text('✓ Mark Dispatched (Tick)'),
+                        ),
+                      if (order.status == OrderStatus.pending)
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.blue,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: () {
+                            repo.setOrderStatus(
+                              order.id,
+                              OrderStatus.confirmed,
+                            );
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Order confirmed')),
+                            );
+                          },
+                          icon: const Icon(Icons.check, size: 16),
+                          label: const Text('Confirm Order'),
+                        ),
+                      if (order.status == OrderStatus.confirmed ||
+                          order.status == OrderStatus.dispatched)
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            repo.setOrderStatus(
+                              order.id,
+                              OrderStatus.pending,
+                            );
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Order status set back to Pending',
+                                ),
+                              ),
+                            );
+                          },
+                          icon: const Icon(
+                            Icons.history_toggle_off,
+                            size: 16,
+                          ),
+                          label: const Text('Set Pending'),
+                        ),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.red,
+                        ),
+                        onPressed: () async {
+                          final confirmed = await ConfirmDialog.show(
+                            context,
+                            title: 'Cancel order',
+                            message:
+                                'Are you sure you want to cancel order ${order.number}?',
+                            confirmLabel: 'Cancel order',
+                            danger: true,
+                          );
+                          if (confirmed && context.mounted) {
+                            repo.deleteOrder(order.id);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Order ${order.number} cancelled',
+                                ),
+                              ),
+                            );
+                            Navigator.pop(context);
+                          }
+                        },
+                        icon: const Icon(Icons.cancel_outlined, size: 16),
+                        label: const Text('Cancel Order'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 14),
           const SectionHeading(title: 'Payments'),
           const SizedBox(height: 8),

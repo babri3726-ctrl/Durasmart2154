@@ -77,10 +77,12 @@ function Stat({ label, value, hint }: { label: string; value: string; hint?: str
 function OrderActions({
   order,
   isOwner,
+  isDispatch,
   onChanged,
 }: {
   order: ServerOrderDetail;
   isOwner: boolean;
+  isDispatch: boolean;
   onChanged: () => void;
 }) {
   const [busy, setBusy] = useState<'' | OrderStatus | 'deleted'>('');
@@ -92,9 +94,10 @@ function OrderActions({
   const cancelKey = useRef<KeyedSubmission | null>(null);
   const navigate = useNavigate();
 
+  const canManageStatus = isOwner || isDispatch;
   const cancelled = order.cancelledAt !== null || order.status === 'cancelled';
   const reasonRequired = cancelNeedsReason(order);
-  const mayCancel = !cancelled && (isOwner || order.status === 'draft' || order.status === 'pending');
+  const mayCancel = !cancelled && (canManageStatus || order.status === 'draft' || order.status === 'pending');
   const mayEdit = !cancelled && order.dispatchStatus !== 'dispatched';
   const mayDelete = isOwner || order.status === 'draft' || order.status === 'pending';
 
@@ -165,9 +168,14 @@ function OrderActions({
           {busy === 'pending' ? 'Submitting…' : 'Submit order'}
         </button>
       )}
-      {order.status === 'pending' && isOwner && (
+      {order.status === 'pending' && canManageStatus && (
         <button type="button" className="btn-primary btn-sm" disabled={busy !== ''} onClick={() => void move('confirmed')}>
-          {busy === 'confirmed' ? 'Working…' : 'Confirm order'}
+          {busy === 'confirmed' ? 'Working…' : '✓ Confirm order (Tick)'}
+        </button>
+      )}
+      {order.status === 'confirmed' && canManageStatus && (
+        <button type="button" className="btn-secondary btn-sm" disabled={busy !== ''} onClick={() => void move('pending')}>
+          {busy === 'pending' ? 'Working…' : '⏳ Set Pending'}
         </button>
       )}
       {mayEdit && (
@@ -193,10 +201,9 @@ function OrderActions({
           <Trash2 size={13} /> Delete order
         </button>
       )}
-      {!isOwner && !cancelled && (
+      {!canManageStatus && !cancelled && (
         <span className="text-[10px] text-faint">
-          Confirming an order, and cancelling one already confirmed, are owner decisions — the backend refuses them
-          for this session, so they are not offered here.
+          Confirming an order, changing status to pending, and cancelling a confirmed order are owner and dispatch desk authorities.
         </span>
       )}
       {error !== '' && (
@@ -540,7 +547,7 @@ export default function OrderDetail() {
               </div>
             </div>
 
-            {canRecord && !cancelled && o.dispatchStatus !== 'dispatched' && (
+            {(canRecord || user?.role === 'owner' || user?.department === 'Dispatch' || user?.email?.includes('dispatch')) && !cancelled && o.dispatchStatus !== 'dispatched' && (
               <button
                 type="button"
                 onClick={() => setQuickDispatchModalOpen(true)}
@@ -585,6 +592,7 @@ export default function OrderDetail() {
           <OrderActions
             order={o}
             isOwner={user?.role === 'owner'}
+            isDispatch={user?.department === 'Dispatch' || (user?.email?.includes('dispatch') ?? false) || canRecord}
             onChanged={() => invalidate(syncKeys.order(o.id), syncKeys.orderList())}
           />
           <p className="mt-3 text-[10px] text-faint">

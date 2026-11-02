@@ -403,5 +403,66 @@ class TestServerApi(unittest.TestCase):
         res_get_deleted = self.client.get(f"/api/v1/orders/{o_id}")
         self.assertEqual(res_get_deleted.status_code, 404)
 
+    def test_15_rbac_salesperson_order_and_dispatch_scoping(self):
+        # 1. Salesperson EMP-SP-01 sees ONLY their own orders
+        r_sp1 = self.client.get("/api/v1/orders", headers={"X-User-Role": "employee", "X-Employee-Id": "EMP-SP-01"})
+        self.assertEqual(r_sp1.status_code, 200)
+        items_sp1 = r_sp1.json()["items"]
+        for o in items_sp1:
+            self.assertEqual(o.get("salespersonId"), "EMP-SP-01")
+
+        # 2. Owner sees all orders
+        r_owner = self.client.get("/api/v1/orders", headers={"X-User-Role": "owner"})
+        self.assertEqual(r_owner.status_code, 200)
+        items_owner = r_owner.json()["items"]
+        self.assertGreaterEqual(len(items_owner), len(items_sp1))
+
+        # 3. Dispatch Desk sees all orders
+        r_dsp = self.client.get("/api/v1/orders", headers={"X-User-Role": "dispatch"})
+        self.assertEqual(r_dsp.status_code, 200)
+        items_dsp = r_dsp.json()["items"]
+        self.assertEqual(len(items_dsp), len(items_owner))
+
+        # 4. Salesperson EMP-SP-01 sees only dispatches for EMP-SP-01 orders
+        r_dsp_sp1 = self.client.get("/api/v1/dispatches", headers={"X-User-Role": "employee", "X-Employee-Id": "EMP-SP-01"})
+        self.assertEqual(r_dsp_sp1.status_code, 200)
+        dsp_items = r_dsp_sp1.json()["items"]
+        order_ids_sp1 = {o["id"] for o in items_sp1}
+        for d in dsp_items:
+            self.assertIn(d["orderId"], order_ids_sp1)
+
+    def test_16_dispatch_person_order_authority(self):
+        # Create an order
+        order_payload = {
+            "customer_id": "DEBTOR-HR-001",
+            "date": "2026-11-02",
+            "lines": [{"product": "Steel Pipe", "quantity": "3.000", "unit": "MT", "rate": 50000.0}],
+            "notes": "Testing Dispatch Authority"
+        }
+        res_o = self.client.post("/api/v1/orders", json=order_payload)
+        o_id = res_o.json()["id"]
+
+        dsp_headers = {"X-User-Role": "dispatch", "X-User-Id": "usr-emp-dsp-01"}
+
+        # 1. Dispatch desk has authority to set status to 'dispatched' (TICK)
+        res_disp = self.client.post(f"/api/v1/orders/{o_id}/status", json={"to": "dispatched"}, headers=dsp_headers)
+        self.assertEqual(res_disp.status_code, 200)
+        self.assertEqual(res_disp.json()["status"], "dispatched")
+        self.assertEqual(res_disp.json()["dispatchStatus"], "dispatched")
+
+        # 2. Dispatch desk has authority to set status to 'pending' (PENDING)
+        res_pend = self.client.post(f"/api/v1/orders/{o_id}/status", json={"to": "pending"}, headers=dsp_headers)
+        self.assertEqual(res_pend.status_code, 200)
+        self.assertEqual(res_pend.json()["status"], "pending")
+
+        # 3. Dispatch desk has authority to CANCEL the order
+        res_cancel = self.client.post(f"/api/v1/orders/{o_id}/status", json={"to": "cancelled"}, headers=dsp_headers)
+        self.assertEqual(res_cancel.status_code, 200)
+        self.assertEqual(res_cancel.json()["status"], "cancelled")
+        self.assertIsNotNone(res_cancel.json().get("cancelledAt"))
+
+        # Clean up
+        self.client.delete(f"/api/v1/orders/{o_id}", headers={"X-User-Role": "owner"})
+
 if __name__ == '__main__':
     unittest.main()

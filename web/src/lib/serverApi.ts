@@ -1157,6 +1157,7 @@ export interface DispatchPatchBody {
 export interface ListDispatchesParams {
   q?: string;
   orderId?: string;
+  salespersonId?: string;
   from?: string;
   to?: string;
   page?: number;
@@ -1169,6 +1170,7 @@ export function listDispatches(
   const query = new URLSearchParams();
   if (params.q) query.set('q', params.q);
   if (params.orderId) query.set('orderId', params.orderId);
+  if (params.salespersonId) query.set('salespersonId', params.salespersonId);
   if (params.from) query.set('from', params.from);
   if (params.to) query.set('to', params.to);
   if (params.page) query.set('page', String(params.page));

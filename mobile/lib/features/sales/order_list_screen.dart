@@ -21,8 +21,10 @@ class _OrderListScreenState extends State<OrderListScreen> {
   Widget build(BuildContext context) {
     final repo = context.watch<MockRepository>();
 
+    final scopedOrders = repo.ordersForUser(repo.currentUser);
+
     int countFor(OrderStatus? status) =>
-        repo.orders.where((o) => status == null || o.status == status).length;
+        scopedOrders.where((o) => status == null || o.status == status).length;
 
     final tabs = <(String, OrderStatus?)>[
       ('All', null),
@@ -61,6 +63,34 @@ class _OrderListScreenState extends State<OrderListScreen> {
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
           child: Column(
             children: [
+                            if (repo.currentUser?.isSalesperson == true)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.purple.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.purple.withValues(alpha: 0.2)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.person_outline, size: 16, color: AppColors.purple),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Your Assigned Orders (${repo.currentUser?.name ?? "Sales Officer"})',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.purple,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               SearchField(
                 hint: 'Search order number or customer',
                 onChanged: (v) => setState(() => _query = v),
@@ -79,7 +109,8 @@ class _OrderListScreenState extends State<OrderListScreen> {
   }
 
   Widget _tabList(MockRepository repo, OrderStatus? status) {
-    final orders = repo.orders.where((o) {
+    final scopedOrders = repo.ordersForUser(repo.currentUser);
+    final orders = scopedOrders.where((o) {
       final matchesStatus = status == null || o.status == status;
       final customer = repo.customerById(o.customerId);
       final matchesQuery =

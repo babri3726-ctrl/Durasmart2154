@@ -7,6 +7,7 @@ import { Modal } from '../components/ui/Overlays';
 import { Pager } from '../components/ui/Pager';
 import { exactRupees } from '../lib/entryRules';
 import { syncKeys, useSyncPrefix } from '../lib/syncStore';
+import { useLiveSession } from '../lib/liveSession';
 import { useLiveList } from '../lib/useLiveList';
 import { useResource } from '../lib/useResource';
 import { toast } from '../lib/toast';
@@ -23,6 +24,9 @@ import {
 const PAGE_SIZE = 20;
 
 export default function Orders() {
+  const user = useLiveSession((s) => s.user);
+  const isSalesperson = user?.role === 'employee' && user?.department === 'Sales';
+
   const [term, setTerm] = useState('');
   const [page, setPage] = useState(1);
   const [salespersonFilter, setSalespersonFilter] = useState('');
@@ -30,6 +34,8 @@ export default function Orders() {
   const [slipModalImage, setSlipModalImage] = useState<{ url: string; title: string } | null>(null);
   const [orderToDelete, setOrderToDelete] = useState<ServerOrder | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  const effectiveSalespersonId = isSalesperson ? (user?.employeeId ?? '') : salespersonFilter;
 
   async function handleDelete() {
     if (!orderToDelete || deleting) return;
@@ -52,12 +58,12 @@ export default function Orders() {
     (folded: string, p: number) =>
       listOrders({
         q: folded || undefined,
-        salespersonId: salespersonFilter || undefined,
+        salespersonId: effectiveSalespersonId || undefined,
         dispatchStatus: dispatchFilter || undefined,
         page: p,
         pageSize: PAGE_SIZE,
       }),
-    [salespersonFilter, dispatchFilter],
+    [effectiveSalespersonId, dispatchFilter],
   );
 
   const listToken = useSyncPrefix(syncKeys.orderList(''));
@@ -89,26 +95,33 @@ export default function Orders() {
               placeholder="Search order number or party name…"
             />
 
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-bold text-muted flex items-center gap-1">
-                <Filter size={13} /> Officer:
-              </span>
-              <select
-                className="input !w-auto !py-1.5 text-xs font-semibold"
-                value={salespersonFilter}
-                onChange={(e) => {
-                  setSalespersonFilter(e.target.value);
-                  setPage(1);
-                }}
-              >
-                <option value="">All Area Officers</option>
-                {employees.data?.items.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.salesTerritory?.toLowerCase().includes('punjab') ? '🌾' : '🏢'} {e.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {isSalesperson ? (
+              <div className="flex items-center gap-1.5 rounded-lg border border-brand-blue/30 bg-brand-blue/10 px-3 py-1.5 text-xs font-bold text-brand-blue">
+                <span>👤</span>
+                <span>Your Assigned Orders ({user?.name || user?.employeeId || 'Sales Officer'})</span>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold text-muted flex items-center gap-1">
+                  <Filter size={13} /> Officer:
+                </span>
+                <select
+                  className="input !w-auto !py-1.5 text-xs font-semibold"
+                  value={salespersonFilter}
+                  onChange={(e) => {
+                    setSalespersonFilter(e.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="">All Area Officers</option>
+                  {employees.data?.items.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.salesTerritory?.toLowerCase().includes('punjab') ? '🌾' : '🏢'} {e.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {/* Quick Dispatch Progress Tabs */}

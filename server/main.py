@@ -358,6 +358,68 @@ def refresh_token(req: RefreshRequest | None = None, authorization: str | None =
 def logout():
     return {"success": True}
 
+def resolve_caller(
+    authorization: str | None = None,
+    x_user_role: str | None = None,
+    x_user_id: str | None = None,
+    x_employee_id: str | None = None,
+) -> dict[str, Any]:
+    token = (authorization or "").lower()
+    role_header = (x_user_role or "").lower().strip()
+    
+    # 1. Dispatch Desk identity
+    if role_header in ["dispatch", "yard"] or "dsp" in token or "dispatch" in token or "yard" in token:
+        return {
+            "role": "employee",
+            "department": "Dispatch",
+            "employeeId": "EMP-DSP-01",
+            "isOwner": False,
+            "isDispatch": True,
+            "isSales": False,
+        }
+
+    # 2. Check if explicitly owner
+    if role_header == "owner" or ("owner" in token and "employee" not in token and "sp-" not in token):
+        return {
+            "role": "owner",
+            "department": "Management",
+            "employeeId": None,
+            "isOwner": True,
+            "isDispatch": False,
+            "isSales": False,
+        }
+
+    # 3. Employee / Sales Officer identity
+    emp_id = x_employee_id
+    if not emp_id:
+        for e in STATE.get("employees", []):
+            if e["id"].lower() in token or (x_user_id and e["id"].lower() in x_user_id.lower()):
+                emp_id = e["id"]
+                break
+
+    if "employee" in token or "sp-" in token or role_header == "employee":
+        emp_match = next((e for e in STATE.get("employees", []) if e["id"] == emp_id), None)
+        dept = emp_match.get("department", "Sales") if emp_match else "Sales"
+        is_dsp = dept == "Dispatch"
+        return {
+            "role": "employee",
+            "department": dept,
+            "employeeId": emp_id or "EMP-SP-01",
+            "isOwner": False,
+            "isDispatch": is_dsp,
+            "isSales": not is_dsp,
+        }
+
+    # Default (unauthenticated or owner test harness): Owner access
+    return {
+        "role": "owner",
+        "department": "Management",
+        "employeeId": None,
+        "isOwner": True,
+        "isDispatch": False,
+        "isSales": False,
+    }
+
 @app.get("/api/v1/me")
 def get_current_user(authorization: str | None = Header(None)):
     token = (authorization or "").lower()
@@ -1676,9 +1738,23 @@ def get_orders(
     dispatchStatus: str | None = None,
     status: str | None = None,
     page: int = 1,
-    pageSize: int = 20
+    pageSize: int = 20,
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_employee_id: str | None = Header(None, alias="X-Employee-Id"),
 ):
+    caller = resolve_caller(authorization, x_user_role, x_user_id, x_employee_id)
     items = STATE["orders"]
+    
+    # If caller is an Area Sales Officer (Employee in Sales), strictly scope to their assigned orders!
+    if caller["isSales"]:
+        sp_id = caller["employeeId"]
+        items = [o for o in items if o.get("salespersonId") == sp_id]
+    elif salespersonId:
+        # Owner or Dispatch can filter by any specific salesperson if requested
+        items = [o for o in items if o.get("salespersonId") == salespersonId]
+
     if q:
         q_l = q.lower().strip()
         items = [
@@ -1687,8 +1763,6 @@ def get_orders(
             or q_l in o.get("customerName", "").lower()
             or q_l in o.get("salespersonName", "").lower()
         ]
-    if salespersonId:
-        items = [o for o in items if o.get("salespersonId") == salespersonId]
     if dispatchStatus:
         if dispatchStatus == "pending":
             items = [o for o in items if o.get("dispatchStatus") in ["pending", None, ""]]
@@ -1709,7 +1783,17 @@ def get_orders(
     }
 
 @app.post("/api/v1/orders/{order_id}/quick-dispatch")
-def quick_dispatch_order(order_id: str, body: dict[str, Any] | None = None):
+def quick_dispatch_order(
+    order_id: str,
+    body: dict[str, Any] | None = None,
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+):
+    caller = resolve_caller(authorization, x_user_role, x_user_id)
+    if not (caller["isOwner"] or caller["isDispatch"]):
+        raise HTTPException(status_code=403, detail="Only Owner and Dispatch Person have authority to quick-dispatch orders.")
+
     body = body or {}
     order = next((o for o in STATE["orders"] if o["id"] == order_id), None)
     if not order:
@@ -2013,15 +2097,49 @@ def delete_order_endpoint(
     return {"deleted": True, "id": order_id, "number": order.get("number")}
 
 @app.post("/api/v1/orders/{order_id}/status")
-def set_order_status(order_id: str, body: dict[str, Any]):
+def set_order_status(
+    order_id: str,
+    body: dict[str, Any],
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_employee_id: str | None = Header(None, alias="X-Employee-Id"),
+):
+    caller = resolve_caller(authorization, x_user_role, x_user_id, x_employee_id)
     order = next((o for o in STATE["orders"] if o["id"] == order_id), None)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    
     to_status = body.get("to", "confirmed")
+
+    # Authority check:
+    # 1. Owner has full authority
+    # 2. Dispatch Person has authority to TICK (dispatched), set PENDING, or CANCEL (or confirm)
+    # 3. Sales officer can only submit drafts to pending or cancel their own unconfirmed order
+    if caller["isOwner"]:
+        pass
+    elif caller["isDispatch"]:
+        if to_status not in ["dispatched", "pending", "confirmed", "cancelled"]:
+            raise HTTPException(status_code=403, detail=f"Dispatch person does not have authority to move order to '{to_status}'")
+    elif caller["isSales"]:
+        if order.get("salespersonId") != caller["employeeId"]:
+            raise HTTPException(status_code=403, detail="You can only manage status for your own orders.")
+        if to_status not in ["pending", "cancelled"]:
+            raise HTTPException(status_code=403, detail="Sales officers can only submit drafts to pending or cancel unconfirmed orders.")
+
     order["status"] = to_status
     if to_status == "cancelled":
         order["cancelledAt"] = datetime.now().isoformat() + "+05:30"
+        order["cancelledBy"] = caller.get("employeeId") or caller.get("role")
+    elif to_status == "dispatched":
+        order["dispatchStatus"] = "dispatched"
+        order["lastDispatchDate"] = datetime.now().strftime("%Y-%m-%d")
+    elif to_status == "pending":
+        if order.get("dispatchStatus") == "dispatched":
+            order["dispatchStatus"] = "pending"
+
     order["version"] = order.get("version", 1) + 1
+    db.save_order(order)
     return order
 
 # ----------------- Dispatches Endpoints -----------------
@@ -2051,14 +2169,30 @@ class DispatchCreate(BaseModel):
 def get_dispatches(
     orderId: str | None = None,
     customerId: str | None = None,
+    salespersonId: str | None = None,
     q: str | None = None,
     from_: str | None = Query(None, alias="from"),
     to: str | None = None,
     deliveryStatus: str | None = None,
     page: int = 1,
-    pageSize: int = 20
+    pageSize: int = 20,
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_employee_id: str | None = Header(None, alias="X-Employee-Id"),
 ):
+    caller = resolve_caller(authorization, x_user_role, x_user_id, x_employee_id)
     items = STATE["dispatches"]
+
+    # If caller is Sales Officer, show only dispatches for orders booked by that sales officer
+    if caller["isSales"]:
+        sp_filter = caller["employeeId"]
+        sp_orders = {o["id"] for o in STATE.get("orders", []) if o.get("salespersonId") == sp_filter}
+        items = [d for d in items if d.get("orderId") in sp_orders]
+    elif salespersonId:
+        sp_orders = {o["id"] for o in STATE.get("orders", []) if o.get("salespersonId") == salespersonId}
+        items = [d for d in items if d.get("orderId") in sp_orders]
+
     if orderId:
         items = [d for d in items if d.get("orderId") == orderId]
     if customerId:
@@ -2074,6 +2208,7 @@ def get_dispatches(
         items = [
             d for d in items
             if query in d.get("number", "").lower()
+            or query in d.get("orderNumber", "").lower()
             or query in d.get("customerName", "").lower()
             or query in d.get("vehicle", "").lower()
             or query in d.get("vehicleNumber", "").lower()

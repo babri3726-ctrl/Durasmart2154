@@ -150,12 +150,42 @@ class MockRepository extends ChangeNotifier {
       orders.where((o) => o.customerId == customerId).toList()
         ..sort((a, b) => b.orderDate.compareTo(a.orderDate));
 
+  /// Scopes orders based on user authority:
+  /// - Owner: sees all orders
+  /// - Dispatch: sees all orders (needed to load and dispatch across yard)
+  /// - Sales Employee: sees only their assigned orders
+  List<SalesOrder> ordersForUser(AppUser? user) {
+    if (user == null || user.isOwner || user.isDispatch) {
+      return List.unmodifiable(orders);
+    }
+    return orders.where((o) {
+      final cust = customerById(o.customerId);
+      return o.salespersonId == user.employeeId ||
+          o.salespersonId == user.id ||
+          cust?.salespersonId == user.employeeId ||
+          cust?.salespersonId == user.id;
+    }).toList();
+  }
+
   List<Payment> paymentsFor(String customerId) =>
       payments.where((p) => p.customerId == customerId).toList()
         ..sort((a, b) => b.date.compareTo(a.date));
 
   List<Dispatch> dispatchesFor(String orderId) =>
       dispatches.where((d) => d.orderId == orderId).toList();
+
+  /// Scopes dispatches based on user role:
+  /// - Owner and Dispatch: see all dispatches
+  /// - Sales Employee: sees only dispatches belonging to their orders
+  List<Dispatch> dispatchesForUser(AppUser? user) {
+    if (user == null || user.isOwner || user.isDispatch) {
+      return List.unmodifiable(dispatches);
+    }
+    final allowedOrderIds = ordersForUser(user).map((o) => o.id).toSet();
+    return dispatches
+        .where((d) => allowedOrderIds.contains(d.orderId))
+        .toList();
+  }
 
   List<Customer> customersForSalesperson(String employeeId) =>
       customers.where((c) => c.salespersonId == employeeId).toList();
@@ -436,11 +466,6 @@ class MockRepository extends ChangeNotifier {
     return order;
   }
 
-  void setOrderStatus(String orderId, OrderStatus status) {
-    orderById(orderId)?.status = status;
-    notifyListeners();
-  }
-
   bool deleteOrder(String orderId) {
     final idx = orders.indexWhere((o) => o.id == orderId);
     if (idx != -1) {
@@ -560,6 +585,52 @@ class MockRepository extends ChangeNotifier {
     } else if (orderDispatchedQty(order.id) > 0) {
       order.status = OrderStatus.pendingDispatch;
     }
+  }
+
+  /// Sets order status (e.g. pending, confirmed, or dispatched / cancelled)
+  void setOrderStatus(String orderId, OrderStatus status, {String? reason}) {
+    final order = orderById(orderId);
+    if (order == null) return;
+    order.status = status;
+    String statusStr = 'pending';
+    if (status == OrderStatus.confirmed) statusStr = 'confirmed';
+    if (status == OrderStatus.dispatched) statusStr = 'dispatched';
+    ApiSyncService.postOrderStatus(orderId, statusStr, reason: reason);
+    _pushNotification(
+      'Order status updated',
+      '${order.number} marked as ${orderStatusLabel(status)}',
+    );
+    notifyListeners();
+  }
+
+  /// Quick dispatches an order in full
+  void quickDispatchOrder(
+    String orderId, {
+    String vehicleNo = 'PB 10 CT 4421',
+    String notes = 'Full order dispatched',
+  }) {
+    final order = orderById(orderId);
+    if (order == null) return;
+    final lines = order.items
+        .map(
+          (i) => DispatchLine(
+            product: i.product,
+            quantity: i.quantity,
+            unit: i.unit,
+          ),
+        )
+        .toList();
+    addDispatch(
+      orderId: orderId,
+      lines: lines,
+      vehicle: vehicleNo,
+      notes: notes,
+    );
+    ApiSyncService.quickDispatchOrder(
+      orderId,
+      vehicleNo: vehicleNo,
+      notes: notes,
+    );
   }
 
   /// Records a payment against an order invoice or on-account. Returns null and changes

@@ -24,12 +24,28 @@ const PAGE_SIZE = 20;
  *  A list that quietly lost a cancelled delivery would leave the desk staring at order quantities
  *  that moved and came back with nobody on record to have moved them — the same discipline a voided
  *  receipt has kept since P1. */
-function Register({ isOwner, userId }: { isOwner: boolean; userId: string | null }) {
+function Register({
+  isOwner,
+  userId,
+  employeeId,
+  isSalesperson,
+}: {
+  isOwner: boolean;
+  userId: string | null;
+  employeeId?: string | null;
+  isSalesperson: boolean;
+}) {
   const [term, setTerm] = useState('');
   const [page, setPage] = useState(1);
   const load = useCallback(
-    (folded: string, p: number) => listDispatches({ q: folded || undefined, page: p, pageSize: PAGE_SIZE }),
-    [],
+    (folded: string, p: number) =>
+      listDispatches({
+        q: folded || undefined,
+        salespersonId: isSalesperson && employeeId ? employeeId : undefined,
+        page: p,
+        pageSize: PAGE_SIZE,
+      }),
+    [isSalesperson, employeeId],
   );
   // Any consignment write names its order under `dispatches:<orderId>`; the register depends on
   // all of them, so it follows the prefix rather than one id it does not own.
@@ -103,6 +119,7 @@ function Register({ isOwner, userId }: { isOwner: boolean; userId: string | null
 export default function DispatchHistory() {
   const user = useLiveSession((s) => s.user);
   const isOwner = user?.role === 'owner';
+  const isSalesperson = user?.role === 'employee' && user?.department === 'Sales';
   const right = useResource(useCallback(() => mayRecordDispatch(), []));
 
   return (
@@ -155,7 +172,14 @@ export default function DispatchHistory() {
         </Card>
       )}
 
-      {right.state === 'ready' && right.data === true && <Register isOwner={isOwner} userId={user?.id ?? null} />}
+      {right.state === 'ready' && right.data === true && (
+        <Register
+          isOwner={isOwner}
+          userId={user?.id ?? null}
+          employeeId={user?.employeeId ?? null}
+          isSalesperson={isSalesperson}
+        />
+      )}
     </div>
   );
 }
