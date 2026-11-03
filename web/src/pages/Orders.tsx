@@ -6,7 +6,7 @@ import { LiveSyncBar } from '../components/ui/LiveSync';
 import { Modal } from '../components/ui/Overlays';
 import { Pager } from '../components/ui/Pager';
 import { exactRupees } from '../lib/entryRules';
-import { syncKeys, useSyncPrefix } from '../lib/syncStore';
+import { invalidate, syncKeys, useSyncPrefix } from '../lib/syncStore';
 import { useLiveSession } from '../lib/liveSession';
 import { useLiveList } from '../lib/useLiveList';
 import { useResource } from '../lib/useResource';
@@ -43,6 +43,7 @@ export default function Orders() {
     try {
       await deleteOrder(orderToDelete.id);
       toast.success(`Order ${orderToDelete.number ?? orderToDelete.id} deleted successfully`);
+      invalidate(syncKeys.dashboard, syncKeys.orderList());
       sync.refresh();
       setOrderToDelete(null);
     } catch (cause) {

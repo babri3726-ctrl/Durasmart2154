@@ -638,7 +638,7 @@ def get_dashboard_cockpit(from_date: str | None = Query(None, alias="from"), to_
         for d in debtors
     ]
 
-    # Territories Progress from HR-PB targets
+    # Territories Progress from HR-PB targets + recorded dispatches
     targets = STATE.get("targets", [])
     pb_t = [t for t in targets if t.get("state") == "Punjab"]
     hr_t = [t for t in targets if t.get("state") == "Haryana"]
@@ -647,6 +647,46 @@ def get_dashboard_cockpit(from_date: str | None = Query(None, alias="from"), to_
     pb_disp = sum(float(t.get("dispatched_mt", 0.0)) for t in pb_t)
     hr_tgt = sum(float(t.get("target_mt", 0.0)) for t in hr_t)
     hr_disp = sum(float(t.get("dispatched_mt", 0.0)) for t in hr_t)
+
+    # Accumulate real recorded dispatches per customer territory
+    customers_map = {c.get("id"): c for c in STATE.get("customers", [])}
+    for dsp in STATE.get("dispatches", []):
+        if dsp.get("voidedAt"):
+            continue
+        dsp_date = dsp.get("dispatchDate") or dsp.get("createdAt", "")[:10]
+        if from_date and dsp_date < from_date:
+            continue
+        if to_date and dsp_date > to_date:
+            continue
+        
+        c_state = "Punjab"
+        c_id = dsp.get("customerId")
+        if c_id and c_id in customers_map:
+            c_state = customers_map[c_id].get("state") or "Punjab"
+        else:
+            ord_match = next((o for o in STATE.get("orders", []) if o.get("id") == dsp.get("orderId")), None)
+            if ord_match:
+                c_state = ord_match.get("state") or "Punjab"
+
+        dsp_mt = 0.0
+        if dsp.get("lines"):
+            for l in dsp["lines"]:
+                try:
+                    q = float(l.get("quantity", 0.0))
+                    u = str(l.get("unit", "MT")).strip().lower()
+                    dsp_mt += (q / 1000.0) if u == "kg" else q
+                except (ValueError, TypeError):
+                    pass
+        elif dsp.get("totalQuantity"):
+            try:
+                dsp_mt += float(dsp.get("totalQuantity", 0.0))
+            except (ValueError, TypeError):
+                pass
+
+        if "haryana" in c_state.lower():
+            hr_disp += dsp_mt
+        else:
+            pb_disp += dsp_mt
 
     territories = {
         "punjab": {
@@ -2063,6 +2103,12 @@ def patch_order(order_id: str, body: dict[str, Any]):
         order["dispatchedQuantity"] = f"{tot_dispatched:.3f}"
         order["valuePaise"] = sum(l["valuePaise"] for l in processed_lines)
         order["orderBalancePaise"] = order["valuePaise"]
+        if total_qty > 0 and tot_dispatched >= total_qty - 0.0001:
+            order["dispatchStatus"] = "dispatched"
+        elif tot_dispatched > 0.0001:
+            order["dispatchStatus"] = "partial"
+        else:
+            order["dispatchStatus"] = "pending"
     
     order["version"] = order.get("version", 1) + 1
     db.save_order(order)
@@ -2092,6 +2138,8 @@ def delete_order_endpoint(
 
     # Remove from in-memory STATE
     STATE["orders"].pop(order_idx)
+    # Remove any dispatches for this order from in-memory STATE dispatches
+    STATE["dispatches"] = [d for d in STATE.get("dispatches", []) if d.get("orderId") != order_id]
     # Remove from SQLite
     db.delete_order(order_id)
     return {"deleted": True, "id": order_id, "number": order.get("number")}

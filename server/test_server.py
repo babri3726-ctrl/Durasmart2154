@@ -129,6 +129,13 @@ class TestServerApi(unittest.TestCase):
         self.assertEqual(new_delayed, base_delayed - 1, "delayedOrderCount must decrement when a delayed order is dispatched")
         self.assertGreater(new_disp_mt, base_disp_mt, "dispatched metric must dynamically increase when order is dispatched")
 
+        # Clean up test dispatch and order
+        dsps = self.client.get("/api/v1/dispatches").json()["items"]
+        for d in dsps:
+            if d["orderId"] == target_order_id and not d.get("voidedAt"):
+                self.client.post(f"/api/v1/dispatches/{d['id']}/void")
+        self.client.delete(f"/api/v1/orders/{target_order_id}", headers={"X-User-Role": "owner"})
+
     def test_07_full_overdue_clearance(self):
         # Paying exact balance of a customer clears overdue flag and balance
         pay_res = self.client.post("/api/v1/payments", json={
@@ -174,6 +181,9 @@ class TestServerApi(unittest.TestCase):
         r_after = self.client.get("/api/v1/dashboard/summary").json()
         self.assertEqual(r_after["delayedOrderCount"], delayed_before, "Today's new order must NOT increment delayedOrderCount")
         self.assertEqual(r_after["ordersValuePaise"], orders_val_before + 23000000, "ordersValuePaise must increase by order value")
+
+        # Clean up test order
+        self.client.delete(f"/api/v1/orders/{order_res.json()['id']}", headers={"X-User-Role": "owner"})
 
     def test_09_stock_preview_contract_shape(self):
         # 1. Test POST /api/v1/imports/excel/stock-preview
@@ -310,6 +320,9 @@ class TestServerApi(unittest.TestCase):
         mov2_data = res_mov2.json()
         self.assertEqual(mov2_data["items"][0]["kind"], "void_dispatch")
         self.assertEqual(mov2_data["items"][0]["deltaQuantity"], "+4.000")
+
+        # Clean up test order
+        self.client.delete(f"/api/v1/orders/{order_id}", headers={"X-User-Role": "owner"})
 
     def test_13_opening_balances_ledger_and_targets(self):
         cust_id = "DEBTOR-HR-001"
@@ -463,6 +476,87 @@ class TestServerApi(unittest.TestCase):
 
         # Clean up
         self.client.delete(f"/api/v1/orders/{o_id}", headers={"X-User-Role": "owner"})
+
+    def test_17_dashboard_dispatch_kpis_on_create_edit_and_delete(self):
+        # 1. Baseline dashboard summary
+        s_base = self.client.get("/api/v1/dashboard/summary").json()
+        val_base = s_base["ordersValuePaise"]
+        disp_base = float(s_base["dispatched"][0]["dispatchedQuantity"])
+
+        # 2. Create order (10 MT @ 50,000 paise = 50,000,000 paise)
+        order_payload = {
+            "customer_id": "DEBTOR-PB-001",
+            "customerName": "GURU KIRPA INDUSTRY BARNALA",
+            "state": "Punjab",
+            "date": "2026-11-03",
+            "lines": [
+                {
+                    "product": "UPVC Heavy Profile",
+                    "quantity": "10.000",
+                    "unit": "MT",
+                    "ratePaise": 5000000,
+                    "amountPaise": 50000000
+                }
+            ]
+        }
+        res_o = self.client.post("/api/v1/orders", json=order_payload)
+        self.assertEqual(res_o.status_code, 200)
+        o_id = res_o.json()["id"]
+
+        # Verify dashboard orders value increased
+        s_after_create = self.client.get("/api/v1/dashboard/summary").json()
+        self.assertEqual(s_after_create["ordersValuePaise"], val_base + 50000000)
+
+        # 3. Edit order: increase quantity from 10 MT to 15 MT (amount 75,000,000 paise)
+        patch_payload = {
+            "lines": [
+                {
+                    "product": "UPVC Heavy Profile",
+                    "orderedQuantity": "15.000",
+                    "unit": "MT",
+                    "ratePaise": 5000000,
+                    "amountPaise": 75000000
+                }
+            ]
+        }
+        res_patch = self.client.patch(f"/api/v1/orders/{o_id}", json=patch_payload)
+        self.assertEqual(res_patch.status_code, 200)
+        self.assertEqual(res_patch.json()["dispatchStatus"], "pending")
+
+        # Verify dashboard orders value updated to match edited value
+        s_after_edit = self.client.get("/api/v1/dashboard/summary").json()
+        self.assertEqual(s_after_edit["ordersValuePaise"], val_base + 75000000)
+
+        # 4. Quick dispatch the order (15 MT dispatched)
+        disp_res = self.client.post(f"/api/v1/orders/{o_id}/quick-dispatch", json={
+            "vehicleNo": "PB 10 CT 8899",
+            "notes": "Full load delivered"
+        })
+        self.assertEqual(disp_res.status_code, 200)
+
+        # Verify dashboard dispatched metric increased by 15 MT
+        s_after_disp = self.client.get("/api/v1/dashboard/summary").json()
+        disp_new = float(s_after_disp["dispatched"][0]["dispatchedQuantity"])
+        self.assertAlmostEqual(disp_new, disp_base + 15.0, places=2)
+
+        # 5. Void the dispatch
+        dsps = self.client.get("/api/v1/dispatches").json()["items"]
+        target_dsp = next(d for d in dsps if d["orderId"] == o_id and not d.get("voidedAt"))
+        res_void = self.client.post(f"/api/v1/dispatches/{target_dsp['id']}/void")
+        self.assertEqual(res_void.status_code, 200)
+
+        # Verify dispatched metric reverted
+        s_after_void = self.client.get("/api/v1/dashboard/summary").json()
+        self.assertAlmostEqual(float(s_after_void["dispatched"][0]["dispatchedQuantity"]), disp_base, places=2)
+
+        # 6. Delete the order
+        res_del = self.client.delete(f"/api/v1/orders/{o_id}", headers={"X-User-Role": "owner"})
+        self.assertEqual(res_del.status_code, 200)
+
+        # Verify dashboard completely reverted to baseline
+        s_final = self.client.get("/api/v1/dashboard/summary").json()
+        self.assertEqual(s_final["ordersValuePaise"], val_base)
+        self.assertEqual(s_final["orderCount"], s_base["orderCount"])
 
 if __name__ == '__main__':
     unittest.main()

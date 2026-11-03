@@ -89,6 +89,7 @@ function Register({
           userId={userId}
           onChanged={(orderId) =>
             invalidate(
+              syncKeys.dashboard,
               syncKeys.dispatchRegister,
               syncKeys.orderList(),
               ...(orderId ? [syncKeys.dispatch(orderId), syncKeys.order(orderId)] : []),

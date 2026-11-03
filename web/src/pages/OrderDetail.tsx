@@ -108,6 +108,7 @@ function OrderActions({
     try {
       await deleteOrder(order.id);
       toast.success(`Order ${orderLabel(order)} permanently deleted.`);
+      invalidate(syncKeys.dashboard, syncKeys.order(order.id), syncKeys.orderList());
       onChanged();
       navigate('/orders');
     } catch (cause) {
@@ -391,7 +392,7 @@ function OrderConsignments({
             isOwner={isOwner}
             userId={userId}
             onChanged={() =>
-              invalidate(syncKeys.dispatch(orderId), syncKeys.order(orderId), syncKeys.orderList())
+              invalidate(syncKeys.dashboard, syncKeys.dispatch(orderId), syncKeys.order(orderId), syncKeys.orderList())
             }
             emptyMessage="Nothing has been dispatched against this order yet — the balance above is still the whole of it."
           />
