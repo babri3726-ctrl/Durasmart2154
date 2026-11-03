@@ -438,24 +438,12 @@ def save_payment(payment: dict[str, Any]) -> dict[str, Any]:
             ),
         )
 
-        # Update party balance in integer paise
-        if customer_id:
-            conn.execute(
-                """
-                UPDATE parties 
-                SET balance_paise = MAX(0, balance_paise - ?),
-                    updated_at = ?
-                WHERE id = ? OR name = ?
-                """,
-                (amount_paise, now, customer_id, payment.get("customerName", "")),
-            )
-
         conn.commit()
 
     return payment
 
 def void_payment(payment_id: str) -> dict[str, Any] | None:
-    """Marks a payment voided and reverses the balance deduction in SQLite."""
+    """Marks a payment voided in SQLite."""
     now = datetime.now().isoformat()
     with get_connection() as conn:
         cur = conn.cursor()
@@ -468,21 +456,7 @@ def void_payment(payment_id: str) -> dict[str, Any] | None:
             payment["voidedAt"] = payment["voided_at"]
             return payment
 
-        amount_paise = payment["amount_paise"]
-        customer_id = payment["customer_id"]
-
         conn.execute("UPDATE payments SET voided_at = ? WHERE id = ?", (now, payment_id))
-
-        if customer_id:
-            conn.execute(
-                """
-                UPDATE parties 
-                SET balance_paise = balance_paise + ?,
-                    updated_at = ?
-                WHERE id = ? OR name = ?
-                """,
-                (amount_paise, now, customer_id, payment.get("customer_name", "")),
-            )
         conn.commit()
         payment["voided_at"] = now
         payment["voidedAt"] = now

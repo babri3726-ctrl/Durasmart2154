@@ -661,7 +661,7 @@ def get_unified_party_receivables() -> list[dict[str, Any]]:
         if not raw_name:
             continue
         key = raw_name.lower()
-        order_val = int(o.get("ordersValuePaise") or o.get("totalPaise") or o.get("valuePaise") or 0)
+        order_val = int(o.get("orderBalancePaise") if "orderBalancePaise" in o else (o.get("ordersValuePaise") or o.get("totalPaise") or o.get("valuePaise") or 0))
         if key in parties_by_key:
             parties_by_key[key]["order_paise"] += order_val
         else:
@@ -2760,22 +2760,41 @@ def create_payment(body: PaymentCreate):
     STATE["payments"].insert(0, saved)
 
     # Auto-deduct balances in memory & SQLite
+    rem_order_paise = amt_paise
     for d in STATE.get("debtors", []):
         if d.get("id") == cust_id or (cust_name and d.get("name", "").strip().lower() == cust_name.strip().lower()):
             old_paise = round(float(d.get("balance", 0.0)) * 100)
+            deduct_from_base = min(old_paise, amt_paise)
             new_paise = max(0, old_paise - amt_paise)
             d["balance"] = round(new_paise / 100.0, 2)
             d["balance_formatted"] = f"{d['balance']:.2f}"
+            rem_order_paise = amt_paise - deduct_from_base
             try:
                 db.save_party(d)
             except Exception as e:
                 print(f"Warning: Failed to save debtor party: {e}")
 
+    # If payment remainder exists, apply it to the customer's active uncancelled orders
+    if rem_order_paise > 0:
+        for o in STATE.get("orders", []):
+            if o.get("status") in ["cancelled", "draft"]:
+                continue
+            if o.get("customerId") == cust_id or (cust_name and (o.get("customerName") or "").strip().lower() == cust_name.strip().lower()):
+                cur_val = int(o.get("orderBalancePaise") if "orderBalancePaise" in o else (o.get("ordersValuePaise") or o.get("totalPaise") or o.get("valuePaise") or 0))
+                deduct = min(cur_val, rem_order_paise)
+                o["paidPaise"] = int(o.get("paidPaise", 0)) + deduct
+                o["orderBalancePaise"] = cur_val - deduct
+                rem_order_paise -= deduct
+                if rem_order_paise <= 0:
+                    break
+
     for c in STATE.get("customers", []):
         if c.get("id") == cust_id or (cust_name and c.get("name", "").strip().lower() == cust_name.strip().lower()):
-            c["outstandingPaise"] = max(0, c.get("outstandingPaise", 0) - amt_paise)
-            c["overduePaise"] = max(0, c.get("overduePaise", 0) - amt_paise)
-            c["isOverdue"] = c["overduePaise"] > 0
+            deducted_from_base = amt_paise - rem_order_paise
+            if deducted_from_base > 0:
+                c["outstandingPaise"] = max(0, c.get("outstandingPaise", 0) - deducted_from_base)
+                c["overduePaise"] = max(0, c.get("overduePaise", 0) - deducted_from_base)
+                c["isOverdue"] = c["overduePaise"] > 0
             c["lastPaymentDate"] = pay_date
             try:
                 db.save_party(c)
@@ -2806,27 +2825,44 @@ def void_payment(payment_id: str):
     # Void in SQLite
     db.void_payment(payment_id)
 
-    # Re-credit balances in memory & SQLite
-    for d in STATE.get("debtors", []):
-        if d.get("id") == cust_id or (cust_name and d.get("name", "").strip().lower() == cust_name.strip().lower()):
-            old_paise = round(float(d.get("balance", 0.0)) * 100)
-            new_paise = old_paise + amt_paise
-            d["balance"] = round(new_paise / 100.0, 2)
-            d["balance_formatted"] = f"{d['balance']:.2f}"
-            try:
-                db.save_party(d)
-            except Exception as e:
-                print(f"Warning: Failed to save debtor party: {e}")
+    # Revert any order reductions for this customer
+    revert_order_paise = amt_paise
+    for o in STATE.get("orders", []):
+        if o.get("status") in ["cancelled", "draft"]:
+            continue
+        if o.get("customerId") == cust_id or (cust_name and (o.get("customerName") or "").strip().lower() == cust_name.strip().lower()):
+            paid = int(o.get("paidPaise", 0))
+            if paid > 0:
+                rev = min(paid, revert_order_paise)
+                o["paidPaise"] = paid - rev
+                o["orderBalancePaise"] = int(o.get("orderBalancePaise", 0)) + rev
+                revert_order_paise -= rev
+                if revert_order_paise <= 0:
+                    break
 
-    for c in STATE.get("customers", []):
-        if c.get("id") == cust_id or (cust_name and c.get("name", "").strip().lower() == cust_name.strip().lower()):
-            c["outstandingPaise"] = c.get("outstandingPaise", 0) + amt_paise
-            c["overduePaise"] = c.get("overduePaise", 0) + amt_paise
-            c["isOverdue"] = c["overduePaise"] > 0
-            try:
-                db.save_party(c)
-            except Exception as e:
-                print(f"Warning: Failed to save customer party: {e}")
+    # Re-credit balances in memory & SQLite only for the portion that originally deducted from base balance
+    if revert_order_paise > 0:
+        for d in STATE.get("debtors", []):
+            if d.get("id") == cust_id or (cust_name and d.get("name", "").strip().lower() == cust_name.strip().lower()):
+                old_paise = round(float(d.get("balance", 0.0)) * 100)
+                new_paise = old_paise + revert_order_paise
+                d["balance"] = round(new_paise / 100.0, 2)
+                d["balance_formatted"] = f"{d['balance']:.2f}"
+                try:
+                    db.save_party(d)
+                except Exception as e:
+                    print(f"Warning: Failed to save debtor party: {e}")
+
+    if revert_order_paise > 0:
+        for c in STATE.get("customers", []):
+            if c.get("id") == cust_id or (cust_name and c.get("name", "").strip().lower() == cust_name.strip().lower()):
+                c["outstandingPaise"] = c.get("outstandingPaise", 0) + revert_order_paise
+                c["overduePaise"] = c.get("overduePaise", 0) + revert_order_paise
+                c["isOverdue"] = c["overduePaise"] > 0
+                try:
+                    db.save_party(c)
+                except Exception as e:
+                    print(f"Warning: Failed to save customer party: {e}")
 
     return pay
 

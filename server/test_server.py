@@ -46,43 +46,72 @@ class TestServerApi(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
 
     def test_05_payment_collection_and_receivables_auto_update(self):
-        # 1. Baseline summary
-        r0 = self.client.get("/api/v1/dashboard/summary")
-        self.assertEqual(r0.status_code, 200)
-        base = r0.json()
-        base_collected = base["collectedPaise"]
-        base_outstanding = base["outstandingPaise"]
-        base_overdue = base["overduePaise"]
+        from server.main import STATE
+        import server.db as db
 
-        # 2. Record payment of 25,000 INR (2,500,000 paise)
-        pay_amt = 2500000
-        pay_res = self.client.post("/api/v1/payments", json={
-            "customerId": "DEBTOR-MAN-0140",
-            "customerName": "Bansal Steel Test Corp",
-            "amountPaise": pay_amt,
-            "method": "NEFT",
-            "reference": "TEST-NEFT-001"
-        })
-        self.assertEqual(pay_res.status_code, 200)
-        pay_data = pay_res.json()
-        payment_id = pay_data["id"]
+        # Ensure a test debtor has temporary balance and overdue for this test
+        test_cust = next((c for c in STATE["customers"] if c["id"] == "DEBTOR-MAN-0140"), None)
+        if not test_cust:
+            test_cust = next((c for c in STATE["customers"] if c["id"] == "DEBTOR-HR-001"), None)
 
-        # 3. Check updated summary
-        r1 = self.client.get("/api/v1/dashboard/summary")
-        s1 = r1.json()
-        self.assertEqual(s1["collectedPaise"], base_collected + pay_amt, "collectedPaise must increase by payment amount")
-        self.assertEqual(s1["outstandingPaise"], base_outstanding - pay_amt, "outstandingPaise must decrease by payment amount")
-        self.assertEqual(s1["overduePaise"], base_overdue - pay_amt, "overduePaise must decrease when overdue debtor pays")
+        test_cust["balance"] = 50000.0
+        test_cust["balance_formatted"] = "50000.00"
+        test_cust["outstandingPaise"] = 5000000
+        test_cust["overduePaise"] = 5000000
+        test_cust["isOverdue"] = True
+        try:
+            db.save_party(test_cust)
+        except Exception:
+            pass
 
-        # 4. Void payment and verify reversal
-        void_res = self.client.post(f"/api/v1/payments/{payment_id}/void")
-        self.assertEqual(void_res.status_code, 200)
+        try:
+            # 1. Baseline summary
+            r0 = self.client.get("/api/v1/dashboard/summary")
+            self.assertEqual(r0.status_code, 200)
+            base = r0.json()
+            base_collected = base["collectedPaise"]
+            base_outstanding = base["outstandingPaise"]
+            base_overdue = base["overduePaise"]
 
-        r2 = self.client.get("/api/v1/dashboard/summary")
-        s2 = r2.json()
-        self.assertEqual(s2["collectedPaise"], base_collected, "collectedPaise must revert after voiding")
-        self.assertEqual(s2["outstandingPaise"], base_outstanding, "outstandingPaise must revert after voiding")
-        self.assertEqual(s2["overduePaise"], base_overdue, "overduePaise must revert after voiding")
+            # 2. Record payment of 25,000 INR (2,500,000 paise)
+            pay_amt = 2500000
+            pay_res = self.client.post("/api/v1/payments", json={
+                "customerId": test_cust["id"],
+                "customerName": test_cust["name"],
+                "amountPaise": pay_amt,
+                "method": "NEFT",
+                "reference": "TEST-NEFT-001"
+            })
+            self.assertEqual(pay_res.status_code, 200)
+            pay_data = pay_res.json()
+            payment_id = pay_data["id"]
+
+            # 3. Check updated summary
+            r1 = self.client.get("/api/v1/dashboard/summary")
+            s1 = r1.json()
+            self.assertEqual(s1["collectedPaise"], base_collected + pay_amt, "collectedPaise must increase by payment amount")
+            self.assertEqual(s1["outstandingPaise"], base_outstanding - pay_amt, "outstandingPaise must decrease by payment amount")
+            self.assertEqual(s1["overduePaise"], base_overdue - pay_amt, "overduePaise must decrease when overdue debtor pays")
+
+            # 4. Void payment and verify reversal
+            void_res = self.client.post(f"/api/v1/payments/{payment_id}/void")
+            self.assertEqual(void_res.status_code, 200)
+
+            r2 = self.client.get("/api/v1/dashboard/summary")
+            s2 = r2.json()
+            self.assertEqual(s2["collectedPaise"], base_collected, "collectedPaise must revert after voiding")
+            self.assertEqual(s2["outstandingPaise"], base_outstanding, "outstandingPaise must revert after voiding")
+            self.assertEqual(s2["overduePaise"], base_overdue, "overduePaise must revert after voiding")
+        finally:
+            test_cust["balance"] = 0.0
+            test_cust["balance_formatted"] = "0.00"
+            test_cust["outstandingPaise"] = 0
+            test_cust["overduePaise"] = 0
+            test_cust["isOverdue"] = False
+            try:
+                db.save_party(test_cust)
+            except Exception:
+                pass
 
     def test_06_delayed_orders_and_dispatch_kpi_update(self):
         # 1. Create a delayed test order with past expectedDispatchDate
@@ -326,32 +355,56 @@ class TestServerApi(unittest.TestCase):
 
     def test_13_opening_balances_ledger_and_targets(self):
         cust_id = "DEBTOR-HR-001"
-        # 1. Add opening balance
-        ob_payload = {
-            "asOf": "2026-04-01",
-            "amountPaise": 5000000,
-            "direction": "owes",
-            "source": "manual"
-        }
-        res_ob = self.client.post(f"/api/v1/customers/{cust_id}/opening-balances", json=ob_payload)
-        self.assertEqual(res_ob.status_code, 200)
-        ob_data = res_ob.json()
-        self.assertEqual(ob_data["amountPaise"], 5000000)
+        try:
+            # 1. Add opening balance
+            ob_payload = {
+                "asOf": "2026-04-01",
+                "amountPaise": 5000000,
+                "direction": "owes",
+                "source": "manual"
+            }
+            res_ob = self.client.post(f"/api/v1/customers/{cust_id}/opening-balances", json=ob_payload)
+            self.assertEqual(res_ob.status_code, 200)
+            ob_data = res_ob.json()
+            self.assertEqual(ob_data["amountPaise"], 5000000)
 
-        # 2. Get customer ledger
-        res_ledg = self.client.get(f"/api/v1/customers/{cust_id}/ledger")
-        self.assertEqual(res_ledg.status_code, 200)
-        ledger = res_ledg.json()
-        self.assertIn("items", ledger)
-        self.assertIn("total", ledger)
-        self.assertGreaterEqual(ledger["total"], 1)
-        self.assertIn("balancePaise", ledger["items"][0])
+            # 2. Get customer ledger
+            res_ledg = self.client.get(f"/api/v1/customers/{cust_id}/ledger")
+            self.assertEqual(res_ledg.status_code, 200)
+            ledger = res_ledg.json()
+            self.assertIn("items", ledger)
+            self.assertIn("total", ledger)
+            self.assertGreaterEqual(ledger["total"], 1)
+            self.assertIn("balancePaise", ledger["items"][0])
 
-        # 3. Targets endpoint
-        res_t = self.client.get("/api/v1/targets")
-        self.assertEqual(res_t.status_code, 200)
-        t_data = res_t.json()
-        self.assertIn("items", t_data)
+            # 3. Targets endpoint
+            res_t = self.client.get("/api/v1/targets")
+            self.assertEqual(res_t.status_code, 200)
+            t_data = res_t.json()
+            self.assertIn("items", t_data)
+        finally:
+            import server.db as db
+            from server.main import STATE
+            try:
+                with db.get_connection() as conn:
+                    conn.execute("DELETE FROM opening_balances WHERE customer_id = ?", (cust_id,))
+                    conn.commit()
+            except Exception:
+                pass
+            if cust_id in STATE.get("opening_balances", {}):
+                STATE["opening_balances"][cust_id] = []
+            cust = next((c for c in STATE.get("customers", []) if c["id"] == cust_id), None)
+            if cust:
+                cust["openingPaise"] = 0
+                cust["outstandingPaise"] = 0
+                cust["balance"] = 0.0
+                cust["balance_formatted"] = "0.00"
+                cust["overduePaise"] = 0
+                cust["isOverdue"] = False
+                try:
+                    db.save_party(cust)
+                except Exception:
+                    pass
 
     def test_14_order_edit_and_delete(self):
         # 1. Create order
