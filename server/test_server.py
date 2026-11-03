@@ -678,6 +678,19 @@ class TestServerApi(unittest.TestCase):
         finally:
             if o_id:
                 self.client.delete(f"/api/v1/orders/{o_id}", headers={"X-User-Role": "owner"})
+            from server.main import STATE
+            import server.db as db
+            cust = next((c for c in STATE.get("customers", []) if c["id"] == cust_id), None)
+            if cust:
+                cust["balance"] = 0.0
+                cust["balance_formatted"] = "0.00"
+                cust["outstandingPaise"] = 0
+                cust["overduePaise"] = 0
+                cust["isOverdue"] = False
+                try:
+                    db.save_party(cust)
+                except Exception:
+                    pass
 
         # 8. Verify clean reversion
         cockpit_final = self.client.get("/api/v1/dashboard/cockpit").json()

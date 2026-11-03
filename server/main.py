@@ -230,14 +230,26 @@ try:
     if _persisted.get("debtors"):
         _existing_d_ids = {d["id"] for d in STATE.get("debtors", [])}
         for _d in _persisted["debtors"]:
+            bal_flt = float(_d.get("balance", 0.0))
+            bal_p = int(round(bal_flt * 100))
             if _d["id"] not in _existing_d_ids:
+                _d["outstandingPaise"] = bal_p
+                if bal_p <= 0:
+                    _d["overduePaise"] = 0
+                    _d["isOverdue"] = False
                 STATE["debtors"].append(_d)
                 _existing_d_ids.add(_d["id"])
             else:
                 _match = next((m for m in STATE["debtors"] if m["id"] == _d["id"]), None)
                 if _match:
-                    _match["balance"] = _d["balance"]
-                    _match["balance_formatted"] = f"{float(_d['balance']):.2f}"
+                    _match["balance"] = bal_flt
+                    _match["balance_formatted"] = f"{bal_flt:.2f}"
+                    _match["outstandingPaise"] = bal_p
+                    if bal_p <= 0:
+                        _match["overduePaise"] = 0
+                        _match["isOverdue"] = False
+                    else:
+                        _match["overduePaise"] = min(bal_p, _match.get("overduePaise", bal_p))
     # Set STATE["customers"] to STATE["debtors"] for unified single source of truth
     STATE["customers"] = STATE["debtors"]
 except Exception as e:
@@ -498,9 +510,9 @@ def get_dashboard_summary(from_date: str | None = Query(None, alias="from"), to_
     outstanding_paise = tot_debtor_bal if tot_debtor_bal > 0 else tot_cust_bal
 
     overdue_paise = sum(
-        int(c.get("overduePaise", c.get("outstandingPaise", 0)))
+        min(int(c.get("outstandingPaise", 0)), int(c.get("overduePaise", c.get("outstandingPaise", 0))))
         for c in customers
-        if c.get("overduePaise", 0) > 0 or (c.get("isOverdue") and c.get("outstandingPaise", 0) > 0)
+        if int(c.get("outstandingPaise", 0)) > 0 and (c.get("overduePaise", 0) > 0 or c.get("isOverdue"))
     )
 
     pending_cust = len([c for c in customers if c.get("status") in ["pendingApproval", "pending"]])
