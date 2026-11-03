@@ -3650,8 +3650,22 @@ def get_stock_summary():
     metal_qty = snap["summary"]["total_metal_kg"] if snap else "1444769.000"
     profile_qty = snap["summary"].get("total_profile_kg", "419662.000") if snap else "419662.000"
     gp_qty = snap["summary"].get("total_gp_kg", "765.000") if snap else "765.000"
-    upvc_pcs = str(snap["summary"]["total_upvc_pcs"]) if snap else "2043"
-    total_footage = sum(item["pieces"] * item["feet"] for item in upvc_matrix) if upvc_matrix else 24500
+    upvc_matrix = snap.get("upvc_matrix", []) if snap else []
+    upvc_new_matrix = [m for m in upvc_matrix if m.get("stockType") == "new"]
+    upvc_old_matrix = [m for m in upvc_matrix if m.get("stockType") == "old"]
+    upvc_waste_matrix = [m for m in upvc_matrix if m.get("stockType") == "waste"]
+
+    upvc_new_pcs = sum(m.get("pieces", 0) for m in upvc_new_matrix)
+    upvc_old_pcs = sum(m.get("pieces", 0) for m in upvc_old_matrix)
+    upvc_waste_pcs = sum(m.get("pieces", 0) for m in upvc_waste_matrix)
+    total_upvc_pcs = sum(m.get("pieces", 0) for m in upvc_matrix)
+
+    upvc_new_footage = sum(m.get("pieces", 0) * m.get("feet", 0) for m in upvc_new_matrix)
+    upvc_old_footage = sum(m.get("pieces", 0) * m.get("feet", 0) for m in upvc_old_matrix)
+    upvc_waste_footage = sum(m.get("pieces", 0) * m.get("feet", 0) for m in upvc_waste_matrix)
+    total_footage = sum(m.get("pieces", 0) * m.get("feet", 0) for m in upvc_matrix) if upvc_matrix else 266724
+
+    upvc_pcs = str(total_upvc_pcs) if snap else "19753"
     accessories_total = sum(accessories.values()) if accessories else 528474
     total_items = len(metal_items) + len(metal_profiles) + len(gp_sheets) + len(upvc_matrix) + len(accessory_items)
 
@@ -3906,18 +3920,66 @@ def get_stock_summary():
                 "note": "Extracted from TOTAL STOCK Col G/H in 1-8-26.xlsx"
             },
             {
+                "key": "upvc-new",
+                "label": "UPVC New",
+                "sourceSheet": "UPVC TOTAL STOCK",
+                "status": "ready",
+                "figureCount": len(upvc_new_matrix) if upvc_new_matrix else 42,
+                "withheldCount": 0,
+                "quantity": None,
+                "withheldQuantity": None,
+                "unit": "pcs",
+                "pieces": str(upvc_new_pcs),
+                "footage": f"{upvc_new_footage:.3f}",
+                "negativeCount": sum(1 for m in upvc_new_matrix if m.get("pieces", 0) < 0),
+                "staleCount": 0,
+                "note": "New stock band of UPVC TOTAL STOCK in 1-8-26.xlsx"
+            },
+            {
+                "key": "upvc-old",
+                "label": "UPVC Old",
+                "sourceSheet": "UPVC TOTAL STOCK",
+                "status": "ready",
+                "figureCount": len(upvc_old_matrix) if upvc_old_matrix else 21,
+                "withheldCount": 0,
+                "quantity": None,
+                "withheldQuantity": None,
+                "unit": "pcs",
+                "pieces": str(upvc_old_pcs),
+                "footage": f"{upvc_old_footage:.3f}",
+                "negativeCount": sum(1 for m in upvc_old_matrix if m.get("pieces", 0) < 0),
+                "staleCount": 0,
+                "note": "Old stock band of UPVC TOTAL STOCK in 1-8-26.xlsx"
+            },
+            {
+                "key": "upvc-waste",
+                "label": "UPVC Waste",
+                "sourceSheet": "UPVC TOTAL STOCK",
+                "status": "ready",
+                "figureCount": len(upvc_waste_matrix) if upvc_waste_matrix else 21,
+                "withheldCount": 0,
+                "quantity": None,
+                "withheldQuantity": None,
+                "unit": "pcs",
+                "pieces": str(upvc_waste_pcs),
+                "footage": f"{upvc_waste_footage:.3f}",
+                "negativeCount": sum(1 for m in upvc_waste_matrix if m.get("pieces", 0) < 0),
+                "staleCount": 0,
+                "note": "Waste stock band of UPVC TOTAL STOCK in 1-8-26.xlsx"
+            },
+            {
                 "key": "upvc-total",
                 "label": "UPVC Roofing Matrix",
                 "sourceSheet": "UPVC TOTAL STOCK",
                 "status": "ready",
-                "figureCount": len(upvc_matrix) if upvc_matrix else 28,
+                "figureCount": len(upvc_matrix) if upvc_matrix else 84,
                 "withheldCount": 0,
                 "quantity": None,
                 "withheldQuantity": None,
                 "unit": "pcs",
                 "pieces": upvc_pcs,
                 "footage": f"{total_footage:.3f}",
-                "negativeCount": 0,
+                "negativeCount": sum(1 for m in upvc_matrix if m.get("pieces", 0) < 0),
                 "staleCount": 0,
                 "note": "Extracted from UPVC TOTAL STOCK matrix in 1-8-26.xlsx"
             },
@@ -3974,22 +4036,25 @@ def get_upvc_stock(
     snap = ensure_latest_stock_snapshot()
     raw_matrix = snap.get("upvc_matrix", []) if snap else []
 
-    # Map raw matrix items to UPVC Standard 'new' rows
+    # Map raw matrix items to UPVC rows with proper stockType
     all_rows = []
     for item in raw_matrix:
         feet = item["feet"]
         pcs = item["pieces"]
         color = item["color"]
+        stype = item.get("stockType", "new")
+        stype_label = item.get("stockTypeLabel", "UPVC Standard")
+        is_neg = pcs < 0
         all_rows.append({
-            "stockType": "new",
-            "stockTypeLabel": "UPVC Standard",
+            "stockType": stype,
+            "stockTypeLabel": stype_label,
             "colour": color,
             "lengthFt": feet,
-            "label": f"UPVC {color} {feet}ft",
+            "label": f"UPVC {color} {feet}ft ({stype_label})",
             "pieces": str(pcs),
             "footage": f"{pcs * feet:.3f}",
             "stale": False,
-            "negative": False
+            "negative": is_neg
         })
 
     # Apply filters
@@ -4079,7 +4144,7 @@ def get_upvc_stock(
         "rowCount": len(filtered_rows),
         "footageRowCount": len(filtered_rows),
         "missingLengthCount": 0,
-        "negativeCount": 0,
+        "negativeCount": sum(1 for r in filtered_rows if r["negative"]),
         "staleCount": 0
     }
 

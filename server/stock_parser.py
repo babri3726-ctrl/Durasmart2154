@@ -170,25 +170,68 @@ def extract_3sheet_stock(file_path: str = DEFAULT_ONEDRIVE_PATH) -> dict:
 
         if "UPVC TOTAL STOCK" in sheets_found:
             ws_upvc = wb["UPVC TOTAL STOCK"]
-            for row in ws_upvc.iter_rows(values_only=True):
-                if not row or len(row) < 3:
+            max_r = ws_upvc.max_row
+            sec_ranges = {"new": [1, max_r], "old": None, "waste": None}
+            for r in range(1, max_r + 1):
+                v = ws_upvc.cell(r, 1).value
+                v_str = str(v).strip().upper() if v else ""
+                if "UPVC OLD" in v_str:
+                    sec_ranges["new"][1] = r - 1
+                    sec_ranges["old"] = [r, max_r]
+                elif "UPVC WASTE" in v_str:
+                    if sec_ranges["old"]:
+                        sec_ranges["old"][1] = r - 1
+                    else:
+                        sec_ranges["new"][1] = r - 1
+                    sec_ranges["waste"] = [r, max_r]
+
+            col_triplets = [
+                (1, 2, 3),   # A, B, C
+                (5, 6, 7),   # E, F, G
+                (9, 10, 11)  # I, J, K
+            ]
+            VALID_COLORS = {"BLUE", "RED", "BROWN", "GREEN", "WHITE", "GREY"}
+            LABEL_MAP = {
+                "new": "UPVC Standard",
+                "old": "UPVC Old",
+                "waste": "UPVC Waste"
+            }
+
+            for sec_key, r_range in sec_ranges.items():
+                if not r_range:
                     continue
-                color_code, feet, count = row[0], row[1], row[2]
-                if color_code and feet and count is not None:
-                    color_str = str(color_code).strip()
-                    if any(color_str.startswith(c) for c in ["BLUE", "RED", "BROWN", "GREEN", "WHITE", "GREY"]):
-                        try:
-                            feet_num = int(feet)
-                            pcs = int(count)
-                            total_upvc_pcs += pcs
-                            color_name = color_str.split()[0]
-                            upvc_matrix.append({
-                                "color": color_name,
-                                "feet": feet_num,
-                                "pieces": pcs
-                            })
-                        except (ValueError, TypeError):
-                            pass
+                start_r, end_r = r_range
+                sec_label = LABEL_MAP.get(sec_key, "UPVC Standard")
+                for r in range(start_r, end_r + 1):
+                    for c_color, c_feet, c_tot in col_triplets:
+                        c_val = ws_upvc.cell(r, c_color).value
+                        if not c_val:
+                            continue
+                        c_str = str(c_val).strip()
+                        tokens = c_str.split()
+                        if not tokens:
+                            continue
+                        base_color = tokens[0].upper()
+                        if base_color in VALID_COLORS:
+                            feet_val = ws_upvc.cell(r, c_feet).value
+                            tot_val = ws_upvc.cell(r, c_tot).value
+                            if feet_val is not None and tot_val is not None:
+                                try:
+                                    feet_num = int(float(feet_val))
+                                    pcs = int(float(tot_val))
+                                    total_upvc_pcs += pcs
+                                    upvc_matrix.append({
+                                        "stockType": sec_key,
+                                        "stockTypeLabel": sec_label,
+                                        "color": base_color,
+                                        "color_raw": c_str,
+                                        "feet": feet_num,
+                                        "pieces": pcs,
+                                        "rowNumber": r,
+                                        "colNumber": c_color
+                                    })
+                                except (ValueError, TypeError):
+                                    pass
 
         # 3. UPVC ITEM (Accessories: Ridge, Jhallar, Caps, Hira Ridge)
         accessories = {}
