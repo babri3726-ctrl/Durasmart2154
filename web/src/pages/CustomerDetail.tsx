@@ -8,6 +8,7 @@ import { fmtDateTime } from '../lib/format';
 import { toast } from '../lib/toast';
 import { useLiveSession } from '../lib/liveSession';
 import { exactRupees, idempotencyKeyFor, type KeyedSubmission } from '../lib/entryRules';
+import { invalidate, syncKeys } from '../lib/syncStore';
 import { useLiveList } from '../lib/useLiveList';
 import { useResource } from '../lib/useResource';
 import {
@@ -198,7 +199,10 @@ export default function CustomerDetail() {
             customerId={c.id}
             status={c.status}
             isOwner={user?.role === 'owner'}
-            onDecided={() => customer.sync.refresh()}
+            onDecided={() => {
+              customer.sync.refresh();
+              invalidate(syncKeys.customers, syncKeys.debtors, syncKeys.dashboard);
+            }}
           />
           {c.status !== 'pendingApproval' && (
             <p className="mt-3 text-[11px] text-muted">

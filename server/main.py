@@ -608,6 +608,107 @@ def get_dashboard_summary(from_date: str | None = Query(None, alias="from"), to_
         ]
     }
 
+def get_unified_party_receivables() -> list[dict[str, Any]]:
+    """
+    Returns a unified, deduplicated list of parties with live receivable balances.
+    Merges:
+      1. Debtors master & manual entries (STATE['debtors'])
+      2. Customers master & opening balances (STATE['customers'])
+      3. Active non-cancelled order balances
+    Deduplicates strictly by normalized name so that duplicate dealer records
+    (e.g. DEBTOR-MAN-XXXX and CUST-D-XXXX) collapse into a single canonical row.
+    """
+    parties_by_key: dict[str, dict[str, Any]] = {}
+
+    # 1. Base from STATE['debtors']
+    for d in STATE.get("debtors", []):
+        raw_name = (d.get("name") or "").strip()
+        if not raw_name:
+            continue
+        key = raw_name.lower()
+        bal_paise = round(float(d.get("balance", 0.0)) * 100)
+        if key not in parties_by_key:
+            parties_by_key[key] = {
+                "id": d.get("id"),
+                "name": raw_name,
+                "city": d.get("city") or d.get("district") or "",
+                "state": d.get("state") or "",
+                "salesperson": d.get("salesperson") or "Unassigned",
+                "salespersonId": d.get("salespersonId") or "EMP-SP-01",
+                "balance_paise": bal_paise,
+                "order_paise": 0,
+            }
+        else:
+            existing = parties_by_key[key]
+            existing["balance_paise"] = max(existing["balance_paise"], bal_paise)
+            if not existing["city"] and (d.get("city") or d.get("district")):
+                existing["city"] = d.get("city") or d.get("district")
+            if existing["salesperson"] == "Unassigned" and d.get("salesperson"):
+                existing["salesperson"] = d.get("salesperson")
+
+    # 2. Merge from STATE['customers']
+    for c in STATE.get("customers", []):
+        raw_name = (c.get("name") or "").strip()
+        if not raw_name:
+            continue
+        key = raw_name.lower()
+        cust_bal = int(c.get("outstandingPaise", 0)) or int(c.get("openingPaise", 0))
+        if key not in parties_by_key:
+            parties_by_key[key] = {
+                "id": c.get("id"),
+                "name": raw_name,
+                "city": c.get("city") or c.get("district") or "",
+                "state": c.get("state") or "",
+                "salesperson": c.get("salesperson") or c.get("salespersonName") or "Unassigned",
+                "salespersonId": c.get("salespersonId") or "EMP-SP-01",
+                "balance_paise": cust_bal,
+                "order_paise": 0,
+            }
+        else:
+            existing = parties_by_key[key]
+            existing["balance_paise"] = max(existing["balance_paise"], cust_bal)
+            if not existing["city"] and (c.get("city") or c.get("district")):
+                existing["city"] = c.get("city") or c.get("district")
+
+    # 3. Add active uncancelled order balances
+    for o in STATE.get("orders", []):
+        if o.get("status") in ["cancelled", "draft"]:
+            continue
+        raw_name = (o.get("customerName") or "").strip()
+        if not raw_name:
+            continue
+        key = raw_name.lower()
+        order_val = int(o.get("ordersValuePaise") or o.get("totalPaise") or o.get("valuePaise") or 0)
+        if key in parties_by_key:
+            parties_by_key[key]["order_paise"] += order_val
+        else:
+            parties_by_key[key] = {
+                "id": o.get("customerId") or f"CUST-ORD-{len(parties_by_key)+1:04d}",
+                "name": raw_name,
+                "city": o.get("state") or "",
+                "state": o.get("state") or "",
+                "salesperson": o.get("salespersonName") or "Unassigned",
+                "salespersonId": o.get("salespersonId") or "EMP-SP-01",
+                "balance_paise": 0,
+                "order_paise": order_val,
+            }
+
+    result = []
+    for p in parties_by_key.values():
+        total_paise = max(0, p["balance_paise"] + p["order_paise"])
+        result.append({
+            "id": p["id"],
+            "name": p["name"],
+            "city": p["city"],
+            "state": p["state"],
+            "salesperson": p["salesperson"],
+            "salespersonId": p["salespersonId"],
+            "balance_paise": total_paise,
+            "balance": round(total_paise / 100.0, 2)
+        })
+
+    return result
+
 @app.get("/api/v1/dashboard/cockpit")
 def get_dashboard_cockpit(from_date: str | None = Query(None, alias="from"), to_date: str | None = Query(None, alias="to")):
     summary = get_dashboard_summary(from_date, to_date)
@@ -625,17 +726,22 @@ def get_dashboard_cockpit(from_date: str | None = Query(None, alias="from"), to_
             "itemsCount": len(o.get("lines", []))
         })
     
-    # Top Debtors (top 6 by balance or alphabetical)
-    debtors = sorted(STATE.get("debtors", []), key=lambda d: float(d.get("balance", 0.0)), reverse=True)[:6]
+    # Top Debtors (top 6 by balance or alphabetical, strictly deduplicated by dealer name)
+    unified_parties = get_unified_party_receivables()
+    sorted_debtors = sorted(
+        unified_parties,
+        key=lambda d: (d["balance_paise"], d["name"]),
+        reverse=True
+    )[:6]
     top_debtors = [
         {
-            "id": d.get("id"),
-            "name": d.get("name"),
-            "city": d.get("city", d.get("district", "")),
-            "salesperson": d.get("salesperson", "Unassigned"),
-            "balance": float(d.get("balance", 0.0))
+            "id": d["id"],
+            "name": d["name"],
+            "city": d["city"],
+            "salesperson": d["salesperson"],
+            "balance": d["balance"]
         }
-        for d in debtors
+        for d in sorted_debtors
     ]
 
     # Territories Progress from HR-PB targets + recorded dispatches
@@ -1062,6 +1168,16 @@ def create_customer_opening_balance(customer_id: str, body: OpeningBalanceCreate
     except Exception:
         pass
 
+    # Mirror balance to matching debtor in STATE['debtors'] if present
+    for d in STATE.get("debtors", []):
+        if d.get("id") == customer_id or d.get("name", "").strip().lower() == cust.get("name", "").strip().lower():
+            d["balance"] = round(cust.get("outstandingPaise", 0) / 100.0, 2)
+            d["balance_formatted"] = f"{d['balance']:.2f}"
+            try:
+                db.save_party(d)
+            except Exception:
+                pass
+
     return entry
 
 @app.get("/api/v1/customers/{customer_id}/opening-balances/history")
@@ -1167,7 +1283,7 @@ def create_debtor(body: DebtorCreate):
         sp_id = next((e["id"] for e in STATE.get("employees", []) if e["name"].lower() == sp_name.lower()), "EMP-SP-01")
         bal_paise = round(float(body.balance or 0.0) * 100)
         cust = {
-            "id": f"CUST-D-{len(STATE['customers']) + 1:04d}",
+            "id": new_id,
             "name": body.name.strip(),
             "city": body.city or "",
             "district": body.district or "",
@@ -2739,24 +2855,28 @@ def create_payment(body: PaymentCreate):
             saved[k] = v
     STATE["payments"].insert(0, saved)
 
-    # Auto-deduct balances in memory
-    matched_d = next((d for d in STATE.get("debtors", []) if d["id"] == cust_id), None)
-    if not matched_d and cust_name:
-        matched_d = next((d for d in STATE.get("debtors", []) if d["name"].lower() == cust_name.lower()), None)
-    if matched_d:
-        old_paise = round(float(matched_d.get("balance", 0.0)) * 100)
-        new_paise = max(0, old_paise - amt_paise)
-        matched_d["balance"] = round(new_paise / 100.0, 2)
-        matched_d["balance_formatted"] = f"{matched_d['balance']:.2f}"
+    # Auto-deduct balances in memory & SQLite
+    for d in STATE.get("debtors", []):
+        if d.get("id") == cust_id or (cust_name and d.get("name", "").strip().lower() == cust_name.strip().lower()):
+            old_paise = round(float(d.get("balance", 0.0)) * 100)
+            new_paise = max(0, old_paise - amt_paise)
+            d["balance"] = round(new_paise / 100.0, 2)
+            d["balance_formatted"] = f"{d['balance']:.2f}"
+            try:
+                db.save_party(d)
+            except Exception as e:
+                print(f"Warning: Failed to save debtor party: {e}")
 
-    matched_c = next((c for c in STATE.get("customers", []) if c["id"] == cust_id), None)
-    if not matched_c and cust_name:
-        matched_c = next((c for c in STATE.get("customers", []) if c["name"].lower() == cust_name.lower()), None)
-    if matched_c:
-        matched_c["outstandingPaise"] = max(0, matched_c.get("outstandingPaise", 0) - amt_paise)
-        matched_c["overduePaise"] = max(0, matched_c.get("overduePaise", 0) - amt_paise)
-        matched_c["isOverdue"] = matched_c["overduePaise"] > 0
-        matched_c["lastPaymentDate"] = pay_date
+    for c in STATE.get("customers", []):
+        if c.get("id") == cust_id or (cust_name and c.get("name", "").strip().lower() == cust_name.strip().lower()):
+            c["outstandingPaise"] = max(0, c.get("outstandingPaise", 0) - amt_paise)
+            c["overduePaise"] = max(0, c.get("overduePaise", 0) - amt_paise)
+            c["isOverdue"] = c["overduePaise"] > 0
+            c["lastPaymentDate"] = pay_date
+            try:
+                db.save_party(c)
+            except Exception as e:
+                print(f"Warning: Failed to save customer party: {e}")
 
     return saved
 
@@ -2782,23 +2902,27 @@ def void_payment(payment_id: str):
     # Void in SQLite
     db.void_payment(payment_id)
 
-    # Re-credit balances in memory
-    matched_d = next((d for d in STATE.get("debtors", []) if d["id"] == cust_id), None)
-    if not matched_d and cust_name:
-        matched_d = next((d for d in STATE.get("debtors", []) if d["name"].lower() == cust_name.lower()), None)
-    if matched_d:
-        old_paise = round(float(matched_d.get("balance", 0.0)) * 100)
-        new_paise = old_paise + amt_paise
-        matched_d["balance"] = round(new_paise / 100.0, 2)
-        matched_d["balance_formatted"] = f"{matched_d['balance']:.2f}"
+    # Re-credit balances in memory & SQLite
+    for d in STATE.get("debtors", []):
+        if d.get("id") == cust_id or (cust_name and d.get("name", "").strip().lower() == cust_name.strip().lower()):
+            old_paise = round(float(d.get("balance", 0.0)) * 100)
+            new_paise = old_paise + amt_paise
+            d["balance"] = round(new_paise / 100.0, 2)
+            d["balance_formatted"] = f"{d['balance']:.2f}"
+            try:
+                db.save_party(d)
+            except Exception as e:
+                print(f"Warning: Failed to save debtor party: {e}")
 
-    matched_c = next((c for c in STATE.get("customers", []) if c["id"] == cust_id), None)
-    if not matched_c and cust_name:
-        matched_c = next((c for c in STATE.get("customers", []) if c["name"].lower() == cust_name.lower()), None)
-    if matched_c:
-        matched_c["outstandingPaise"] = matched_c.get("outstandingPaise", 0) + amt_paise
-        matched_c["overduePaise"] = matched_c.get("overduePaise", 0) + amt_paise
-        matched_c["isOverdue"] = matched_c["overduePaise"] > 0
+    for c in STATE.get("customers", []):
+        if c.get("id") == cust_id or (cust_name and c.get("name", "").strip().lower() == cust_name.strip().lower()):
+            c["outstandingPaise"] = c.get("outstandingPaise", 0) + amt_paise
+            c["overduePaise"] = c.get("overduePaise", 0) + amt_paise
+            c["isOverdue"] = c["overduePaise"] > 0
+            try:
+                db.save_party(c)
+            except Exception as e:
+                print(f"Warning: Failed to save customer party: {e}")
 
     return pay
 

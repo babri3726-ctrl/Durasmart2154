@@ -7,6 +7,7 @@ import { Pager } from '../components/ui/Pager';
 import { LiveCustomerModal } from '../components/LiveCustomerEntry';
 import { OpeningBalanceModal, type OpeningBalancePreset } from '../components/OpeningBalanceModal';
 import { exactRupees } from '../lib/entryRules';
+import { invalidate, syncKeys } from '../lib/syncStore';
 import { useLiveList } from '../lib/useLiveList';
 import { useLiveSession } from '../lib/liveSession';
 import { listCustomers, serverHost } from '../lib/serverApi';
@@ -203,7 +204,10 @@ export default function Customers() {
       <LiveCustomerModal
         open={liveAddOpen}
         onClose={() => setLiveAddOpen(false)}
-        onCreated={() => setRefresh((n) => n + 1)}
+        onCreated={() => {
+          setRefresh((n) => n + 1);
+          invalidate(syncKeys.customers, syncKeys.debtors, syncKeys.dashboard);
+        }}
       />
       <OpeningBalanceModal
         open={balanceOpen}
@@ -212,7 +216,10 @@ export default function Customers() {
           setBalancePreset(null);
         }}
         preset={balancePreset}
-        onSaved={() => setRefresh((n) => n + 1)}
+        onSaved={() => {
+          setRefresh((n) => n + 1);
+          invalidate(syncKeys.customers, syncKeys.debtors, syncKeys.dashboard);
+        }}
       />
     </div>
   );

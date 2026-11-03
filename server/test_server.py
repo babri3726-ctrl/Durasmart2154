@@ -558,5 +558,79 @@ class TestServerApi(unittest.TestCase):
         self.assertEqual(s_final["ordersValuePaise"], val_base)
         self.assertEqual(s_final["orderCount"], s_base["orderCount"])
 
+    def test_18_top_receivables_dashboard_deduplication_and_order_updates(self):
+        """Verifies Top Receivables feed in dashboard cockpit is strictly deduplicated and updates on orders and payments."""
+        # 1. Baseline cockpit query
+        cockpit_base = self.client.get("/api/v1/dashboard/cockpit").json()
+        top_debtors_base = cockpit_base.get("topDebtors", [])
+        
+        # Check strict deduplication: no duplicate dealer names in topDebtors
+        names = [d["name"].strip().lower() for d in top_debtors_base]
+        self.assertEqual(len(names), len(set(names)), "topDebtors must contain strictly unique dealer names")
+
+        # Find or use KALRA TRADERS
+        dealer_name = "KALRA TRADERS/ STEEL DERABASSI"
+        cust_id = "DEBTOR-HR-001"
+        base_dealer_entry = next((d for d in top_debtors_base if d["name"].strip().lower() == dealer_name.lower()), None)
+        base_bal = float(base_dealer_entry["balance"]) if base_dealer_entry else 0.0
+
+        o_id = None
+        p_id = None
+        try:
+            # 2. Book an order for this dealer with total amount 2,500,000 paise (25,000 INR)
+            order_res = self.client.post("/api/v1/orders", json={
+                "customerId": cust_id,
+                "customerName": dealer_name,
+                "status": "confirmed",
+                "lines": [
+                    {
+                        "productName": "Color Coated Sheets",
+                        "quantity": "5.000",
+                        "unit": "MT",
+                        "ratePaise": 500000,
+                        "amountPaise": 2500000
+                    }
+                ]
+            }, headers={"X-User-Role": "owner"})
+            self.assertEqual(order_res.status_code, 200)
+            o_id = order_res.json()["id"]
+
+            # 3. Verify cockpit topDebtors balance reflects the new order (+25,000 INR)
+            cockpit_after_order = self.client.get("/api/v1/dashboard/cockpit").json()
+            dealer_after_order = next((d for d in cockpit_after_order["topDebtors"] if d["name"].strip().lower() == dealer_name.lower()), None)
+            self.assertIsNotNone(dealer_after_order, "Dealer must appear in topDebtors")
+            self.assertAlmostEqual(dealer_after_order["balance"], base_bal + 25000.0, places=2)
+
+            # 4. Record a payment of 10,000 INR (1,000,000 paise) for this dealer
+            pay_res = self.client.post("/api/v1/payments", json={
+                "customerId": cust_id,
+                "customerName": dealer_name,
+                "amount": 10000.0,
+                "amountPaise": 1000000,
+                "method": "NEFT",
+                "reference": "TEST-TOP-REC-PAY"
+            })
+            self.assertEqual(pay_res.status_code, 200)
+            p_id = pay_res.json()["id"]
+
+            # 5. Verify cockpit topDebtors balance decreased by 10,000 INR
+            cockpit_after_pay = self.client.get("/api/v1/dashboard/cockpit").json()
+            dealer_after_pay = next((d for d in cockpit_after_pay["topDebtors"] if d["name"].strip().lower() == dealer_name.lower()), None)
+            self.assertAlmostEqual(dealer_after_pay["balance"], base_bal + 15000.0, places=2)
+
+            # 6. Void payment
+            void_res = self.client.post(f"/api/v1/payments/{p_id}/void")
+            self.assertEqual(void_res.status_code, 200)
+
+        finally:
+            if o_id:
+                self.client.delete(f"/api/v1/orders/{o_id}", headers={"X-User-Role": "owner"})
+
+        # 8. Verify clean reversion
+        cockpit_final = self.client.get("/api/v1/dashboard/cockpit").json()
+        dealer_final = next((d for d in cockpit_final["topDebtors"] if d["name"].strip().lower() == dealer_name.lower()), None)
+        final_bal = float(dealer_final["balance"]) if dealer_final else 0.0
+        self.assertAlmostEqual(final_bal, base_bal, places=2)
+
 if __name__ == '__main__':
     unittest.main()

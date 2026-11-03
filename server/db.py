@@ -445,9 +445,9 @@ def save_payment(payment: dict[str, Any]) -> dict[str, Any]:
                 UPDATE parties 
                 SET balance_paise = MAX(0, balance_paise - ?),
                     updated_at = ?
-                WHERE id = ?
+                WHERE id = ? OR name = ?
                 """,
-                (amount_paise, now, customer_id),
+                (amount_paise, now, customer_id, payment.get("customerName", "")),
             )
 
         conn.commit()
@@ -479,9 +479,9 @@ def void_payment(payment_id: str) -> dict[str, Any] | None:
                 UPDATE parties 
                 SET balance_paise = balance_paise + ?,
                     updated_at = ?
-                WHERE id = ?
+                WHERE id = ? OR name = ?
                 """,
-                (amount_paise, now, customer_id),
+                (amount_paise, now, customer_id, payment.get("customer_name", "")),
             )
         conn.commit()
         payment["voided_at"] = now
@@ -568,23 +568,27 @@ def load_all_persisted_state() -> dict[str, Any]:
 
         debtors = []
         customers = []
+        seen_debtor_names = set()
         for p in parties:
             bal_paise = p["balance_paise"] or 0
             bal_rupees = round(bal_paise / 100.0, 2)
-            d_row = {
-                "id": p["id"],
-                "name": p["name"],
-                "state": p["state"],
-                "city": p["city"],
-                "district": p["district"],
-                "salesperson": p["salesperson"],
-                "salespersonId": p["salesperson_id"] or "EMP-SP-01",
-                "mobile": p["mobile"],
-                "balance": bal_rupees,
-                "creditDays": p["credit_days"],
-                "status": p["status"],
-            }
-            debtors.append(d_row)
+            norm_name = (p["name"] or "").strip().lower()
+            if norm_name not in seen_debtor_names:
+                seen_debtor_names.add(norm_name)
+                d_row = {
+                    "id": p["id"],
+                    "name": p["name"],
+                    "state": p["state"],
+                    "city": p["city"],
+                    "district": p["district"],
+                    "salesperson": p["salesperson"],
+                    "salespersonId": p["salesperson_id"] or "EMP-SP-01",
+                    "mobile": p["mobile"],
+                    "balance": bal_rupees,
+                    "creditDays": p["credit_days"],
+                    "status": p["status"],
+                }
+                debtors.append(d_row)
 
             c_row = {
                 "id": p["id"],
