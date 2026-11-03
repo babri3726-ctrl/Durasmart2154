@@ -22,6 +22,11 @@ def get_default_stock_path() -> str:
         return os.environ["ONEDRIVE_STOCK_PATH"]
     user_onedrive = os.path.join(os.environ.get("USERPROFILE", ""), "OneDrive", "1-8-26.xlsx")
     if os.path.exists(user_onedrive):
+        try:
+            if not os.path.exists(DATA_FALLBACK_STOCK) or os.path.getmtime(user_onedrive) > os.path.getmtime(DATA_FALLBACK_STOCK):
+                shutil.copy2(user_onedrive, DATA_FALLBACK_STOCK)
+        except Exception:
+            pass
         return user_onedrive
     return DATA_FALLBACK_STOCK
 

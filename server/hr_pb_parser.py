@@ -20,6 +20,12 @@ def get_default_hrpb_path() -> str:
         return os.environ["ONEDRIVE_HRPB_PATH"]
     user_onedrive = os.path.join(os.environ.get("USERPROFILE", ""), "OneDrive", "HR-PB.xlsx")
     if os.path.exists(user_onedrive):
+        try:
+            import shutil
+            if not os.path.exists(DATA_FALLBACK_HRPB) or os.path.getmtime(user_onedrive) > os.path.getmtime(DATA_FALLBACK_HRPB):
+                shutil.copy2(user_onedrive, DATA_FALLBACK_HRPB)
+        except Exception:
+            pass
         return user_onedrive
     return DATA_FALLBACK_HRPB
 

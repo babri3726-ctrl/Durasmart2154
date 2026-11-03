@@ -20,10 +20,34 @@ from pydantic import BaseModel
 
 from server import db
 
-from .hr_pb_parser import DEFAULT_HRPB_PATH, extract_hr_pb_targets
-from .stock_parser import DEFAULT_ONEDRIVE_PATH, extract_3sheet_stock, get_file_sha256
+from .hr_pb_parser import DEFAULT_HRPB_PATH, extract_hr_pb_targets, get_default_hrpb_path
+from .stock_parser import DEFAULT_ONEDRIVE_PATH, extract_3sheet_stock, get_file_sha256, get_default_stock_path
 
 app = FastAPI(title="Operations API", version="1.0.0")
+
+def ensure_latest_stock_snapshot(force: bool = False) -> dict | None:
+    stock_path = get_default_stock_path()
+    if not os.path.exists(stock_path):
+        return STATE.get("latest_snapshot")
+
+    try:
+        mtime = os.path.getmtime(stock_path)
+    except OSError:
+        mtime = 0.0
+
+    cur_snap = STATE.get("latest_snapshot")
+    should_refresh = force or (cur_snap is None) or (STATE.get("stock_file_mtime") != mtime)
+    if should_refresh:
+        try:
+            snap = extract_3sheet_stock(stock_path)
+            STATE["latest_snapshot"] = snap
+            STATE["stock_file_mtime"] = mtime
+            return snap
+        except Exception as e:
+            if cur_snap:
+                return cur_snap
+            raise e
+    return cur_snap
 
 # Enable CORS for Web panel & Mobile
 app.add_middleware(
@@ -466,11 +490,7 @@ def get_dashboard_summary(from_date: str | None = Query(None, alias="from"), to_
     if not isinstance(to_date, str):
         to_date = None
 
-    if not STATE["latest_snapshot"]:
-        try:
-            STATE["latest_snapshot"] = extract_3sheet_stock(DEFAULT_ONEDRIVE_PATH)
-        except Exception:
-            pass
+    ensure_latest_stock_snapshot()
 
     # Filter orders inside period window
     orders = STATE.get("orders", [])
@@ -806,6 +826,7 @@ def get_dashboard_cockpit(from_date: str | None = Query(None, alias="from"), to_
     }
 
     # Stock snapshot
+    ensure_latest_stock_snapshot()
     snap = STATE.get("latest_snapshot")
     stock_quick = {
         "metalKg": snap["summary"]["total_metal_kg"] if snap else "1444769.000",
@@ -3076,11 +3097,12 @@ def void_payment(payment_id: str):
 # ----------------- 1-Click OneDrive Stock Watch & Sync -----------------
 @app.get("/api/v1/imports/excel/stock-watch")
 def get_stock_watch():
-    file_exists = os.path.exists(DEFAULT_ONEDRIVE_PATH)
+    stock_path = get_default_stock_path()
+    file_exists = os.path.exists(stock_path)
     if not file_exists:
         return {
             "configured": False,
-            "path": DEFAULT_ONEDRIVE_PATH,
+            "path": stock_path,
             "present": False,
             "readable": False,
             "sizeBytes": None,
@@ -3092,15 +3114,15 @@ def get_stock_watch():
             "note": "1-8-26.xlsx not found in OneDrive."
         }
 
-    current_sha = get_file_sha256(DEFAULT_ONEDRIVE_PATH)
-    applied_sha = STATE["latest_snapshot"]["file_sha256"] if STATE["latest_snapshot"] else None
+    current_sha = get_file_sha256(stock_path)
+    applied_sha = STATE["latest_snapshot"]["file_sha256"] if STATE.get("latest_snapshot") else None
     is_up_to_date = (applied_sha == current_sha) and (applied_sha is not None)
-    file_size = os.path.getsize(DEFAULT_ONEDRIVE_PATH)
-    mtime = datetime.fromtimestamp(os.path.getmtime(DEFAULT_ONEDRIVE_PATH)).isoformat()
+    file_size = os.path.getsize(stock_path)
+    mtime = datetime.fromtimestamp(os.path.getmtime(stock_path)).isoformat()
 
     return {
         "configured": True,
-        "path": DEFAULT_ONEDRIVE_PATH,
+        "path": stock_path,
         "present": True,
         "readable": True,
         "sizeBytes": file_size,
@@ -3108,8 +3130,8 @@ def get_stock_watch():
         "fileSha256": current_sha,
         "matchesLatestBatch": is_up_to_date,
         "matchesAuthorizedRevision": True,
-        "latestBatchId": "SIM-BATCH-001" if STATE["latest_snapshot"] else None,
-        "note": "1-8-26.xlsx (Filtered exclusively to TOTAL STOCK, UPVC TOTAL STOCK, UPVC ITEM)"
+        "latestBatchId": "SIM-BATCH-001" if STATE.get("latest_snapshot") else None,
+        "note": f"{os.path.basename(stock_path)} (Filtered exclusively to TOTAL STOCK, UPVC TOTAL STOCK, UPVC ITEM)"
     }
 
 def build_stock_preview_out(snap: dict, filename: str, file_size: int) -> dict:
@@ -3255,8 +3277,9 @@ def build_stock_preview_out(snap: dict, filename: str, file_size: int) -> dict:
 @app.post("/api/v1/imports/excel/stock-watch/preview")
 def preview_stock_watch():
     try:
-        snap = extract_3sheet_stock(DEFAULT_ONEDRIVE_PATH)
-        file_size = os.path.getsize(DEFAULT_ONEDRIVE_PATH)
+        stock_path = get_default_stock_path()
+        snap = extract_3sheet_stock(stock_path)
+        file_size = os.path.getsize(stock_path)
         return build_stock_preview_out(snap, snap.get("filename", "1-8-26.xlsx"), file_size)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -3270,16 +3293,23 @@ async def upload_excel_file(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
     result = {"filename": file.filename, "size": os.path.getsize(target_path)}
     try:
-        if "1-8-26" in file.filename or "stock" in file.filename.lower():
-            # Save as default 1-8-26.xlsx in data dir
+        wb_test = openpyxl.load_workbook(target_path, read_only=True)
+        sheet_names = wb_test.sheetnames
+        wb_test.close()
+
+        is_stock_file = any(s in sheet_names for s in ["TOTAL STOCK", "UPVC TOTAL STOCK", "UPVC ITEM"]) or "1-8-26" in file.filename or "stock" in file.filename.lower()
+        is_hrpb_file = any("HARYANA" in s.upper() or "PUNJAB" in s.upper() for s in sheet_names) or "hr" in file.filename.lower() or "target" in file.filename.lower()
+
+        if is_stock_file:
             default_stock = os.path.join(db.DATA_DIR, "1-8-26.xlsx")
             if target_path != default_stock:
                 shutil.copyfile(target_path, default_stock)
-            snap = extract_3sheet_stock(target_path)
+            snap = extract_3sheet_stock(default_stock)
             STATE["latest_snapshot"] = snap
+            STATE["stock_file_mtime"] = os.path.getmtime(default_stock)
             result["type"] = "stock"
             result["items_parsed"] = snap["summary"]["metal_items_count"] + snap["summary"]["upvc_matrix_count"]
-        elif "hr" in file.filename.lower() or "target" in file.filename.lower():
+        elif is_hrpb_file:
             default_hrpb = os.path.join(db.DATA_DIR, "HR-PB.xlsx")
             if target_path != default_hrpb:
                 shutil.copyfile(target_path, default_hrpb)
@@ -3534,14 +3564,15 @@ async def apply_uploaded_stock_bytes(request: Request, fileName: str | None = "1
 @app.post("/api/v1/imports/excel/stock-watch/sync")
 def sync_stock_watch():
     try:
-        snapshot = extract_3sheet_stock(DEFAULT_ONEDRIVE_PATH)
-        STATE["latest_snapshot"] = snapshot
+        snapshot = ensure_latest_stock_snapshot(force=True)
+        if not snapshot:
+            raise HTTPException(status_code=404, detail="Stock workbook not found to sync")
         total_items = snapshot["summary"]["metal_items_count"] + snapshot["summary"]["upvc_matrix_count"]
 
         batch = {
             "id": "SIM-BATCH-001",
-            "filename": snapshot["filename"],
-            "appliedAt": snapshot["synced_at"],
+            "filename": snapshot.get("filename", "1-8-26.xlsx"),
+            "appliedAt": snapshot.get("synced_at"),
             "appliedByName": "Harpreet Singh (Owner)",
             "fileSha256": snapshot["file_sha256"],
             "authorizedSha256": snapshot["file_sha256"],
@@ -3549,7 +3580,7 @@ def sync_stock_watch():
             "appliedItemCount": total_items,
             "staleCount": 0,
             "quarantineCount": 0,
-            "sheetsRead": snapshot["allowed_sheets"]
+            "sheetsRead": snapshot.get("allowed_sheets", ["TOTAL STOCK", "UPVC TOTAL STOCK", "UPVC ITEM"])
         }
 
         return {
@@ -3557,20 +3588,14 @@ def sync_stock_watch():
             "replayed": False,
             "stockMovementsCreated": False,
             "businessRecordsCreated": False,
-            "message": "3-sheet stock successfully synced from 1-8-26.xlsx"
+            "message": f"3-sheet stock successfully synced from {snapshot.get('filename', '1-8-26.xlsx')}"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/v1/imports/excel/stock-imports")
 def list_stock_imports(q: str | None = None, page: int = 1, pageSize: int = 20):
-    snap = STATE.get("latest_snapshot")
-    if not snap:
-        try:
-            snap = extract_3sheet_stock(DEFAULT_ONEDRIVE_PATH)
-            STATE["latest_snapshot"] = snap
-        except Exception:
-            pass
+    snap = ensure_latest_stock_snapshot()
 
     items = []
     if snap:
@@ -3612,11 +3637,7 @@ def list_stock_imports(q: str | None = None, page: int = 1, pageSize: int = 20):
 # ----------------- Stock Reading Endpoints -----------------
 @app.get("/api/v1/stock/summary")
 def get_stock_summary():
-    if not STATE["latest_snapshot"]:
-        try:
-            STATE["latest_snapshot"] = extract_3sheet_stock(DEFAULT_ONEDRIVE_PATH)
-        except Exception:
-            pass
+    snap = ensure_latest_stock_snapshot()
 
     snap = STATE["latest_snapshot"]
     metal_items = snap.get("metal_slit_coils", []) if snap else []
@@ -3950,13 +3971,7 @@ def get_upvc_stock(
     if hasattr(q, "default"):
         q = q.default
 
-    if not STATE["latest_snapshot"]:
-        try:
-            STATE["latest_snapshot"] = extract_3sheet_stock(DEFAULT_ONEDRIVE_PATH)
-        except Exception:
-            pass
-
-    snap = STATE["latest_snapshot"]
+    snap = ensure_latest_stock_snapshot()
     raw_matrix = snap.get("upvc_matrix", []) if snap else []
 
     # Map raw matrix items to UPVC Standard 'new' rows
@@ -4086,12 +4101,7 @@ def get_upvc_stock(
 
 @app.get("/api/v1/stock/accessories")
 def get_stock_accessories():
-    if not STATE["latest_snapshot"]:
-        try:
-            STATE["latest_snapshot"] = extract_3sheet_stock(DEFAULT_ONEDRIVE_PATH)
-        except Exception:
-            pass
-    snap = STATE["latest_snapshot"]
+    snap = ensure_latest_stock_snapshot()
     accessories = snap.get("summary", {}).get("accessories", {}) if snap else {}
     return {
         "available": False,
