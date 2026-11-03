@@ -20,14 +20,24 @@ DATA_FALLBACK_STOCK = os.path.join(BASE_DIR, "data", "1-8-26.xlsx")
 def get_default_stock_path() -> str:
     if os.environ.get("ONEDRIVE_STOCK_PATH") and os.path.exists(os.environ["ONEDRIVE_STOCK_PATH"]):
         return os.environ["ONEDRIVE_STOCK_PATH"]
-    user_onedrive = os.path.join(os.environ.get("USERPROFILE", ""), "OneDrive", "1-8-26.xlsx")
-    if os.path.exists(user_onedrive):
-        try:
-            if not os.path.exists(DATA_FALLBACK_STOCK) or os.path.getmtime(user_onedrive) > os.path.getmtime(DATA_FALLBACK_STOCK):
-                shutil.copy2(user_onedrive, DATA_FALLBACK_STOCK)
-        except Exception:
-            pass
-        return user_onedrive
+    user_profile = os.environ.get("USERPROFILE", "")
+    candidates = [
+        os.path.join(user_profile, "OneDrive", "1-8-26.xlsx"),
+        os.path.join(user_profile, "Holla - Personal", "1-8-26.xlsx"),
+        os.path.join(user_profile, "OneDrive - Personal", "1-8-26.xlsx"),
+    ]
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            try:
+                if not os.path.exists(DATA_FALLBACK_STOCK) or os.path.getmtime(candidate) > os.path.getmtime(DATA_FALLBACK_STOCK):
+                    if os.name == 'nt':
+                        cmd = f"Copy-Item -Path '{candidate}' -Destination '{DATA_FALLBACK_STOCK}' -Force"
+                        subprocess.run(["powershell", "-NoProfile", "-Command", cmd], capture_output=True)
+                    else:
+                        shutil.copy2(candidate, DATA_FALLBACK_STOCK)
+            except Exception:
+                pass
+            return candidate
     return DATA_FALLBACK_STOCK
 
 DEFAULT_ONEDRIVE_PATH = get_default_stock_path()
@@ -92,17 +102,24 @@ def extract_3sheet_stock(file_path: str = DEFAULT_ONEDRIVE_PATH) -> dict:
         if "TOTAL STOCK" in sheets_found:
             ws_total = wb["TOTAL STOCK"]
             current_company = "UNKNOWN"
+            KNOWN_COMPANIES = {
+                "APL", "GPSP KAM", "JSW", "KAMDHENU", "TATA", "AMNS", "JINDAL", "SAIL", "ESSAR", "BHUSHAN"
+            }
+            SKIP_HEADERS = {
+                "GRAND TOTAL", "TOTAL", "COMPANY", "SLIT COIL", "BAL STOCK.", "BAL STOCK", "SUM OF BAL STOCK."
+            }
             for row_idx, row in enumerate(ws_total.iter_rows(values_only=True)):
                 if not row or len(row) < 2:
                     continue
 
                 # Col A & B: Slit Coils
                 col_a, col_b = row[0], row[1]
-                if col_a:
+                if col_a and col_b is not None:
                     str_a = str(col_a).strip()
-                    if str_a in ["APL", "GPSP KAM", "JSW"]:
-                        current_company = str_a
-                    elif "*" in str_a and col_b is not None:
+                    upper_a = str_a.upper()
+                    if upper_a in KNOWN_COMPANIES:
+                        current_company = upper_a
+                    elif upper_a not in SKIP_HEADERS:
                         try:
                             qty = float(col_b)
                             total_metal_kg += qty

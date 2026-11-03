@@ -18,15 +18,25 @@ DATA_FALLBACK_HRPB = os.path.join(BASE_DIR, "data", "HR-PB.xlsx")
 def get_default_hrpb_path() -> str:
     if os.environ.get("ONEDRIVE_HRPB_PATH") and os.path.exists(os.environ["ONEDRIVE_HRPB_PATH"]):
         return os.environ["ONEDRIVE_HRPB_PATH"]
-    user_onedrive = os.path.join(os.environ.get("USERPROFILE", ""), "OneDrive", "HR-PB.xlsx")
-    if os.path.exists(user_onedrive):
-        try:
-            import shutil
-            if not os.path.exists(DATA_FALLBACK_HRPB) or os.path.getmtime(user_onedrive) > os.path.getmtime(DATA_FALLBACK_HRPB):
-                shutil.copy2(user_onedrive, DATA_FALLBACK_HRPB)
-        except Exception:
-            pass
-        return user_onedrive
+    user_profile = os.environ.get("USERPROFILE", "")
+    candidates = [
+        os.path.join(user_profile, "OneDrive", "HR-PB.xlsx"),
+        os.path.join(user_profile, "Holla - Personal", "HR-PB.xlsx"),
+        os.path.join(user_profile, "OneDrive - Personal", "HR-PB.xlsx"),
+    ]
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            try:
+                import shutil, subprocess
+                if not os.path.exists(DATA_FALLBACK_HRPB) or os.path.getmtime(candidate) > os.path.getmtime(DATA_FALLBACK_HRPB):
+                    if os.name == 'nt':
+                        cmd = f"Copy-Item -Path '{candidate}' -Destination '{DATA_FALLBACK_HRPB}' -Force"
+                        subprocess.run(["powershell", "-NoProfile", "-Command", cmd], capture_output=True)
+                    else:
+                        shutil.copy2(candidate, DATA_FALLBACK_HRPB)
+            except Exception:
+                pass
+            return candidate
     return DATA_FALLBACK_HRPB
 
 DEFAULT_HRPB_PATH = get_default_hrpb_path()
