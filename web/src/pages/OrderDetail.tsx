@@ -566,7 +566,7 @@ export default function OrderDetail() {
             <span className="chip bg-canvas text-muted">source: {o.source}</span>
           </div>
           <p className="text-[13px] font-bold text-ink">
-            <Link to={`/customers/${o.customerId}`} className="hover:underline">
+            <Link to="/debtors" className="hover:underline">
               {o.customerName}
             </Link>
           </p>

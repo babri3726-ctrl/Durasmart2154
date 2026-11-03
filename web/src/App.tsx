@@ -19,8 +19,8 @@ import Account from './pages/Account';
 import VaccantArea from './pages/VaccantArea';
 import TourPlan from './pages/TourPlan';
 import TaskAlarm from './pages/TaskAlarm';
-import Customers from './pages/Customers';
-import CustomerDetail from './pages/CustomerDetail';
+
+
 import Debtors from './pages/Debtors';
 import ProvisionalDebtors from './pages/ProvisionalDebtors';
 import Orders from './pages/Orders';
@@ -123,8 +123,8 @@ export default function App() {
           <Route path="/vaccant-area" element={<VaccantArea />} />
           <Route path="/tour-plan" element={<TourPlan />} />
           <Route path="/task-alarm" element={<TaskAlarm />} />
-          <Route path="/customers" element={<Customers />} />
-          <Route path="/customers/:id" element={<CustomerDetail />} />
+          <Route path="/customers" element={<Navigate to="/debtors" replace />} />
+          <Route path="/customers/:id" element={<Navigate to="/debtors" replace />} />
           {/* Employees read this too, scoped by the server to their own parties; the owner-only
               workbook preview inside the page is hidden for them and refused by the backend. */}
           <Route path="/debtors" element={<Debtors />} />

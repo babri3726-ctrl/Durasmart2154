@@ -27,7 +27,7 @@ const NAV: { label: string; to: string; icon: LucideIcon; end?: boolean; hidden?
   { label: 'Vaccant Area', to: '/vaccant-area', icon: Map },
   { label: 'Tour Plan', to: '/tour-plan', icon: Route },
   { label: 'Task Alarm', to: '/task-alarm', icon: AlarmClock },
-  { label: 'Customers', to: '/customers', icon: Users },
+  { label: 'Customers', to: '/debtors', icon: Users, hidden: true },
   { label: 'Debtor List', to: '/debtors', icon: ReceiptIndianRupee, end: true },
   { label: 'Provisional Debtors', to: '/debtors/provisional', icon: FileSpreadsheet, end: true },
   { label: 'Orders', to: '/orders', icon: ShoppingCart, end: true },

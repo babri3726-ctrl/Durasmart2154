@@ -183,41 +183,33 @@ try:
         ]
         STATE["employees"] = list(INITIAL_EMPLOYEES) + sp_employees
 
-        # Seed active customers directly from HR-PB dealers
-        existing_cust_names = {c["name"].lower() for c in STATE["customers"]}
-        for idx, d in enumerate(_hrpb["dealers_master"]):
-            if d["name"].lower() not in existing_cust_names:
-                sp_id = next((e["id"] for e in STATE["employees"] if e["name"].lower() == d.get("salesperson", "").lower()), "EMP-SP-01")
-                STATE["customers"].append({
-                    "id": d["id"],
-                    "name": d["name"],
-                    "city": d["city"],
-                    "district": d.get("district", ""),
-                    "state": d.get("state", ""),
-                    "mobile": f"98140{20000 + idx}",
-                    "contactPerson": d["name"],
-                    "status": "active",
-                    "creditDays": 30,
-                    "salesperson": d.get("salesperson", ""),
-                    "salespersonId": sp_id,
-                    "source": "hr-pb",
-                    "openingPaise": 0,
-                    "outstandingPaise": 0,
-                    "advancePaise": 0,
-                    "unbilledValuePaise": 0,
-                    "overduePaise": 0,
-                    "isOverdue": False,
-                    "invoiceCount": 0,
-                    "orderCount": 0,
-                    "lastPaymentDate": None,
-                    "address": f"{d['city']}, {d.get('state', '')}",
-                    "notes": f"HR-PB active dealer. Officer: {d.get('salesperson', 'Unassigned')}",
-                    "ledgerGroup": "Sundry Debtors",
-                    "creditTerms": "30 days net",
-                    "approvedBy": "USR-OWNER",
-                    "approvedAt": datetime.now().isoformat() + "+05:30"
-                })
-                existing_cust_names.add(d["name"].lower())
+        # Ensure all dealers have unified party attributes and alias customers to debtors
+        for idx, d in enumerate(STATE["debtors"]):
+            sp_name = d.get("salesperson", "")
+            sp_id = next((e["id"] for e in STATE["employees"] if e["name"].lower() == sp_name.lower()), "EMP-SP-01")
+            bal = float(d.get("balance", 0.0))
+            bal_paise = int(round(bal * 100))
+            d.setdefault("mobile", f"98140{20000 + idx}")
+            d.setdefault("salespersonId", sp_id)
+            d.setdefault("creditDays", 30)
+            d.setdefault("contactPerson", d["name"])
+            d.setdefault("source", "hr-pb")
+            d.setdefault("openingPaise", bal_paise)
+            d.setdefault("outstandingPaise", bal_paise)
+            d.setdefault("advancePaise", 0)
+            d.setdefault("unbilledValuePaise", 0)
+            d.setdefault("overduePaise", bal_paise if d.get("status") == "active" else 0)
+            d.setdefault("isOverdue", bal > 0)
+            d.setdefault("invoiceCount", 0)
+            d.setdefault("orderCount", 0)
+            d.setdefault("lastPaymentDate", None)
+            d.setdefault("address", f"{d.get('city', '')}, {d.get('state', '')}")
+            d.setdefault("notes", f"HR-PB active dealer. Officer: {sp_name}")
+            d.setdefault("ledgerGroup", "Sundry Debtors")
+            d.setdefault("creditTerms", "30 days net")
+            d.setdefault("approvedBy", "USR-OWNER")
+            d.setdefault("approvedAt", datetime.now().isoformat() + "+05:30")
+        STATE["customers"] = STATE["debtors"]
 except Exception as e:
     print(f"Warning: Failed to load HR-PB targets: {e}")
 
@@ -246,17 +238,8 @@ try:
                 if _match:
                     _match["balance"] = _d["balance"]
                     _match["balance_formatted"] = f"{float(_d['balance']):.2f}"
-    if _persisted.get("customers"):
-        _existing_c_ids = {c["id"] for c in STATE.get("customers", [])}
-        for _c in _persisted["customers"]:
-            if _c["id"] not in _existing_c_ids:
-                STATE["customers"].append(_c)
-                _existing_c_ids.add(_c["id"])
-            else:
-                _match = next((m for m in STATE["customers"] if m["id"] == _c["id"]), None)
-                if _match:
-                    _match["outstandingPaise"] = _c["outstandingPaise"]
-                    _match["overduePaise"] = _c["overduePaise"]
+    # Set STATE["customers"] to STATE["debtors"] for unified single source of truth
+    STATE["customers"] = STATE["debtors"]
 except Exception as e:
     print(f"Warning: Failed to initialize/load SQLite DB: {e}")
 
@@ -964,42 +947,15 @@ def get_customer(customer_id: str):
 
 @app.post("/api/v1/customers")
 def create_customer(body: dict[str, Any]):
-    new_id = f"CUST-{len(STATE['customers']) + 1:04d}"
-    first_sp = STATE.get("employees", [{}])[0].get("id", "EMP-SP-01")
-    cust = {
-        "id": new_id,
-        "name": body.get("name", "New Customer"),
-        "city": body.get("city", "Ludhiana"),
-        "district": body.get("district", "Ludhiana"),
-        "state": body.get("state", "Punjab"),
-        "mobile": body.get("mobile", "9800000000"),
-        "contactPerson": body.get("contactPerson", "Contact Person"),
-        "status": "approved",
-        "creditDays": body.get("creditDays", 30),
-        "salespersonId": body.get("salespersonId", first_sp),
-        "source": "manual",
-        "openingPaise": 0,
-        "outstandingPaise": 0,
-        "advancePaise": 0,
-        "unbilledValuePaise": 0,
-        "overduePaise": 0,
-        "isOverdue": False,
-        "invoiceCount": 0,
-        "orderCount": 0,
-        "lastPaymentDate": None,
-        "address": body.get("address", ""),
-        "notes": body.get("notes", ""),
-        "ledgerGroup": "Sundry Debtors",
-        "creditTerms": "30 days net",
-        "approvedBy": "USR-OWNER",
-        "approvedAt": datetime.now().isoformat() + "+05:30"
-    }
-    STATE["customers"].append(cust)
-    try:
-        db.save_party(cust)
-    except Exception as e:
-        print(f"Warning: Failed to save party to db: {e}")
-    return cust
+    debtor_input = DebtorCreate(
+        name=body.get("name", "New Customer"),
+        state=body.get("state", "Punjab"),
+        city=body.get("city", "Ludhiana"),
+        district=body.get("district", "Ludhiana"),
+        salesperson=body.get("salesperson", "Unassigned"),
+        balance=body.get("balance", 0.0)
+    )
+    return create_debtor(debtor_input)
 
 @app.post("/api/v1/customers/{customer_id}/approve")
 def approve_customer(customer_id: str):
@@ -1260,61 +1216,45 @@ def get_debtors(
 @app.post("/api/v1/debtors")
 def create_debtor(body: DebtorCreate):
     new_id = f"DEBTOR-MAN-{len(STATE['debtors']) + 1:04d}"
+    bal_val = float(body.balance or 0.0)
+    bal_paise = round(bal_val * 100)
+    sp_name = body.salesperson or "Unassigned"
+    sp_id = next((e["id"] for e in STATE.get("employees", []) if e["name"].lower() == sp_name.lower()), "EMP-SP-01")
     debtor = {
         "id": new_id,
         "name": body.name.strip(),
         "state": body.state or "Punjab",
         "city": body.city or "",
         "district": body.district or "",
-        "salesperson": body.salesperson or "Unassigned",
-        "balance": float(body.balance or 0.0),
-        "balance_formatted": f"{float(body.balance or 0.0):.2f}",
+        "salesperson": sp_name,
+        "salespersonId": sp_id,
+        "mobile": "9814000000",
+        "balance": bal_val,
+        "balance_formatted": f"{bal_val:.2f}",
+        "creditDays": 30,
         "status": "active",
+        "contactPerson": body.name.strip(),
+        "source": "manual",
+        "openingPaise": bal_paise,
+        "outstandingPaise": bal_paise,
+        "advancePaise": 0,
+        "unbilledValuePaise": 0,
+        "overduePaise": 0,
+        "isOverdue": False,
+        "invoiceCount": 0,
+        "orderCount": 0,
+        "lastPaymentDate": None,
+        "address": f"{body.city or ''}, {body.district or ''}, {body.state or 'Punjab'}",
+        "notes": f"Debtor registered via Debtor Master. Officer: {sp_name}",
+        "ledgerGroup": "Sundry Debtors",
+        "creditTerms": "30 days net",
+        "approvedBy": "USR-OWNER",
+        "approvedAt": datetime.now().isoformat() + "+05:30",
         "created_at": datetime.now().isoformat() + "+05:30"
     }
     # Save debtor to persistent SQLite
     debtor = db.save_party(debtor)
     STATE["debtors"].insert(0, debtor)
-
-    # Mirror into customers so newly added debtor is immediately available across the whole platform
-    existing_c = next((c for c in STATE["customers"] if c["name"].lower() == body.name.strip().lower()), None)
-    if not existing_c:
-        sp_name = body.salesperson or "Unassigned"
-        sp_id = next((e["id"] for e in STATE.get("employees", []) if e["name"].lower() == sp_name.lower()), "EMP-SP-01")
-        bal_paise = round(float(body.balance or 0.0) * 100)
-        cust = {
-            "id": new_id,
-            "name": body.name.strip(),
-            "city": body.city or "",
-            "district": body.district or "",
-            "state": body.state or "Punjab",
-            "mobile": "9814000000",
-            "contactPerson": body.name.strip(),
-            "status": "active",
-            "creditDays": 30,
-            "salesperson": sp_name,
-            "salespersonId": sp_id,
-            "source": "manual",
-            "openingPaise": bal_paise,
-            "outstandingPaise": bal_paise,
-            "advancePaise": 0,
-            "unbilledValuePaise": 0,
-            "overduePaise": 0,
-            "isOverdue": False,
-            "invoiceCount": 0,
-            "orderCount": 0,
-            "lastPaymentDate": None,
-            "address": f"{body.city or ''}, {body.district or ''}, {body.state or 'Punjab'}",
-            "notes": f"Debtor registered via Debtor Master. Officer: {sp_name}",
-            "ledgerGroup": "Sundry Debtors",
-            "creditTerms": "30 days net",
-            "approvedBy": "USR-OWNER",
-            "approvedAt": datetime.now().isoformat() + "+05:30"
-        }
-        # Save mirrored customer to persistent SQLite
-        cust = db.save_party(cust)
-        STATE["customers"].insert(0, cust)
-
     return debtor
 
 @app.put("/api/v1/debtors/{debtor_id}")
@@ -1323,8 +1263,6 @@ def update_debtor(debtor_id: str, body: DebtorUpdate):
     if not debtor:
         raise HTTPException(status_code=404, detail=f"Debtor {debtor_id} not found")
     
-    old_name = debtor["name"]
-
     if body.name is not None:
         debtor["name"] = body.name.strip()
     if body.state is not None:
@@ -1335,30 +1273,22 @@ def update_debtor(debtor_id: str, body: DebtorUpdate):
         debtor["district"] = body.district
     if body.salesperson is not None:
         debtor["salesperson"] = body.salesperson
+        sp_match = next((e["id"] for e in STATE.get("employees", []) if e["name"].lower() == body.salesperson.lower()), None)
+        if sp_match:
+            debtor["salespersonId"] = sp_match
     if body.balance is not None:
         debtor["balance"] = float(body.balance)
         debtor["balance_formatted"] = f"{float(body.balance):.2f}"
+        bal_paise = round(float(body.balance) * 100)
+        debtor["openingPaise"] = bal_paise
+        debtor["outstandingPaise"] = bal_paise
     if body.status is not None:
         debtor["status"] = body.status
 
-    # Mirror updates to customer
-    cust = next((c for c in STATE["customers"] if c["name"].lower() == old_name.lower() or c["id"] == debtor_id), None)
-    if cust:
-        if body.name is not None:
-            cust["name"] = body.name.strip()
-        if body.city is not None:
-            cust["city"] = body.city
-        if body.district is not None:
-            cust["district"] = body.district
-        if body.salesperson is not None:
-            cust["salesperson"] = body.salesperson
-            sp_match = next((e["id"] for e in STATE.get("employees", []) if e["name"].lower() == body.salesperson.lower()), None)
-            if sp_match:
-                cust["salespersonId"] = sp_match
-        if body.balance is not None:
-            bal_paise = round(float(body.balance) * 100)
-            cust["openingPaise"] = bal_paise
-            cust["outstandingPaise"] = bal_paise
+    try:
+        db.save_party(debtor)
+    except Exception:
+        pass
 
     return debtor
 
@@ -1368,10 +1298,6 @@ def delete_debtor(debtor_id: str):
     if idx is None:
         raise HTTPException(status_code=404, detail=f"Debtor {debtor_id} not found")
     deleted = STATE["debtors"].pop(idx)
-    # Mirror deletion in customer list
-    c_idx = next((i for i, c in enumerate(STATE["customers"]) if c["name"].lower() == deleted["name"].lower() or c["id"] == debtor_id), None)
-    if c_idx is not None:
-        STATE["customers"].pop(c_idx)
     # Remove from SQLite
     try:
         with db.get_connection() as conn:
@@ -1562,42 +1488,20 @@ def sync_hr_pb_excel():
                 target_d["city"] = dealer.get("city", target_d.get("city", ""))
                 target_d["state"] = dealer.get("state", target_d.get("state", ""))
                 target_d["salesperson"] = dealer.get("salesperson", target_d.get("salesperson", "Unassigned"))
+                target_d["outstandingPaise"] = bal_paise
+                target_d["overduePaise"] = bal_paise
+                target_d["isOverdue"] = bal_paise > 0
                 updated_count += 1
             else:
+                dealer["outstandingPaise"] = bal_paise
+                dealer["overduePaise"] = bal_paise
+                dealer["isOverdue"] = bal_paise > 0
+                dealer.setdefault("mobile", f"98140{20000 + len(STATE['debtors'])}")
+                dealer.setdefault("creditDays", 30)
+                dealer.setdefault("status", "active")
                 STATE["debtors"].append(dealer)
                 existing_debtors_by_name[d_name] = dealer
                 added_count += 1
-
-            if d_name in existing_customers_by_name:
-                target_c = existing_customers_by_name[d_name]
-                target_c["outstandingPaise"] = bal_paise
-                target_c["overduePaise"] = bal_paise
-                target_c["isOverdue"] = bal_paise > 0
-            else:
-                c_row = {
-                    "id": dealer.get("id") or f"CUST-{dealer['name'][:6].strip()}",
-                    "name": dealer["name"],
-                    "city": dealer.get("city", ""),
-                    "district": dealer.get("district", ""),
-                    "state": dealer.get("state", "Punjab"),
-                    "mobile": dealer.get("mobile", "9814000000"),
-                    "contactPerson": dealer["name"],
-                    "status": "active",
-                    "creditDays": 30,
-                    "salesperson": dealer.get("salesperson", "Unassigned"),
-                    "source": "hr-pb",
-                    "openingPaise": 0,
-                    "outstandingPaise": bal_paise,
-                    "advancePaise": 0,
-                    "unbilledValuePaise": 0,
-                    "overduePaise": bal_paise,
-                    "isOverdue": bal_paise > 0,
-                    "invoiceCount": 0,
-                    "orderCount": 0,
-                    "lastPaymentDate": None,
-                }
-                STATE["customers"].append(c_row)
-                existing_customers_by_name[d_name] = c_row
 
             db.save_party(dealer)
 
@@ -3154,42 +3058,20 @@ async def upload_excel_file(file: UploadFile = File(...)):
                     target_d["city"] = dealer.get("city", target_d.get("city", ""))
                     target_d["state"] = dealer.get("state", target_d.get("state", ""))
                     target_d["salesperson"] = dealer.get("salesperson", target_d.get("salesperson", "Unassigned"))
+                    target_d["outstandingPaise"] = bal_paise
+                    target_d["overduePaise"] = bal_paise
+                    target_d["isOverdue"] = bal_paise > 0
                     updated += 1
                 else:
+                    dealer["outstandingPaise"] = bal_paise
+                    dealer["overduePaise"] = bal_paise
+                    dealer["isOverdue"] = bal_paise > 0
+                    dealer.setdefault("mobile", f"98140{20000 + len(STATE['debtors'])}")
+                    dealer.setdefault("creditDays", 30)
+                    dealer.setdefault("status", "active")
                     STATE["debtors"].append(dealer)
                     existing_debtors_by_name[d_name] = dealer
                     added += 1
-
-                if d_name in existing_customers_by_name:
-                    target_c = existing_customers_by_name[d_name]
-                    target_c["outstandingPaise"] = bal_paise
-                    target_c["overduePaise"] = bal_paise
-                    target_c["isOverdue"] = bal_paise > 0
-                else:
-                    c_row = {
-                        "id": dealer.get("id") or f"CUST-{dealer['name'][:6].strip()}",
-                        "name": dealer["name"],
-                        "city": dealer.get("city", ""),
-                        "district": dealer.get("district", ""),
-                        "state": dealer.get("state", "Punjab"),
-                        "mobile": dealer.get("mobile", "9814000000"),
-                        "contactPerson": dealer["name"],
-                        "status": "active",
-                        "creditDays": 30,
-                        "salesperson": dealer.get("salesperson", "Unassigned"),
-                        "source": "hr-pb",
-                        "openingPaise": 0,
-                        "outstandingPaise": bal_paise,
-                        "advancePaise": 0,
-                        "unbilledValuePaise": 0,
-                        "overduePaise": bal_paise,
-                        "isOverdue": bal_paise > 0,
-                        "invoiceCount": 0,
-                        "orderCount": 0,
-                        "lastPaymentDate": None,
-                    }
-                    STATE["customers"].append(c_row)
-                    existing_customers_by_name[d_name] = c_row
 
                 db.save_party(dealer)
 
@@ -3338,39 +3220,20 @@ async def apply_debtor_bytes(
             target_d["city"] = dealer.get("city", target_d.get("city", ""))
             target_d["state"] = dealer.get("state", target_d.get("state", ""))
             target_d["salesperson"] = dealer.get("salesperson", target_d.get("salesperson", "Unassigned"))
+            target_d["outstandingPaise"] = bal_paise
+            target_d["overduePaise"] = bal_paise
+            target_d["isOverdue"] = bal_paise > 0
             updated += 1
         else:
+            dealer["outstandingPaise"] = bal_paise
+            dealer["overduePaise"] = bal_paise
+            dealer["isOverdue"] = bal_paise > 0
+            dealer.setdefault("mobile", f"98140{20000 + len(STATE['debtors'])}")
+            dealer.setdefault("creditDays", 30)
+            dealer.setdefault("status", "active")
             STATE["debtors"].append(dealer)
             existing_debtors_by_name[d_name] = dealer
             added += 1
-
-        if d_name in existing_customers_by_name:
-            target_c = existing_customers_by_name[d_name]
-            target_c["outstandingPaise"] = bal_paise
-            target_c["overduePaise"] = bal_paise
-            target_c["isOverdue"] = bal_paise > 0
-        else:
-            c_row = {
-                "id": dealer.get("id") or f"CUST-{dealer['name'][:6].strip()}",
-                "name": dealer["name"],
-                "city": dealer.get("city", ""),
-                "district": dealer.get("district", ""),
-                "state": dealer.get("state", "Punjab"),
-                "mobile": dealer.get("mobile", "9814000000"),
-                "contactPerson": dealer["name"],
-                "status": "active",
-                "creditDays": 30,
-                "salesperson": dealer.get("salesperson", "Unassigned"),
-                "source": "hr-pb",
-                "openingPaise": 0,
-                "outstandingPaise": bal_paise,
-                "advancePaise": 0,
-                "unbilledValuePaise": 0,
-                "overduePaise": bal_paise,
-                "isOverdue": bal_paise > 0
-            }
-            STATE["customers"].append(c_row)
-            existing_customers_by_name[d_name] = c_row
 
     return {
         "filename": fileName or "HR-PB.xlsx",

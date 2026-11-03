@@ -567,7 +567,6 @@ def load_all_persisted_state() -> dict[str, Any]:
         parties = cur.fetchall()
 
         debtors = []
-        customers = []
         seen_debtor_names = set()
         for p in parties:
             bal_paise = p["balance_paise"] or 0
@@ -583,37 +582,26 @@ def load_all_persisted_state() -> dict[str, Any]:
                     "district": p["district"],
                     "salesperson": p["salesperson"],
                     "salespersonId": p["salesperson_id"] or "EMP-SP-01",
-                    "mobile": p["mobile"],
+                    "mobile": p["mobile"] or "9814000000",
                     "balance": bal_rupees,
-                    "creditDays": p["credit_days"],
-                    "status": p["status"],
+                    "balance_formatted": f"{bal_rupees:.2f}",
+                    "creditDays": p["credit_days"] or 30,
+                    "status": p["status"] or "active",
+                    "contactPerson": p["name"],
+                    "source": "database",
+                    "openingPaise": 0,
+                    "outstandingPaise": bal_paise,
+                    "advancePaise": 0,
+                    "unbilledValuePaise": 0,
+                    "overduePaise": bal_paise if p["status"] == "active" else 0,
+                    "isOverdue": bal_paise > 0,
+                    "invoiceCount": 0,
+                    "orderCount": 0,
+                    "lastPaymentDate": None,
                 }
                 debtors.append(d_row)
 
-            c_row = {
-                "id": p["id"],
-                "name": p["name"],
-                "city": p["city"],
-                "district": p["district"],
-                "state": p["state"],
-                "mobile": p["mobile"],
-                "contactPerson": p["name"],
-                "status": p["status"],
-                "creditDays": p["credit_days"],
-                "salespersonId": p["salesperson_id"] or "EMP-SP-01",
-                "salesperson": p["salesperson"],
-                "source": "database",
-                "openingPaise": 0,
-                "outstandingPaise": bal_paise,
-                "advancePaise": 0,
-                "unbilledValuePaise": 0,
-                "overduePaise": bal_paise if p["status"] == "active" else 0,
-                "isOverdue": bal_paise > 0,
-                "invoiceCount": 0,
-                "orderCount": 0,
-                "lastPaymentDate": None,
-            }
-            customers.append(c_row)
+        customers = debtors
 
         # Load orders and their lines
         cur.execute("SELECT * FROM orders ORDER BY created_at DESC")

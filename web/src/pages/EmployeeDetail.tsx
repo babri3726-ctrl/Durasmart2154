@@ -220,7 +220,7 @@ export default function EmployeeDetail() {
                       <div key={c.id} className="flex items-center justify-between gap-3 border-b border-line/60 px-3 py-2 last:border-b-0">
                         <div className="min-w-0">
                           <p className="truncate text-[12px] font-bold text-ink">
-                            <Link to={`/customers/${c.id}`} className="hover:underline">
+                            <Link to="/debtors" className="hover:underline">
                               {c.name}
                             </Link>
                           </p>

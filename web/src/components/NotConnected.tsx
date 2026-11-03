@@ -54,7 +54,7 @@ export function NotConnected({
             {title} {reason}
           </p>
           {hint && <p className="mt-2 text-[11px] leading-relaxed text-faint">{hint}</p>}
-          <Link to="/customers" className="btn-primary mt-4 inline-block">Go to Customers (live)</Link>
+          <Link to="/debtors" className="btn-primary mt-4 inline-block">Go to Debtors (live)</Link>
         </Card>
       </div>
     </>
