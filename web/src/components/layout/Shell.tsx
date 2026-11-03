@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, TrendingUp, Wallet, Truck, Boxes,
   Map, Route, AlarmClock, Users, ShoppingCart, FilePlus2, IdCard, BarChart3, Settings, ReceiptIndianRupee,
-  Megaphone, Landmark, FileSpreadsheet,
+  Megaphone, Landmark,
   ChevronLeft, ChevronRight, LogOut, Menu,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -29,7 +29,7 @@ const NAV: { label: string; to: string; icon: LucideIcon; end?: boolean; hidden?
   { label: 'Task Alarm', to: '/task-alarm', icon: AlarmClock },
   { label: 'Customers', to: '/debtors', icon: Users, hidden: true },
   { label: 'Debtor List', to: '/debtors', icon: ReceiptIndianRupee, end: true },
-  { label: 'Provisional Debtors', to: '/debtors/provisional', icon: FileSpreadsheet, end: true },
+  { label: 'Provisional Debtors', to: '/debtors', icon: ReceiptIndianRupee, hidden: true },
   { label: 'Orders', to: '/orders', icon: ShoppingCart, end: true },
   { label: 'New Order', to: '/orders/new', icon: FilePlus2, end: true },
   { label: 'Employees', to: '/employees', icon: IdCard },

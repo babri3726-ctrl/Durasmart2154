@@ -22,7 +22,6 @@ import TaskAlarm from './pages/TaskAlarm';
 
 
 import Debtors from './pages/Debtors';
-import ProvisionalDebtors from './pages/ProvisionalDebtors';
 import Orders from './pages/Orders';
 import OrderNew from './pages/OrderNew';
 import OrderDetail from './pages/OrderDetail';
@@ -108,7 +107,7 @@ export default function App() {
             {/* The provisional list's corrections, review sign-offs and salesperson assignments are
                 company financial working papers. `RequireOwner` is the second fence; every backend
                 route is behind `OwnerUser` and refuses a non-owner before reading a body. */}
-            <Route path="/debtors/provisional" element={<ProvisionalDebtors />} />
+            <Route path="/debtors/provisional" element={<Navigate to="/debtors" replace />} />
           </Route>
           <Route path="/payment" element={<Payment />} />
           <Route path="/marketing" element={<Marketing />} />

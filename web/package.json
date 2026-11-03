@@ -17,9 +17,7 @@
     "test:stock": "node --test scripts/stock-preview-contract-test.mjs",
     "test:stock:read": "node --test scripts/stock-read-contract-test.mjs",
     "test:debtors": "node --test scripts/debtor-apply-contract-test.mjs",
-    "test:provisional": "node --test scripts/provisional-sync-contract-test.mjs",
-    "test:provisional-management": "node --test scripts/provisional-management-contract-test.mjs",
-    "test": "node --test scripts/entry-boundary-test.mjs scripts/dispatch-entry-test.mjs scripts/session-refresh-test.mjs scripts/live-refresh-test.mjs scripts/reporting-window-test.mjs scripts/stock-preview-contract-test.mjs scripts/stock-read-contract-test.mjs scripts/debtor-apply-contract-test.mjs scripts/provisional-sync-contract-test.mjs scripts/provisional-management-contract-test.mjs",
+    "test": "node --test scripts/entry-boundary-test.mjs scripts/dispatch-entry-test.mjs scripts/session-refresh-test.mjs scripts/live-refresh-test.mjs scripts/reporting-window-test.mjs scripts/stock-preview-contract-test.mjs scripts/stock-read-contract-test.mjs scripts/debtor-apply-contract-test.mjs",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\""
   },
   "dependencies": {

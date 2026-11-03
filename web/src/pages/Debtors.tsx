@@ -34,10 +34,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { CheckCircle2, FileSearch, ShieldAlert, Plus, Pencil, Trash2, RefreshCw } from 'lucide-react';
 import { Card, EmptyState, PageHeader, Spinner } from '../components/ui/Card';
-import ProvisionalDebtorSync from '../components/ProvisionalDebtorSync';
 import { LiveSyncBar } from '../components/ui/LiveSync';
 import { Pager } from '../components/ui/Pager';
 import { rupees } from '../lib/format';
@@ -1180,11 +1178,7 @@ export default function Debtors() {
         title="Debtor List"
         subtitle={`Imported closing balances on ${serverHost()} — dated snapshots, debit and credit separate`}
       />
-      {/* Provisional debtors function retired - hidden from UI */}
-      <div className="hidden">
-        <Link to="/debtors/provisional">Provisional debtors</Link>
-        {user?.role === 'owner' && <ProvisionalDebtorSync />}
-      </div>
+
       <DebtorListCard />
       {user?.role === 'owner' && <DebtorWorkbookPreview />}
     </div>
