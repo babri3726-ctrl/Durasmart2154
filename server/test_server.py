@@ -556,55 +556,65 @@ class TestServerApi(unittest.TestCase):
         self.assertEqual(res_o.status_code, 200)
         o_id = res_o.json()["id"]
 
-        # Verify dashboard orders value increased
-        s_after_create = self.client.get("/api/v1/dashboard/summary").json()
-        self.assertEqual(s_after_create["ordersValuePaise"], val_base + 50000000)
+        try:
+            # Verify dashboard orders value increased
+            s_after_create = self.client.get("/api/v1/dashboard/summary").json()
+            self.assertEqual(s_after_create["ordersValuePaise"], val_base + 50000000)
 
-        # 3. Edit order: increase quantity from 10 MT to 15 MT (amount 75,000,000 paise)
-        patch_payload = {
-            "lines": [
-                {
-                    "product": "UPVC Heavy Profile",
-                    "orderedQuantity": "15.000",
-                    "unit": "MT",
-                    "ratePaise": 5000000,
-                    "amountPaise": 75000000
-                }
-            ]
-        }
-        res_patch = self.client.patch(f"/api/v1/orders/{o_id}", json=patch_payload)
-        self.assertEqual(res_patch.status_code, 200)
-        self.assertEqual(res_patch.json()["dispatchStatus"], "pending")
+            # 3. Edit order: increase quantity from 10 MT to 15 MT (amount 75,000,000 paise)
+            patch_payload = {
+                "lines": [
+                    {
+                        "product": "UPVC Heavy Profile",
+                        "orderedQuantity": "15.000",
+                        "unit": "MT",
+                        "ratePaise": 5000000,
+                        "amountPaise": 75000000
+                    }
+                ]
+            }
+            res_patch = self.client.patch(f"/api/v1/orders/{o_id}", json=patch_payload)
+            self.assertEqual(res_patch.status_code, 200)
+            self.assertEqual(res_patch.json()["dispatchStatus"], "pending")
 
-        # Verify dashboard orders value updated to match edited value
-        s_after_edit = self.client.get("/api/v1/dashboard/summary").json()
-        self.assertEqual(s_after_edit["ordersValuePaise"], val_base + 75000000)
+            # Verify dashboard orders value updated to match edited value
+            s_after_edit = self.client.get("/api/v1/dashboard/summary").json()
+            self.assertEqual(s_after_edit["ordersValuePaise"], val_base + 75000000)
 
-        # 4. Quick dispatch the order (15 MT dispatched)
-        disp_res = self.client.post(f"/api/v1/orders/{o_id}/quick-dispatch", json={
-            "vehicleNo": "PB 10 CT 8899",
-            "notes": "Full load delivered"
-        })
-        self.assertEqual(disp_res.status_code, 200)
+            # 4. Quick dispatch the order (15 MT dispatched)
+            disp_res = self.client.post(f"/api/v1/orders/{o_id}/quick-dispatch", json={
+                "vehicleNo": "PB 10 CT 8899",
+                "notes": "Full load delivered"
+            })
+            self.assertEqual(disp_res.status_code, 200)
 
-        # Verify dashboard dispatched metric increased by 15 MT
-        s_after_disp = self.client.get("/api/v1/dashboard/summary").json()
-        disp_new = float(s_after_disp["dispatched"][0]["dispatchedQuantity"])
-        self.assertAlmostEqual(disp_new, disp_base + 15.0, places=2)
+            # Verify dashboard dispatched metric increased by 15 MT
+            s_after_disp = self.client.get("/api/v1/dashboard/summary").json()
+            disp_new = float(s_after_disp["dispatched"][0]["dispatchedQuantity"])
+            self.assertAlmostEqual(disp_new, disp_base + 15.0, places=2)
 
-        # 5. Void the dispatch
-        dsps = self.client.get("/api/v1/dispatches").json()["items"]
-        target_dsp = next(d for d in dsps if d["orderId"] == o_id and not d.get("voidedAt"))
-        res_void = self.client.post(f"/api/v1/dispatches/{target_dsp['id']}/void")
-        self.assertEqual(res_void.status_code, 200)
+            # 5. Void the dispatch
+            dsps = self.client.get("/api/v1/dispatches").json()["items"]
+            target_dsp = next(d for d in dsps if d["orderId"] == o_id and not d.get("voidedAt"))
+            res_void = self.client.post(f"/api/v1/dispatches/{target_dsp['id']}/void")
+            self.assertEqual(res_void.status_code, 200)
 
-        # Verify dispatched metric reverted
-        s_after_void = self.client.get("/api/v1/dashboard/summary").json()
-        self.assertAlmostEqual(float(s_after_void["dispatched"][0]["dispatchedQuantity"]), disp_base, places=2)
-
-        # 6. Delete the order
-        res_del = self.client.delete(f"/api/v1/orders/{o_id}", headers={"X-User-Role": "owner"})
-        self.assertEqual(res_del.status_code, 200)
+            # Verify dispatched metric reverted
+            s_after_void = self.client.get("/api/v1/dashboard/summary").json()
+            self.assertAlmostEqual(float(s_after_void["dispatched"][0]["dispatchedQuantity"]), disp_base, places=2)
+        finally:
+            # 6. Delete the order and clean up any dispatches
+            if o_id:
+                self.client.delete(f"/api/v1/orders/{o_id}", headers={"X-User-Role": "owner"})
+                from server.main import STATE
+                import server.db as db
+                STATE["dispatches"] = [d for d in STATE.get("dispatches", []) if d.get("orderId") != o_id]
+                try:
+                    conn = db.get_connection()
+                    with conn:
+                        conn.execute("DELETE FROM dispatches WHERE order_id = ?", (o_id,))
+                except Exception:
+                    pass
 
         # Verify dashboard completely reverted to baseline
         s_final = self.client.get("/api/v1/dashboard/summary").json()
@@ -697,6 +707,162 @@ class TestServerApi(unittest.TestCase):
         dealer_final = next((d for d in cockpit_final["topDebtors"] if d["name"].strip().lower() == dealer_name.lower()), None)
         final_bal = float(dealer_final["balance"]) if dealer_final else 0.0
         self.assertAlmostEqual(final_bal, base_bal, places=2)
+
+    def test_21_dispatch_salesperson_target_dynamic_adjustment(self):
+        # 1. Fetch initial targets
+        tgts_res = self.client.get("/api/v1/sales/targets")
+        self.assertEqual(tgts_res.status_code, 200)
+        tgts_data = tgts_res.json()
+        self.assertTrue(len(tgts_data["items"]) > 0, "Targets list must not be empty")
+
+        sample_tgt = tgts_data["items"][0]
+        sp_name = sample_tgt["salesperson"]
+        party_name = sample_tgt["party_name"]
+
+        sp_summary_before = next((s for s in tgts_data["salesperson_summary"] if s["salesperson"].lower() == sp_name.lower()), None)
+        self.assertIsNotNone(sp_summary_before, f"Salesperson {sp_name} must exist in summary")
+        initial_disp = float(sp_summary_before["total_dispatched_mt"])
+        initial_pending = float(sp_summary_before["total_pending_mt"])
+
+        order_id = None
+        dsp_id = None
+
+        try:
+            # 2. Create order for this party and salesperson
+            order_res = self.client.post("/api/v1/orders", json={
+                "customerName": party_name,
+                "salespersonName": sp_name,
+                "notes": "Target Auto-Adjustment Integration Test Order",
+                "lines": [
+                    {
+                        "productId": "PRD-STEEL-BAR",
+                        "productName": "TMT Rebar 500D",
+                        "quantity": "10.000",
+                        "unit": "MT",
+                        "unitPrice": 50000.0
+                    }
+                ]
+            })
+            self.assertEqual(order_res.status_code, 200)
+            order_data = order_res.json()
+            order_id = order_data["id"]
+
+            # 3. Create a dispatch of 4.000 MT
+            dsp_res = self.client.post("/api/v1/dispatches", json={
+                "orderId": order_id,
+                "dispatchDate": "2026-11-03",
+                "vehicle": "PB 10 Z 9999",
+                "driver": "Test Yard Driver",
+                "lines": [
+                    {
+                        "orderLineId": 1,
+                        "productName": "TMT Rebar 500D",
+                        "quantity": "4.000",
+                        "unit": "MT"
+                    }
+                ]
+            })
+            self.assertEqual(dsp_res.status_code, 200)
+            dsp_data = dsp_res.json()
+            dsp_id = dsp_data["id"]
+
+            # Verify target auto-adjustment: dispatched increases by 4.0, pending decreases by 4.0
+            tgts_after_dsp = self.client.get("/api/v1/sales/targets").json()
+            sp_after_dsp = next((s for s in tgts_after_dsp["salesperson_summary"] if s["salesperson"].lower() == sp_name.lower()), None)
+            self.assertAlmostEqual(float(sp_after_dsp["total_dispatched_mt"]), initial_disp + 4.000, places=3)
+            self.assertAlmostEqual(float(sp_after_dsp["total_pending_mt"]), max(0.0, initial_pending - 4.000), places=3)
+
+            # Verify in /api/v1/dashboard/salesperson-performance
+            perf_after_dsp = self.client.get("/api/v1/dashboard/salesperson-performance").json()
+            sp_perf = next((r for r in perf_after_dsp["rows"] if r["employeeName"].lower() == sp_name.lower()), None)
+            self.assertIsNotNone(sp_perf)
+            self.assertAlmostEqual(float(sp_perf["units"][0]["dispatchedQuantity"]), initial_disp + 4.000, places=3)
+
+            # 4. Edit dispatch weight (Increase weight: from 4.000 MT to 7.000 MT -> delta +3.000 MT)
+            edit_res = self.client.patch(f"/api/v1/dispatches/{dsp_id}", json={
+                "lines": [
+                    {
+                        "dispatchLineId": 1,
+                        "orderLineId": 1,
+                        "quantity": "7.000",
+                        "unit": "MT"
+                    }
+                ],
+                "notes": "Weighbridge updated weight to 7 MT"
+            })
+            self.assertEqual(edit_res.status_code, 200)
+
+            tgts_after_inc = self.client.get("/api/v1/sales/targets").json()
+            sp_after_inc = next((s for s in tgts_after_inc["salesperson_summary"] if s["salesperson"].lower() == sp_name.lower()), None)
+            self.assertAlmostEqual(float(sp_after_inc["total_dispatched_mt"]), initial_disp + 7.000, places=3)
+            self.assertAlmostEqual(float(sp_after_inc["total_pending_mt"]), max(0.0, initial_pending - 7.000), places=3)
+
+            # 5. Edit dispatch weight (Decrease weight: from 7.000 MT to 5.000 MT -> delta -2.000 MT)
+            edit_dec_res = self.client.patch(f"/api/v1/dispatches/{dsp_id}", json={
+                "lines": [
+                    {
+                        "dispatchLineId": 1,
+                        "orderLineId": 1,
+                        "quantity": "5.000",
+                        "unit": "MT"
+                    }
+                ],
+                "notes": "Tare deduction applied: 5 MT net"
+            })
+            self.assertEqual(edit_dec_res.status_code, 200)
+
+            tgts_after_dec = self.client.get("/api/v1/sales/targets").json()
+            sp_after_dec = next((s for s in tgts_after_dec["salesperson_summary"] if s["salesperson"].lower() == sp_name.lower()), None)
+            self.assertAlmostEqual(float(sp_after_dec["total_dispatched_mt"]), initial_disp + 5.000, places=3)
+            self.assertAlmostEqual(float(sp_after_dec["total_pending_mt"]), max(0.0, initial_pending - 5.000), places=3)
+
+            # 6. Void dispatch -> Should cleanly revert by -5.000 MT back to initial baseline
+            void_res = self.client.post(f"/api/v1/dispatches/{dsp_id}/void")
+            self.assertEqual(void_res.status_code, 200)
+
+            tgts_after_void = self.client.get("/api/v1/sales/targets").json()
+            sp_after_void = next((s for s in tgts_after_void["salesperson_summary"] if s["salesperson"].lower() == sp_name.lower()), None)
+            self.assertAlmostEqual(float(sp_after_void["total_dispatched_mt"]), initial_disp, places=3)
+            self.assertAlmostEqual(float(sp_after_void["total_pending_mt"]), initial_pending, places=3)
+
+        finally:
+            # 7. Complete cleanup of test data so state remains pristine
+            from server.main import STATE
+            import server.db as db
+
+            if dsp_id:
+                STATE["dispatches"] = [d for d in STATE.get("dispatches", []) if d["id"] != dsp_id]
+                try:
+                    conn = db.get_connection()
+                    with conn:
+                        conn.execute("DELETE FROM dispatches WHERE id = ?", (dsp_id,))
+                except Exception:
+                    pass
+
+            if order_id:
+                STATE["orders"] = [o for o in STATE.get("orders", []) if o["id"] != order_id]
+                try:
+                    conn = db.get_connection()
+                    with conn:
+                        conn.execute("DELETE FROM orders WHERE id = ?", (order_id,))
+                except Exception:
+                    pass
+
+            # Restore original target figures on matching targets
+            for t in STATE.get("targets", []):
+                if t.get("salesperson", "").lower() == sp_name.lower() and t.get("party_name", "").lower() == party_name.lower():
+                    t["dispatched_mt"] = f"{float(sample_tgt.get('dispatched_mt', 0.0)):.3f}"
+                    t["pending_mt"] = f"{float(sample_tgt.get('pending_mt', 0.0)):.3f}"
+                    try:
+                        db.save_target(t)
+                    except Exception:
+                        pass
+
+        # Final verification: targets back to original
+        tgts_clean = self.client.get("/api/v1/sales/targets").json()
+        sp_clean = next((s for s in tgts_clean["salesperson_summary"] if s["salesperson"].lower() == sp_name.lower()), None)
+        self.assertAlmostEqual(float(sp_clean["total_dispatched_mt"]), initial_disp, places=3)
+        self.assertAlmostEqual(float(sp_clean["total_pending_mt"]), initial_pending, places=3)
 
 if __name__ == '__main__':
     unittest.main()

@@ -1144,6 +1144,13 @@ export interface DispatchCreateBody {
  *  void and a fresh record, never by an edit that rewrites what left the yard. `reason` goes into
  *  the audit row, which is where this API keeps the *why* of every mutation. Before N-2's review
  *  the recorder or the owner may correct; after it, the owner alone (`409 reviewed_locked`). */
+export interface DispatchPatchLine {
+  dispatchLineId?: number;
+  orderLineId?: number;
+  quantity: string;
+  unit?: string;
+}
+
 export interface DispatchPatchBody {
   dispatchDate?: string;
   vehicle?: string;
@@ -1151,6 +1158,7 @@ export interface DispatchPatchBody {
   driverPhone?: string;
   transportName?: string;
   notes?: string;
+  lines?: DispatchPatchLine[];
   reason: string;
 }
 

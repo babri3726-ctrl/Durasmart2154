@@ -539,9 +539,10 @@ def get_dashboard_summary(from_date: str | None = Query(None, alias="from"), to_
             delayed_orders += 1
 
     # Dispatched goods in the window (from targets base + recorded dispatches)
-    targets = STATE.get("targets", [])
-    base_disp_mt = sum(float(t.get("dispatched_mt", 0.0)) for t in targets)
-    if base_disp_mt == 0:
+    snap = STATE.get("hrpb_snapshot")
+    if snap and snap.get("summary") and "total_dispatched_mt" in snap["summary"]:
+        base_disp_mt = float(snap["summary"]["total_dispatched_mt"])
+    else:
         base_disp_mt = 621.776
 
     dispatches = STATE.get("dispatches", [])
@@ -1947,6 +1948,20 @@ def quick_dispatch_order(
             "createdAt": datetime.now().isoformat() + "+05:30"
         })
 
+    # Automatically adjust salesperson target
+    sp_name = order.get("salespersonName") or order.get("salesperson")
+    if not sp_name and order.get("salespersonId"):
+        emp_match = next((e for e in STATE.get("employees", []) if e.get("id") == order.get("salespersonId")), None)
+        if emp_match:
+            sp_name = emp_match.get("name")
+    if not sp_name and order.get("customerId"):
+        cust_match = next((c for c in STATE.get("customers", []) if c.get("id") == order.get("customerId")), None)
+        if cust_match:
+            sp_name = cust_match.get("salesperson") or cust_match.get("salespersonName")
+
+    if total_qty > 0:
+        adjust_salesperson_dispatch_target(sp_name, order.get("customerName"), total_qty)
+
     return order
 
 @app.get("/api/v1/orders/{order_id}")
@@ -2245,6 +2260,84 @@ class DispatchCreate(BaseModel):
     notes: str | None = None
     lines: list[DispatchLineCreate]
 
+def adjust_salesperson_dispatch_target(salesperson_name: str | None, party_name: str | None, delta_mt: float):
+    if not salesperson_name and not party_name:
+        return
+    if abs(delta_mt) < 1e-6:
+        return
+
+    targets = STATE.get("targets", [])
+    if not targets and os.path.exists(DEFAULT_HRPB_PATH):
+        try:
+            snap = extract_hr_pb_targets(DEFAULT_HRPB_PATH)
+            STATE["hrpb_snapshot"] = snap
+            STATE["targets"] = snap["all_targets"]
+            targets = STATE["targets"]
+        except Exception:
+            pass
+
+    sp_clean = (salesperson_name or "").strip().lower()
+    party_clean = (party_name or "").strip().lower()
+
+    # 1. Try to find targets matching both party and salesperson
+    matched = []
+    if party_clean and sp_clean:
+        matched = [
+            t for t in targets
+            if t.get("salesperson", "").strip().lower() == sp_clean
+            and (party_clean in t.get("party_name", "").strip().lower() or t.get("party_name", "").strip().lower() in party_clean)
+        ]
+
+    # 2. If no party match, match by salesperson alone
+    if not matched and sp_clean:
+        matched = [t for t in targets if t.get("salesperson", "").strip().lower() == sp_clean]
+
+    # 3. If still no match and party_clean exists, match by party alone
+    if not matched and party_clean:
+        matched = [
+            t for t in targets
+            if party_clean in t.get("party_name", "").strip().lower() or t.get("party_name", "").strip().lower() in party_clean
+        ]
+
+    # 4. If target matched, adjust target row
+    if matched:
+        tgt = matched[0]
+        cur_disp = float(tgt.get("dispatched_mt", 0.0))
+        cur_target = float(tgt.get("target_mt", 0.0))
+        new_disp = max(0.0, cur_disp + delta_mt)
+        new_pending = max(0.0, cur_target - new_disp)
+        tgt["dispatched_mt"] = f"{new_disp:.3f}"
+        tgt["pending_mt"] = f"{new_pending:.3f}"
+    elif sp_clean:
+        # If no target exists at all for this salesperson, create one so tracking is preserved
+        sp_display = salesperson_name or "Sales Officer"
+        new_disp = max(0.0, delta_mt)
+        new_pending = max(0.0, 100.0 - new_disp)
+        new_tgt = {
+            "id": f"TGT-AUTO-{len(targets) + 1:04d}",
+            "state": "Punjab",
+            "party_name": party_name or "General Territory Consignment",
+            "station": "Direct Yard",
+            "district": "Ludhiana",
+            "salesperson": sp_display,
+            "target_mt": "100.000",
+            "order_received_mt": "0.000",
+            "dispatched_mt": f"{new_disp:.3f}",
+            "pending_mt": f"{new_pending:.3f}"
+        }
+        targets.append(new_tgt)
+
+    # 5. Also update employee target tracking in STATE["employees"]
+    if sp_clean:
+        for emp in STATE.get("employees", []):
+            if emp.get("name", "").strip().lower() == sp_clean or emp.get("id", "").strip().lower() == sp_clean:
+                m_target = float(emp.get("monthlyTargetQty", 100.0))
+                e_disp = float(emp.get("dispatchedQty", 0.0)) + delta_mt
+                e_disp = max(0.0, e_disp)
+                e_rem = max(0.0, m_target - e_disp)
+                emp["dispatchedQty"] = f"{e_disp:.3f}"
+                emp["remainingTargetQty"] = f"{e_rem:.3f}"
+
 @app.get("/api/v1/dispatches")
 def get_dispatches(
     orderId: str | None = None,
@@ -2466,6 +2559,26 @@ def create_dispatch(
         movs.insert(0, mov_entry)
         db.save_stock_movement(mov_entry)
 
+    # Automatically decrease remaining dispatch target of salesperson
+    tot_dsp_mt = 0.0
+    for cl in created_lines:
+        u = str(cl.get("unit", "MT")).strip().lower()
+        q = float(cl.get("quantity", 0.0))
+        tot_dsp_mt += (q / 1000.0) if u == "kg" else q
+
+    sp_name = order.get("salespersonName") or order.get("salesperson")
+    if not sp_name and order.get("salespersonId"):
+        emp_match = next((e for e in STATE.get("employees", []) if e.get("id") == order.get("salespersonId")), None)
+        if emp_match:
+            sp_name = emp_match.get("name")
+    if not sp_name and order.get("customerId"):
+        cust_match = next((c for c in STATE.get("customers", []) if c.get("id") == order.get("customerId")), None)
+        if cust_match:
+            sp_name = cust_match.get("salesperson") or cust_match.get("salespersonName")
+
+    if tot_dsp_mt > 0:
+        adjust_salesperson_dispatch_target(sp_name, order.get("customerName"), tot_dsp_mt)
+
     return dispatch_entry
 
 @app.patch("/api/v1/dispatches/{dispatch_id}")
@@ -2499,6 +2612,72 @@ def patch_dispatch(
                 dsp["vehicleNumber"] = body[f]
             elif f == "driver":
                 dsp["driverName"] = body[f]
+
+    # Handle line weight / quantity updates
+    if "lines" in body and isinstance(body["lines"], list):
+        old_dsp_mt = 0.0
+        for l in dsp.get("lines", []):
+            u = str(l.get("unit", "MT")).strip().lower()
+            q = float(l.get("quantity", 0.0))
+            old_dsp_mt += (q / 1000.0) if u == "kg" else q
+
+        order = next((o for o in STATE["orders"] if o["id"] == dsp.get("orderId")), None)
+
+        for new_l in body["lines"]:
+            dl_id = new_l.get("dispatchLineId") or new_l.get("lineNo")
+            target_line = None
+            if dl_id:
+                target_line = next((l for l in dsp.get("lines", []) if l.get("dispatchLineId") == dl_id or l.get("lineNo") == dl_id), None)
+            if not target_line and len(dsp.get("lines", [])) == 1:
+                target_line = dsp["lines"][0]
+
+            if target_line and "quantity" in new_l:
+                try:
+                    old_q = float(target_line.get("quantity", 0.0))
+                    new_q = float(new_l["quantity"])
+                except (ValueError, TypeError):
+                    continue
+                delta_q = new_q - old_q
+                target_line["quantity"] = f"{new_q:.3f}"
+                if "unit" in new_l:
+                    target_line["unit"] = new_l["unit"]
+
+                if order:
+                    ol_id = target_line.get("orderLineId")
+                    match_ol = next((l for l in order.get("lines", []) if l.get("lineNo") == ol_id or l.get("orderLineId") == ol_id), None)
+                    if not match_ol and len(order.get("lines", [])) == 1:
+                        match_ol = order["lines"][0]
+                    if match_ol:
+                        ord_disp = max(0.0, float(match_ol.get("dispatchedQuantity", 0.0)) + delta_q)
+                        ord_rem = max(0.0, float(match_ol.get("remainingQuantity", 0.0)) - delta_q)
+                        match_ol["dispatchedQuantity"] = f"{ord_disp:.3f}"
+                        match_ol["remainingQuantity"] = f"{ord_rem:.3f}"
+
+        if order:
+            tot_dispatched = sum(float(l.get("dispatchedQuantity") or 0.0) for l in order.get("lines", []))
+            tot_remaining = sum(float(l.get("remainingQuantity") or 0.0) for l in order.get("lines", []))
+            order["dispatchedQuantity"] = f"{tot_dispatched:.3f}"
+            if tot_remaining <= 0.0001:
+                order["dispatchStatus"] = "dispatched"
+                order["status"] = "dispatched"
+            else:
+                order["dispatchStatus"] = "partial"
+            db.save_order(order)
+
+        new_dsp_mt = 0.0
+        for l in dsp.get("lines", []):
+            u = str(l.get("unit", "MT")).strip().lower()
+            q = float(l.get("quantity", 0.0))
+            new_dsp_mt += (q / 1000.0) if u == "kg" else q
+
+        delta_weight_mt = new_dsp_mt - old_dsp_mt
+        if abs(delta_weight_mt) > 1e-6:
+            sp_name = (order.get("salespersonName") or order.get("salesperson")) if order else None
+            if not sp_name and dsp.get("customerId"):
+                cust = next((c for c in STATE.get("customers", []) if c.get("id") == dsp.get("customerId")), None)
+                if cust:
+                    sp_name = cust.get("salesperson") or cust.get("salespersonName")
+            adjust_salesperson_dispatch_target(sp_name, dsp.get("customerName"), delta_weight_mt)
 
     dsp["version"] = dsp.get("version", 1) + 1
     db.save_dispatch(dsp)
@@ -2583,6 +2762,22 @@ def void_dispatch(
         }
         movs.insert(0, mov_entry)
         db.save_stock_movement(mov_entry)
+
+    # Revert target for salesperson
+    tot_disp_mt = 0.0
+    for dl in dsp.get("lines", []):
+        u = str(dl.get("unit", "MT")).strip().lower()
+        q = float(dl.get("quantity", 0.0))
+        tot_disp_mt += (q / 1000.0) if u == "kg" else q
+
+    sp_name = (order.get("salespersonName") or order.get("salesperson")) if order else None
+    if not sp_name and dsp.get("customerId"):
+        cust = next((c for c in STATE.get("customers", []) if c.get("id") == dsp.get("customerId")), None)
+        if cust:
+            sp_name = cust.get("salesperson") or cust.get("salespersonName")
+
+    if tot_disp_mt > 0:
+        adjust_salesperson_dispatch_target(sp_name, dsp.get("customerName"), -tot_disp_mt)
 
     db.save_dispatch(dsp)
     return dsp

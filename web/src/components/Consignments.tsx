@@ -97,6 +97,7 @@ function ConsignmentRow({
   const [voidOpen, setVoidOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [draft, setDraft] = useState<DispatchHeaderDraft>(emptyDraft);
+  const [lineWeights, setLineWeights] = useState<Record<string | number, string>>({});
   const [reason, setReason] = useState('');
   const [voidReason, setVoidReason] = useState('');
   const [reviewNote, setReviewNote] = useState('');
@@ -111,7 +112,21 @@ function ConsignmentRow({
   // this line only decides whether to offer a button that is known to be refused.
   const mayCorrect = isOwner || (userId !== null && row.createdBy === userId && !reviewed);
   const changes = correctOpen ? headerChanges(toDraft(row), draft) : {};
-  const changedCount = Object.keys(changes).length;
+
+  const linesList = ((row as unknown as { lines?: Array<{ dispatchLineId?: number; lineNo?: number; quantity: string; unit?: string; productName?: string; product?: string }> }).lines) || [];
+  const changedLines = linesList.map((l) => {
+    const key = l.dispatchLineId ?? l.lineNo ?? 1;
+    return {
+      dispatchLineId: l.dispatchLineId ?? l.lineNo ?? 1,
+      quantity: lineWeights[key] ?? l.quantity,
+      unit: l.unit ?? 'MT',
+    };
+  }).filter((l) => {
+    const orig = linesList.find((x) => (x.dispatchLineId ?? x.lineNo ?? 1) === l.dispatchLineId)?.quantity;
+    return orig !== undefined && l.quantity !== orig && l.quantity.trim() !== '';
+  });
+
+  const changedCount = Object.keys(changes).length + changedLines.length;
 
   /** The one call site for all three actions, so the failure handling cannot drift between them:
    *  the server's sentence on screen, the key kept for a retry of the same body, a success clearing
@@ -276,9 +291,7 @@ function ConsignmentRow({
 
       <Modal open={correctOpen} onClose={() => setCorrectOpen(false)} title={`Correct ${row.number}`}>
         <p className="text-[11px] text-muted">
-          Paperwork only. There is no quantity on this form and no route that accepts one: a wrong delivered figure
-          is corrected by voiding the consignment and recording it again, so both figures stay on the record. None of
-          it moves stock.
+          Correct dispatch details or adjust consignment item weights. Weight changes automatically adjust salesperson dispatch targets.
         </p>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <div>
@@ -337,6 +350,34 @@ function ConsignmentRow({
             />
           </div>
         </div>
+
+        {linesList.length > 0 && (
+          <div className="mt-3 rounded-card border border-edge/60 bg-surface/50 p-3">
+            <label className="label text-[11px] font-bold text-ink">Consignment Line Weights (MT/kg)</label>
+            <p className="mb-2 text-[10px] text-muted">Editing line weight automatically adjusts salesperson dispatch targets.</p>
+            <div className="space-y-2">
+              {linesList.map((l) => {
+                const key = l.dispatchLineId ?? l.lineNo ?? 1;
+                const pName = l.productName || l.product || `Line #${key}`;
+                return (
+                  <div key={key} className="flex items-center justify-between gap-3 text-xs">
+                    <span className="truncate text-ink font-medium max-w-[200px]">{pName}</span>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        className="input w-24 py-1 text-right text-xs"
+                        value={lineWeights[key] ?? l.quantity}
+                        onChange={(e) => setLineWeights({ ...lineWeights, [key]: e.target.value })}
+                      />
+                      <span className="text-[11px] text-muted">{l.unit || 'MT'}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <label className="label mt-4">
           Reason<span className="text-brand-red"> *</span>
         </label>
@@ -346,7 +387,7 @@ function ConsignmentRow({
           maxLength={1900}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="Why is this paperwork being corrected? It goes into the audit row with your name."
+          placeholder="Why is this paperwork or weight being corrected? It goes into the audit row with your name."
         />
         <p className="mt-2 text-[10px] text-faint">
           {changedCount === 0
@@ -362,11 +403,16 @@ function ConsignmentRow({
             className="btn-primary"
             disabled={busy !== '' || changedCount === 0 || reason.trim() === ''}
             onClick={() => {
-              const body = { ...changes, reason: reason.trim() };
+              const body = {
+                ...changes,
+                ...(changedLines.length > 0 ? { lines: changedLines } : {}),
+                reason: reason.trim(),
+              };
               void act('patch', body, (key) => patchDispatch(row.id, body, key, row.version), () => {
                 setCorrectOpen(false);
                 setReason('');
                 setDraft(emptyDraft);
+                setLineWeights({});
               });
             }}
           >
