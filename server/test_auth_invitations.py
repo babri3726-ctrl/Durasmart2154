@@ -1,9 +1,11 @@
 import pytest
+import uuid
 from datetime import datetime, timedelta, timezone
 from server import db
 
 def test_invitation_crud_and_status():
-    code = "TEST-INVITE-001"
+    uid = uuid.uuid4().hex[:6].upper()
+    code = f"TEST-INVITE-{uid}"
     expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
     inv = db.create_invitation(
         code=code,
@@ -40,7 +42,7 @@ def test_invitation_crud_and_status():
     assert used_second is False
 
     # Revoke
-    code2 = "TEST-INVITE-002"
+    code2 = f"TEST-INVITE-REV-{uid}"
     db.create_invitation(
         code=code2,
         role="dispatch",
@@ -54,9 +56,10 @@ def test_invitation_crud_and_status():
     assert fetched2["status"] == "revoked"
 
 def test_user_creation_and_salted_auth():
-    username = "test_user_rajesh"
-    email = "rajesh.test@durasmart.com"
-    phone = "9876543210"
+    uid = uuid.uuid4().hex[:6]
+    username = f"test_user_{uid}"
+    email = f"rajesh_{uid}@durasmart.com"
+    phone = f"9876{uuid.uuid4().int % 1000000:06d}"
     password = "SecurePassword123"
 
     user = db.create_user(
@@ -91,9 +94,10 @@ def test_user_creation_and_salted_auth():
     assert by_user is not None and by_user["id"] == user["id"]
 
     # Profile updates
-    updated = db.update_user_profile(user["id"], phone="9999988888", name="Rajesh K. Sharma")
+    new_phone = f"9999{uuid.uuid4().int % 1000000:06d}"
+    updated = db.update_user_profile(user["id"], phone=new_phone, name="Rajesh K. Sharma")
     assert updated is not None
-    assert updated["phone"] == "9999988888"
+    assert updated["phone"] == new_phone
     assert updated["name"] == "Rajesh K. Sharma"
 
     # Password update

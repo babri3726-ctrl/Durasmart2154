@@ -7,9 +7,11 @@ Links React Web Owner Cockpit & Mobile App with:
 """
 import hashlib
 import os
+import re
+import secrets
 import shutil
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
@@ -288,12 +290,229 @@ class LoginRequest(BaseModel):
 class RefreshRequest(BaseModel):
     refreshToken: str | None = None
 
+class CreateInvitationRequest(BaseModel):
+    role: str = "employee"
+    department: str = "Sales"
+    employeeId: str | None = None
+    salesTerritory: str | None = None
+    monthlyTargetQty: float = 100.0
+    targetUnit: str = "MT"
+    mayDispatch: bool = False
+    maxUses: int = 1
+    expiresInDays: int = 7
+
+class VerifyInvitationRequest(BaseModel):
+    code: str
+
+class SignupRequest(BaseModel):
+    name: str
+    identifier: str
+    password: str
+    phone: str | None = None
+    inviteCode: str
+
+class UpdateProfileRequest(BaseModel):
+    name: str | None = None
+    phone: str | None = None
+    currentPassword: str | None = None
+    newPassword: str | None = None
+
+@app.post("/api/v1/auth/invitations")
+def create_invitation(
+    req: CreateInvitationRequest,
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None)
+):
+    caller = resolve_caller(authorization, x_user_role)
+    if not caller["isOwner"]:
+        raise HTTPException(status_code=403, detail="Only owner can generate invitation codes")
+
+    code = f"DURA-{secrets.token_hex(3).upper()}"
+    days = max(1, req.expiresInDays)
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+
+    inv = db.create_invitation(
+        code=code,
+        role=req.role,
+        department=req.department,
+        employee_id=req.employeeId or "",
+        sales_territory=req.salesTerritory or "",
+        monthly_target_qty=req.monthlyTargetQty,
+        target_unit=req.targetUnit,
+        may_dispatch=1 if req.mayDispatch else 0,
+        max_uses=req.maxUses,
+        expires_at=expires_at,
+        created_by="USR-OWNER"
+    )
+    return inv
+
+@app.get("/api/v1/auth/invitations")
+def list_invitations(
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None)
+):
+    caller = resolve_caller(authorization, x_user_role)
+    if not caller["isOwner"]:
+        raise HTTPException(status_code=403, detail="Only owner can inspect invitation codes")
+    return db.list_invitations()
+
+@app.delete("/api/v1/auth/invitations/{code}")
+def revoke_invitation(
+    code: str,
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None)
+):
+    caller = resolve_caller(authorization, x_user_role)
+    if not caller["isOwner"]:
+        raise HTTPException(status_code=403, detail="Only owner can revoke invitation codes")
+    ok = db.revoke_invitation(code)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Active invitation code not found")
+    return {"success": True, "code": code.upper()}
+
+@app.post("/api/v1/auth/invitations/verify")
+def verify_invitation(req: VerifyInvitationRequest):
+    inv = db.get_invitation_by_code(req.code)
+    if not inv or inv["status"] != "active":
+        return {"valid": False, "reason": "Invitation code is invalid or has expired."}
+
+    if inv["expires_at"]:
+        try:
+            exp = datetime.fromisoformat(inv["expires_at"].replace("Z", "+00:00"))
+            now = datetime.now(exp.tzinfo) if exp.tzinfo else datetime.now()
+            if now > exp:
+                db.revoke_invitation(inv["code"])
+                return {"valid": False, "reason": "Invitation code has expired."}
+        except Exception:
+            pass
+
+    if inv["used_count"] >= inv["max_uses"]:
+        return {"valid": False, "reason": "Invitation code has already reached its maximum usage."}
+
+    return {
+        "valid": True,
+        "code": inv["code"],
+        "role": inv["role"],
+        "department": inv["department"],
+        "salesTerritory": inv["sales_territory"],
+        "monthlyTargetQty": inv["monthly_target_qty"],
+        "targetUnit": inv["target_unit"],
+        "mayDispatch": bool(inv["may_dispatch"])
+    }
+
+@app.post("/api/v1/auth/signup")
+def signup(req: SignupRequest):
+    if not req.name or not req.identifier or not req.password or not req.inviteCode:
+        raise HTTPException(status_code=400, detail="Name, identifier, password, and inviteCode are required.")
+
+    inv = db.get_invitation_by_code(req.inviteCode)
+    if not inv or inv["status"] != "active":
+        raise HTTPException(status_code=400, detail="Invalid or expired invitation code")
+
+    if inv["used_count"] >= inv["max_uses"]:
+        raise HTTPException(status_code=400, detail="Invitation code has already been used")
+
+    existing = db.get_user_by_identifier(req.identifier)
+    if existing:
+        raise HTTPException(status_code=409, detail="A user with this username or email already exists.")
+    if req.phone:
+        existing_phone = db.get_user_by_identifier(req.phone)
+        if existing_phone:
+            raise HTTPException(status_code=409, detail="A user with this phone number already exists.")
+
+    emp_id = inv.get("employee_id") or ""
+    if not emp_id:
+        emp_count = len(STATE.get("employees", [])) + 1
+        emp_id = f"EMP-SP-{emp_count:02d}" if inv["department"] == "Sales" else f"EMP-DSP-{emp_count:02d}"
+
+    clean_email = req.identifier if "@" in req.identifier else f"{req.identifier}@steeloperations.com"
+    clean_username = req.identifier.split("@")[0]
+
+    user = db.create_user(
+        name=req.name,
+        username=clean_username,
+        email=clean_email,
+        password=req.password,
+        phone=req.phone or "",
+        role=inv["role"],
+        department=inv["department"],
+        employee_id=emp_id,
+        sales_territory=inv["sales_territory"]
+    )
+
+    db.use_invitation_code(req.inviteCode)
+
+    new_emp = {
+        "id": emp_id,
+        "name": req.name,
+        "role": "Area Sales Officer" if inv["department"] == "Sales" else ("Yard Dispatch" if inv["department"] == "Dispatch" else inv["role"]),
+        "department": inv["department"],
+        "phone": req.phone or "",
+        "city": inv["sales_territory"] or "Punjab/Haryana",
+        "salesTerritory": inv["sales_territory"] or "Punjab/Haryana",
+        "monthlyTargetQty": f"{inv['monthly_target_qty']:.3f}",
+        "targetUnit": inv["target_unit"],
+        "active": True,
+        "mayDispatch": bool(inv["may_dispatch"])
+    }
+    if not any(e["id"] == emp_id for e in STATE.get("employees", [])):
+        STATE.setdefault("employees", []).append(new_emp)
+
+    user_id = user["id"]
+    return {
+        "accessToken": f"jwt-access-token-{inv['role']}-{emp_id}-{user_id}",
+        "refreshToken": f"jwt-refresh-token-{inv['role']}-{emp_id}-{user_id}",
+        "tokenType": "Bearer",
+        "accessExpiresAt": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+        "expiresIn": 86400,
+        "user": {
+            "id": user_id,
+            "name": user["name"],
+            "email": user["email"],
+            "phone": user["phone"],
+            "role": user["role"],
+            "department": user["department"],
+            "employeeId": emp_id,
+            "salesTerritory": user["sales_territory"]
+        }
+    }
+
 @app.post("/api/v1/auth/login")
 def login(req: LoginRequest):
     user_id = (req.identifier or req.username or "").strip().lower()
     if not req.password:
         raise HTTPException(status_code=400, detail="Password is required")
-    
+
+    # 1. Check SQLite Persistent Users
+    db_user = db.get_user_by_identifier(user_id)
+    if db_user:
+        if not db.verify_user_password(db_user, req.password):
+            raise HTTPException(status_code=401, detail="Incorrect password")
+        role = db_user.get("role", "employee")
+        emp_id = db_user.get("employee_id") or None
+        name = db_user.get("name", "Staff Member")
+        email = db_user.get("email", f"{user_id}@steeloperations.com")
+        dept = db_user.get("department", "Sales")
+        phone = db_user.get("phone", "+91 98140 10001")
+        user_db_id = db_user["id"]
+        return {
+            "accessToken": f"jwt-access-token-{role}-{emp_id or 'none'}-{user_db_id}",
+            "refreshToken": f"jwt-refresh-token-{role}-{emp_id or 'none'}-{user_db_id}",
+            "tokenType": "Bearer",
+            "accessExpiresAt": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            "expiresIn": 86400,
+            "user": {
+                "id": user_db_id,
+                "name": name,
+                "email": email,
+                "role": role,
+                "department": dept,
+                "employeeId": emp_id,
+                "phone": phone
+            }
+        }
+
+    # 2. Fallback to existing mock identity
     is_owner = "owner" in user_id or user_id in ["admin", "md", "director"]
 
     emp = None
@@ -345,6 +564,115 @@ def login(req: LoginRequest):
             "employeeId": emp_id,
             "phone": "+91 98140 10001"
         }
+    }
+
+@app.get("/api/v1/auth/me")
+def get_current_user_profile(
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None),
+    x_user_id: str | None = Header(None),
+    x_employee_id: str | None = Header(None)
+):
+    token = (authorization or "").replace("Bearer ", "").strip()
+    caller = resolve_caller(authorization, x_user_role, x_user_id, x_employee_id)
+
+    db_user = None
+    m = re.search(r"(usr-[a-f0-9]+)", token, re.IGNORECASE)
+    if m:
+        db_user = db.get_user_by_id(m.group(1))
+    if not db_user and x_user_id:
+        db_user = db.get_user_by_id(x_user_id) or db.get_user_by_identifier(x_user_id)
+    if not db_user and caller.get("employeeId"):
+        with db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM users WHERE employee_id = ? LIMIT 1", (caller["employeeId"],))
+            row = cur.fetchone()
+            if row:
+                db_user = dict(row)
+
+    if db_user:
+        emp_match = next((e for e in STATE.get("employees", []) if e["id"] == db_user.get("employee_id")), None)
+        return {
+            "id": db_user["id"],
+            "name": db_user["name"],
+            "email": db_user["email"],
+            "phone": db_user["phone"],
+            "role": db_user["role"],
+            "department": db_user["department"],
+            "employeeId": db_user.get("employee_id") or None,
+            "salesTerritory": db_user.get("sales_territory") or (emp_match.get("salesTerritory") if emp_match else ""),
+            "monthlyTargetQty": emp_match.get("monthlyTargetQty") if emp_match else "100.000",
+            "targetUnit": emp_match.get("targetUnit") if emp_match else "MT",
+            "active": bool(db_user.get("active", 1)),
+            "isOwner": db_user["role"] == "owner",
+            "isDispatch": db_user["department"] == "Dispatch" or (emp_match.get("mayDispatch") if emp_match else False)
+        }
+
+    is_owner = caller["isOwner"]
+    emp_id = caller.get("employeeId")
+    emp_match = next((e for e in STATE.get("employees", []) if e["id"] == emp_id), None)
+    return {
+        "id": "usr-owner" if is_owner else f"usr-{emp_id.lower() if emp_id else 'emp'}",
+        "name": "Managing Director (Owner)" if is_owner else (emp_match.get("name") if emp_match else "Sales Officer"),
+        "email": "owner@steeloperations.com" if is_owner else f"{emp_id.lower() if emp_id else 'staff'}@steeloperations.com",
+        "phone": "+91 98140 10001",
+        "role": caller["role"],
+        "department": caller["department"],
+        "employeeId": emp_id,
+        "salesTerritory": emp_match.get("salesTerritory", "Punjab/Haryana") if emp_match else "",
+        "monthlyTargetQty": emp_match.get("monthlyTargetQty", "100.000") if emp_match else "100.000",
+        "targetUnit": emp_match.get("targetUnit", "MT") if emp_match else "MT",
+        "active": True,
+        "isOwner": is_owner,
+        "isDispatch": caller["isDispatch"]
+    }
+
+@app.patch("/api/v1/auth/me")
+def update_current_user_profile(
+    req: UpdateProfileRequest,
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None),
+    x_user_id: str | None = Header(None),
+    x_employee_id: str | None = Header(None)
+):
+    token = (authorization or "").replace("Bearer ", "").strip()
+    caller = resolve_caller(authorization, x_user_role, x_user_id, x_employee_id)
+
+    db_user = None
+    m = re.search(r"(usr-[a-f0-9]+)", token, re.IGNORECASE)
+    if m:
+        db_user = db.get_user_by_id(m.group(1))
+    if not db_user and x_user_id:
+        db_user = db.get_user_by_id(x_user_id) or db.get_user_by_identifier(x_user_id)
+    if not db_user and caller.get("employeeId"):
+        with db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM users WHERE employee_id = ? LIMIT 1", (caller["employeeId"],))
+            row = cur.fetchone()
+            if row:
+                db_user = dict(row)
+
+    if not db_user:
+        return {
+            "name": req.name or "Managing Director (Owner)",
+            "phone": req.phone or "+91 98140 10001",
+            "message": "Profile updated"
+        }
+
+    if req.newPassword:
+        if not req.currentPassword or not db.verify_user_password(db_user, req.currentPassword):
+            raise HTTPException(status_code=400, detail="Current password verification failed")
+        db.update_user_password(db_user["id"], req.newPassword)
+
+    updated = db.update_user_profile(db_user["id"], name=req.name, phone=req.phone)
+    return {
+        "id": updated["id"],
+        "name": updated["name"],
+        "email": updated["email"],
+        "phone": updated["phone"],
+        "role": updated["role"],
+        "department": updated["department"],
+        "employeeId": updated.get("employee_id") or None
     }
 
 @app.post("/api/v1/auth/refresh")
