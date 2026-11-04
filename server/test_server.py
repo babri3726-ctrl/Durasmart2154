@@ -74,17 +74,24 @@ class TestServerApi(unittest.TestCase):
         from server.main import STATE
         import server.db as db
 
-        # Ensure a test debtor has temporary balance and overdue for this test
-        test_cust = next((c for c in STATE["customers"] if c["id"] == "DEBTOR-MAN-0140"), None)
-        if not test_cust:
-            test_cust = next((c for c in STATE["customers"] if c["id"] == "DEBTOR-HR-001"), None)
-
-        initial_bal = float(test_cust.get("balance", 0.0))
-        test_cust["balance"] = 50000.0
-        test_cust["balance_formatted"] = "50000.00"
-        test_cust["outstandingPaise"] = 5000000
-        test_cust["overduePaise"] = 5000000
-        test_cust["isOverdue"] = True
+        # Dedicated test debtor with initial balance and overdue for this test
+        test_cust = {
+            "id": "TEST-DEBTOR-T05",
+            "name": "TEST DEBTOR T05 DERABASSI",
+            "state": "Haryana",
+            "city": "Dera Bassi",
+            "district": "Mohali",
+            "salesperson": "Mozi Ram",
+            "balance": 50000.0,
+            "balance_formatted": "50000.00",
+            "outstandingPaise": 5000000,
+            "overduePaise": 5000000,
+            "isOverdue": True,
+            "status": "active"
+        }
+        STATE["debtors"].append(test_cust)
+        if test_cust not in STATE["customers"]:
+            STATE["customers"].append(test_cust)
         try:
             db.save_party(test_cust)
         except Exception:
@@ -135,21 +142,20 @@ class TestServerApi(unittest.TestCase):
                     self.client.delete(f"/api/v1/payments/{payment_id}")
                 except Exception:
                     pass
-            test_cust["balance"] = initial_bal
-            test_cust["balance_formatted"] = f"{initial_bal:.2f}"
-            test_cust["outstandingPaise"] = round(initial_bal * 100)
-            test_cust["overduePaise"] = round(initial_bal * 100)
-            test_cust["isOverdue"] = initial_bal > 0
+            STATE["debtors"] = [d for d in STATE.get("debtors", []) if d.get("id") != test_cust["id"]]
+            STATE["customers"] = [c for c in STATE.get("customers", []) if c.get("id") != test_cust["id"]]
             try:
-                db.save_party(test_cust)
+                with db.get_connection() as conn:
+                    conn.execute("DELETE FROM parties WHERE id = ?", (test_cust["id"],))
+                    conn.commit()
             except Exception:
                 pass
 
     def test_06_delayed_orders_and_dispatch_kpi_update(self):
         # 1. Create a delayed test order with past expectedDispatchDate
         order_res = self.client.post("/api/v1/orders", json={
-            "customerId": "DEBTOR-HR-001",
-            "customerName": "KALRA TRADERS/ STEEL DERABASSI",
+            "customerId": "TEST-CUST-FIXTURE-01",
+            "customerName": "TEST FIXTURE CUSTOMER",
             "expectedDispatchDate": "2026-10-20",
             "orderDate": "2026-10-18",
             "lines": [
@@ -202,8 +208,8 @@ class TestServerApi(unittest.TestCase):
         try:
             # Paying exact balance of a customer clears overdue flag and balance
             pay_res = self.client.post("/api/v1/payments", json={
-                "customerId": "DEBTOR-HR-001",
-                "customerName": "KALRA TRADERS/ STEEL DERABASSI",
+                "customerId": "TEST-CUST-FIXTURE-01",
+                "customerName": "TEST FIXTURE CUSTOMER",
                 "amount": 500.0,
                 "method": "RTGS",
                 "reference": "TEST-RTGS-CLEAR"
@@ -232,8 +238,8 @@ class TestServerApi(unittest.TestCase):
         orders_val_before = r_before["ordersValuePaise"]
 
         order_res = self.client.post("/api/v1/orders", json={
-            "customerId": "DEBTOR-HR-001",
-            "customerName": "KALRA TRADERS/ STEEL DERABASSI",
+            "customerId": "TEST-CUST-FIXTURE-01",
+            "customerName": "TEST FIXTURE CUSTOMER",
             "salespersonName": "Manoj Kumar",
             "lines": [
                 {
@@ -317,7 +323,7 @@ class TestServerApi(unittest.TestCase):
     def test_12_dispatch_crud_order_flow_and_stock_movements(self):
         # Create an order first
         order_payload = {
-            "customer_id": "DEBTOR-HR-001",
+            "customer_id": "TEST-CUST-FIXTURE-01",
             "date": "2026-11-02",
             "lines": [
                 {
@@ -394,7 +400,28 @@ class TestServerApi(unittest.TestCase):
         self.client.delete(f"/api/v1/orders/{order_id}", headers={"X-User-Role": "owner"})
 
     def test_13_opening_balances_ledger_and_targets(self):
-        cust_id = "DEBTOR-HR-001"
+        from server.main import STATE
+        import server.db as db
+        cust_id = "TEST-CUST-OB-01"
+        test_c = {
+            "id": cust_id,
+            "name": "Test Customer OB",
+            "state": "Punjab",
+            "city": "Mohali",
+            "salesperson": "Mozi Ram",
+            "balance": 0.0,
+            "balance_formatted": "0.00",
+            "openingPaise": 0,
+            "outstandingPaise": 0,
+            "overduePaise": 0,
+            "isOverdue": False
+        }
+        STATE["customers"].append(test_c)
+        try:
+            db.save_party(test_c)
+        except Exception:
+            pass
+
         try:
             # 1. Add opening balance
             ob_payload = {
@@ -423,33 +450,21 @@ class TestServerApi(unittest.TestCase):
             t_data = res_t.json()
             self.assertIn("items", t_data)
         finally:
-            import server.db as db
-            from server.main import STATE
             try:
                 with db.get_connection() as conn:
                     conn.execute("DELETE FROM opening_balances WHERE customer_id = ?", (cust_id,))
+                    conn.execute("DELETE FROM parties WHERE id = ?", (cust_id,))
                     conn.commit()
             except Exception:
                 pass
             if cust_id in STATE.get("opening_balances", {}):
                 STATE["opening_balances"][cust_id] = []
-            cust = next((c for c in STATE.get("customers", []) if c["id"] == cust_id), None)
-            if cust:
-                cust["openingPaise"] = 0
-                cust["outstandingPaise"] = 0
-                cust["balance"] = 0.0
-                cust["balance_formatted"] = "0.00"
-                cust["overduePaise"] = 0
-                cust["isOverdue"] = False
-                try:
-                    db.save_party(cust)
-                except Exception:
-                    pass
+            STATE["customers"] = [c for c in STATE.get("customers", []) if c.get("id") != cust_id]
 
     def test_14_order_edit_and_delete(self):
         # 1. Create order
         order_payload = {
-            "customer_id": "DEBTOR-HR-001",
+            "customer_id": "TEST-CUST-FIXTURE-01",
             "date": "2026-11-02",
             "lines": [
                 {
@@ -540,7 +555,7 @@ class TestServerApi(unittest.TestCase):
     def test_16_dispatch_person_order_authority(self):
         # Create an order
         order_payload = {
-            "customer_id": "DEBTOR-HR-001",
+            "customer_id": "TEST-CUST-FIXTURE-01",
             "date": "2026-11-02",
             "lines": [{"product": "Steel Pipe", "quantity": "3.000", "unit": "MT", "rate": 50000.0}],
             "notes": "Testing Dispatch Authority"
@@ -672,8 +687,8 @@ class TestServerApi(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)), "topDebtors must contain strictly unique dealer names")
 
         # Find or use KALRA TRADERS
-        dealer_name = "KALRA TRADERS/ STEEL DERABASSI"
-        cust_id = "DEBTOR-HR-001"
+        dealer_name = "TEST FIXTURE CUSTOMER"
+        cust_id = "TEST-CUST-FIXTURE-01"
         base_dealer_entry = next((d for d in top_debtors_base if d["name"].strip().lower() == dealer_name.lower()), None)
         base_bal = float(base_dealer_entry["balance"]) if base_dealer_entry else 0.0
 
@@ -914,8 +929,8 @@ class TestServerApi(unittest.TestCase):
     def test_22_payment_permanent_deletion_and_purge(self):
         # 1. Create a payment
         res = self.client.post("/api/v1/payments", json={
-            "customerId": "DEBTOR-HR-001",
-            "customerName": "KALRA TRADERS/ STEEL DERABASSI",
+            "customerId": "TEST-CUST-FIXTURE-01",
+            "customerName": "TEST FIXTURE CUSTOMER",
             "amount": 10000.0,
             "method": "NEFT",
             "reference": "TEST-DELETE-VERIFY"
@@ -959,7 +974,7 @@ class TestServerApi(unittest.TestCase):
             "notes": "Dealer collection and stock order check",
             "visits": [
                 {
-                    "customerId": "DEBTOR-HR-001",
+                    "customerId": "TEST-CUST-FIXTURE-01",
                     "customerName": "DOORKRM SIRSA ENTERPRISES (GOYAL AGROTECH) SIRSA",
                     "city": "Sirsa",
                     "district": "SIRSA",
@@ -1005,7 +1020,7 @@ class TestServerApi(unittest.TestCase):
                 "visits": [
                     {
                         "id": visit_1_id,
-                        "customerId": "DEBTOR-HR-001",
+                        "customerId": "TEST-CUST-FIXTURE-01",
                         "customerName": "DOORKRM SIRSA ENTERPRISES (GOYAL AGROTECH) SIRSA",
                         "city": "Sirsa",
                         "district": "SIRSA",
