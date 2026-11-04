@@ -1,7 +1,10 @@
 import base64
+import hashlib
 import os
 import re
+import secrets
 import sqlite3
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -132,6 +135,41 @@ def init_db(seed_state: dict[str, Any] | None = None):
             source TEXT DEFAULT '',
             source_ref TEXT DEFAULT '',
             created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS invitations (
+            id TEXT PRIMARY KEY,
+            code TEXT UNIQUE NOT NULL,
+            role TEXT NOT NULL DEFAULT 'employee',
+            department TEXT NOT NULL DEFAULT 'Sales',
+            employee_id TEXT DEFAULT '',
+            sales_territory TEXT DEFAULT '',
+            monthly_target_qty REAL DEFAULT 100.0,
+            target_unit TEXT DEFAULT 'MT',
+            may_dispatch INTEGER DEFAULT 0,
+            max_uses INTEGER DEFAULT 1,
+            used_count INTEGER DEFAULT 0,
+            expires_at TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_by TEXT NOT NULL DEFAULT 'USR-OWNER',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            phone TEXT DEFAULT '',
+            name TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            salt TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'employee',
+            department TEXT NOT NULL DEFAULT 'Sales',
+            employee_id TEXT DEFAULT '',
+            sales_territory TEXT DEFAULT '',
+            active INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
         );
         """)
 
@@ -855,3 +893,194 @@ def load_opening_balances() -> dict[str, list[dict[str, Any]]]:
                 "createdAt": r["created_at"]
             })
         return result
+
+# ----------------- Invitations & User Management -----------------
+
+def create_invitation(
+    code: str,
+    role: str = "employee",
+    department: str = "Sales",
+    employee_id: str = "",
+    sales_territory: str = "",
+    monthly_target_qty: float = 100.0,
+    target_unit: str = "MT",
+    may_dispatch: int = 0,
+    max_uses: int = 1,
+    expires_at: str = "",
+    created_by: str = "USR-OWNER"
+) -> dict[str, Any]:
+    inv_id = f"inv-{uuid.uuid4().hex[:12]}"
+    now = datetime.now().isoformat()
+    clean_code = code.strip().upper()
+    with get_connection() as conn:
+        conn.execute("""
+            INSERT INTO invitations (
+                id, code, role, department, employee_id, sales_territory,
+                monthly_target_qty, target_unit, may_dispatch, max_uses,
+                used_count, expires_at, status, created_by, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 'active', ?, ?)
+        """, (
+            inv_id, clean_code, role, department, employee_id, sales_territory,
+            monthly_target_qty, target_unit, 1 if may_dispatch else 0, max_uses,
+            expires_at, created_by, now
+        ))
+        conn.commit()
+    return get_invitation_by_code(clean_code)  # type: ignore
+
+def get_invitation_by_code(code: str) -> dict[str, Any] | None:
+    clean_code = code.strip().upper()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM invitations WHERE code = ?", (clean_code,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return dict(row)
+
+def list_invitations() -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM invitations ORDER BY created_at DESC")
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
+
+def revoke_invitation(code: str) -> bool:
+    clean_code = code.strip().upper()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE invitations SET status = 'revoked' WHERE code = ? AND status = 'active'", (clean_code,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+def use_invitation_code(code: str) -> bool:
+    clean_code = code.strip().upper()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT max_uses, used_count, status, expires_at FROM invitations WHERE code = ?", (clean_code,))
+        row = cursor.fetchone()
+        if not row:
+            return False
+        if row["status"] != "active":
+            return False
+        if row["expires_at"]:
+            try:
+                exp = datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
+                now = datetime.now(exp.tzinfo) if exp.tzinfo else datetime.now()
+                if now > exp:
+                    cursor.execute("UPDATE invitations SET status = 'expired' WHERE code = ?", (clean_code,))
+                    conn.commit()
+                    return False
+            except Exception:
+                pass
+        
+        new_used = row["used_count"] + 1
+        new_status = "used" if new_used >= row["max_uses"] else "active"
+        cursor.execute("UPDATE invitations SET used_count = ?, status = ? WHERE code = ?", (new_used, new_status, clean_code))
+        conn.commit()
+        return True
+
+def hash_password(password: str, salt: str | None = None) -> tuple[str, str]:
+    if salt is None:
+        salt = secrets.token_hex(16)
+    hashed = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+    return hashed, salt
+
+def create_user(
+    name: str,
+    username: str,
+    email: str,
+    password: str,
+    phone: str = "",
+    role: str = "employee",
+    department: str = "Sales",
+    employee_id: str = "",
+    sales_territory: str = ""
+) -> dict[str, Any]:
+    user_id = f"usr-{uuid.uuid4().hex[:10]}"
+    now = datetime.now().isoformat()
+    pwd_hash, salt = hash_password(password)
+    clean_user = username.strip().lower()
+    clean_email = email.strip().lower()
+    clean_phone = phone.strip()
+
+    with get_connection() as conn:
+        conn.execute("""
+            INSERT INTO users (
+                id, username, email, phone, name, password_hash, salt,
+                role, department, employee_id, sales_territory, active,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        """, (
+            user_id, clean_user, clean_email, clean_phone, name.strip(),
+            pwd_hash, salt, role, department, employee_id, sales_territory,
+            now, now
+        ))
+        conn.commit()
+    return get_user_by_id(user_id)  # type: ignore
+
+def get_user_by_id(user_id: str) -> dict[str, Any] | None:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+def get_user_by_identifier(identifier: str) -> dict[str, Any] | None:
+    clean = identifier.strip().lower()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM users
+            WHERE lower(username) = ? OR lower(email) = ? OR phone = ?
+            LIMIT 1
+        """, (clean, clean, identifier.strip()))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+def verify_user_password(user: dict[str, Any], password: str) -> bool:
+    salt = user.get("salt", "")
+    expected = user.get("password_hash", "")
+    computed, _ = hash_password(password, salt=salt)
+    return secrets.compare_digest(computed, expected)
+
+def update_user_profile(user_id: str, name: str | None = None, phone: str | None = None) -> dict[str, Any] | None:
+    now = datetime.now().isoformat()
+    updates = []
+    params = []
+    if name is not None:
+        updates.append("name = ?")
+        params.append(name.strip())
+    if phone is not None:
+        updates.append("phone = ?")
+        params.append(phone.strip())
+    if not updates:
+        return get_user_by_id(user_id)
+    updates.append("updated_at = ?")
+    params.append(now)
+    params.append(user_id)
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", tuple(params))
+        conn.commit()
+    return get_user_by_id(user_id)
+
+def update_user_password(user_id: str, new_password: str) -> bool:
+    now = datetime.now().isoformat()
+    pwd_hash, salt = hash_password(new_password)
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE users SET password_hash = ?, salt = ?, updated_at = ?
+            WHERE id = ?
+        """, (pwd_hash, salt, now, user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+# Ensure schema tables exist
+try:
+    init_db()
+except Exception:
+    pass
+
+
