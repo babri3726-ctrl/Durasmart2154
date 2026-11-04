@@ -13,7 +13,9 @@ class MockRepository extends ChangeNotifier {
     _seed();
   }
 
-  static const demoPasscode = 'demo123';
+  static const ownerPasscode = 'Ishu@DuraSmart#2026';
+  static const employeePasscode = 'DuraSmart@2026';
+  static const demoPasscode = ownerPasscode;
 
   // ── session ──────────────────────────────────────────────────────────
   AppUser? currentUser;
@@ -25,12 +27,20 @@ class MockRepository extends ChangeNotifier {
       final matches =
           u.email.toLowerCase() == key ||
           u.id.toLowerCase() == key ||
-          (u.employeeId?.toLowerCase() == key);
-      if (matches && password == demoPasscode) {
-        currentUser = u;
-        signedIn = true;
-        notifyListeners();
-        return u;
+          (u.employeeId?.toLowerCase() == key) ||
+          u.name.toLowerCase() == key ||
+          (key == 'owner' && u.isOwner) ||
+          (key == 'ishujindal' && u.isOwner) ||
+          (key == 'ishu' && u.isOwner);
+
+      if (matches) {
+        final expected = u.isOwner ? ownerPasscode : employeePasscode;
+        if (password == expected) {
+          currentUser = u;
+          signedIn = true;
+          notifyListeners();
+          return u;
+        }
       }
     }
     return null;
@@ -883,51 +893,133 @@ class MockRepository extends ChangeNotifier {
   String _fmtShort(DateTime d) =>
       '${d.day}/${d.month} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
 
-  // ── seed demo data ───────────────────────────────────────────────────
+  // ── seed data ─────────────────────────────────────────────────────────
   final _accounts = <AppUser>[
     AppUser(
-      id: 'USR-001',
-      name: 'Rajinder Malhotra',
-      email: 'owner@example.test',
+      id: 'USR-OWNER-ISHU',
+      name: 'Ishu Jindal',
+      email: 'ishu.jindal@durasmart.com',
       role: UserRole.owner,
       department: 'Management',
-      phone: '919814011111',
+      employeeId: 'OWNER-01',
+      phone: '+91 98140 10001',
     ),
     AppUser(
-      id: 'EMP-101',
-      name: 'Amanpreet Singh',
-      email: 'amanpreet@example.test',
+      id: 'USR-EMP-SP-01',
+      name: 'AJAY JI',
+      email: 'ajay.ji@durasmart.com',
       role: UserRole.employee,
       department: 'Sales',
-      employeeId: 'SAL-01',
-      phone: '919814022101',
+      employeeId: 'EMP-SP-01',
+      phone: '9814010000',
     ),
     AppUser(
-      id: 'EMP-102',
-      name: 'Harpreet Singh',
-      email: 'harpreet@example.test',
+      id: 'USR-EMP-SP-02',
+      name: 'Aksit',
+      email: 'aksit@durasmart.com',
       role: UserRole.employee,
       department: 'Sales',
-      employeeId: 'SAL-02',
-      phone: '919815540021',
+      employeeId: 'EMP-SP-02',
+      phone: '9814010001',
     ),
     AppUser(
-      id: 'EMP-103',
-      name: 'Rohit Kumar',
-      email: 'rohit@example.test',
+      id: 'USR-EMP-SP-03',
+      name: 'GAURAV JI',
+      email: 'gaurav.ji@durasmart.com',
       role: UserRole.employee,
       department: 'Sales',
-      employeeId: 'SAL-03',
-      phone: '919876011234',
+      employeeId: 'EMP-SP-03',
+      phone: '9814010002',
     ),
     AppUser(
-      id: 'EMP-201',
-      name: 'Simran Kaur',
-      email: 'simran@example.test',
+      id: 'USR-EMP-SP-04',
+      name: 'JAGDEEP 2/ Aakash Kumar',
+      email: 'aakash.kumar@durasmart.com',
       role: UserRole.employee,
-      department: 'Dispatch',
-      employeeId: 'OPS-01',
-      phone: '919872055410',
+      department: 'Sales',
+      employeeId: 'EMP-SP-04',
+      phone: '9814010003',
+    ),
+    AppUser(
+      id: 'USR-EMP-SP-05',
+      name: 'JAGDEEP 3/ Dalip Kumar',
+      email: 'dalip.kumar@durasmart.com',
+      role: UserRole.employee,
+      department: 'Sales',
+      employeeId: 'EMP-SP-05',
+      phone: '9814010004',
+    ),
+    AppUser(
+      id: 'USR-EMP-SP-06',
+      name: 'Jagdeep Singh',
+      email: 'jagdeep.singh@durasmart.com',
+      role: UserRole.employee,
+      department: 'Sales',
+      employeeId: 'EMP-SP-06',
+      phone: '9814010005',
+    ),
+    AppUser(
+      id: 'USR-EMP-SP-07',
+      name: 'Mozi Ram',
+      email: 'mozi.ram@durasmart.com',
+      role: UserRole.employee,
+      department: 'Sales',
+      employeeId: 'EMP-SP-07',
+      phone: '9814010006',
+    ),
+    AppUser(
+      id: 'USR-EMP-SP-08',
+      name: 'PANKAJ JI',
+      email: 'pankaj.ji@durasmart.com',
+      role: UserRole.employee,
+      department: 'Sales',
+      employeeId: 'EMP-SP-08',
+      phone: '9814010007',
+    ),
+    AppUser(
+      id: 'USR-EMP-SP-09',
+      name: 'Pankaj Goyal',
+      email: 'pankaj.goyal@durasmart.com',
+      role: UserRole.employee,
+      department: 'Sales',
+      employeeId: 'EMP-SP-09',
+      phone: '9814010008',
+    ),
+    AppUser(
+      id: 'USR-EMP-SP-10',
+      name: 'SANDEEP2/Mozi Ram',
+      email: 'sandeep2@durasmart.com',
+      role: UserRole.employee,
+      department: 'Sales',
+      employeeId: 'EMP-SP-10',
+      phone: '9814010009',
+    ),
+    AppUser(
+      id: 'USR-EMP-SP-11',
+      name: 'Sandeep Mahajan',
+      email: 'sandeep.mahajan@durasmart.com',
+      role: UserRole.employee,
+      department: 'Sales',
+      employeeId: 'EMP-SP-11',
+      phone: '9814010010',
+    ),
+    AppUser(
+      id: 'USR-EMP-SP-12',
+      name: 'Suresh Jindal',
+      email: 'suresh.jindal@durasmart.com',
+      role: UserRole.employee,
+      department: 'Sales',
+      employeeId: 'EMP-SP-12',
+      phone: '9814010011',
+    ),
+    AppUser(
+      id: 'USR-EMP-SP-13',
+      name: 'VIJAY JI',
+      email: 'vijay.ji@durasmart.com',
+      role: UserRole.employee,
+      department: 'Sales',
+      employeeId: 'EMP-SP-13',
+      phone: '9814010012',
     ),
   ];
 
@@ -940,62 +1032,134 @@ class MockRepository extends ChangeNotifier {
 
     employees.addAll([
       Employee(
-        id: 'SAL-01',
-        name: 'Amanpreet Singh',
-        role: 'Area Sales Manager',
+        id: 'EMP-SP-01',
+        name: 'AJAY JI',
+        role: 'Area Sales Officer',
         department: 'Sales',
-        phone: '919814022101',
-        email: 'amanpreet@example.test',
-        city: 'Ludhiana',
+        phone: '9814010000',
+        email: 'ajay.ji@durasmart.com',
+        city: 'Punjab/Haryana',
         monthlyTargetQty: 100,
       ),
       Employee(
-        id: 'SAL-02',
-        name: 'Harpreet Singh',
-        role: 'Sales Executive',
+        id: 'EMP-SP-02',
+        name: 'Aksit',
+        role: 'Area Sales Officer',
         department: 'Sales',
-        phone: '919815540021',
-        email: 'harpreet@example.test',
-        city: 'Jalandhar',
-        monthlyTargetQty: 85,
+        phone: '9814010001',
+        email: 'aksit@durasmart.com',
+        city: 'Punjab/Haryana',
+        monthlyTargetQty: 100,
       ),
       Employee(
-        id: 'SAL-03',
-        name: 'Rohit Kumar',
-        role: 'Sales Executive',
+        id: 'EMP-SP-03',
+        name: 'GAURAV JI',
+        role: 'Area Sales Officer',
         department: 'Sales',
-        phone: '919876011234',
-        email: 'rohit@example.test',
-        city: 'Amritsar',
-        monthlyTargetQty: 75,
+        phone: '9814010002',
+        email: 'gaurav.ji@durasmart.com',
+        city: 'Punjab/Haryana',
+        monthlyTargetQty: 100,
       ),
       Employee(
-        id: 'SAL-04',
-        name: 'Vikram Anand',
-        role: 'Sales Executive',
+        id: 'EMP-SP-04',
+        name: 'JAGDEEP 2/ Aakash Kumar',
+        role: 'Area Sales Officer',
         department: 'Sales',
-        phone: '919877712345',
-        email: 'vikram@example.test',
-        city: 'Patiala',
-        monthlyTargetQty: 60,
+        phone: '9814010003',
+        email: 'aakash.kumar@durasmart.com',
+        city: 'Punjab/Haryana',
+        monthlyTargetQty: 100,
       ),
       Employee(
-        id: 'OPS-01',
-        name: 'Simran Kaur',
-        role: 'Dispatch Coordinator',
-        department: 'Dispatch',
-        phone: '919872055410',
-        email: 'simran@example.test',
-        city: 'Ludhiana',
+        id: 'EMP-SP-05',
+        name: 'JAGDEEP 3/ Dalip Kumar',
+        role: 'Area Sales Officer',
+        department: 'Sales',
+        phone: '9814010004',
+        email: 'dalip.kumar@durasmart.com',
+        city: 'Punjab/Haryana',
+        monthlyTargetQty: 100,
       ),
       Employee(
-        id: 'OPS-02',
-        name: 'Gurmeet Singh',
-        role: 'Warehouse In-charge',
-        department: 'Stores',
-        phone: '919814455667',
-        email: 'gurmeet@example.test',
-        city: 'Ludhiana',
+        id: 'EMP-SP-06',
+        name: 'Jagdeep Singh',
+        role: 'Area Sales Officer',
+        department: 'Sales',
+        phone: '9814010005',
+        email: 'jagdeep.singh@durasmart.com',
+        city: 'Punjab/Haryana',
+        monthlyTargetQty: 100,
+      ),
+      Employee(
+        id: 'EMP-SP-07',
+        name: 'Mozi Ram',
+        role: 'Area Sales Officer',
+        department: 'Sales',
+        phone: '9814010006',
+        email: 'mozi.ram@durasmart.com',
+        city: 'Punjab/Haryana',
+        monthlyTargetQty: 100,
+      ),
+      Employee(
+        id: 'EMP-SP-08',
+        name: 'PANKAJ JI',
+        role: 'Area Sales Officer',
+        department: 'Sales',
+        phone: '9814010007',
+        email: 'pankaj.ji@durasmart.com',
+        city: 'Punjab/Haryana',
+        monthlyTargetQty: 100,
+      ),
+      Employee(
+        id: 'EMP-SP-09',
+        name: 'Pankaj Goyal',
+        role: 'Area Sales Officer',
+        department: 'Sales',
+        phone: '9814010008',
+        email: 'pankaj.goyal@durasmart.com',
+        city: 'Punjab/Haryana',
+        monthlyTargetQty: 100,
+      ),
+      Employee(
+        id: 'EMP-SP-10',
+        name: 'SANDEEP2/Mozi Ram',
+        role: 'Area Sales Officer',
+        department: 'Sales',
+        phone: '9814010009',
+        email: 'sandeep2@durasmart.com',
+        city: 'Punjab/Haryana',
+        monthlyTargetQty: 100,
+      ),
+      Employee(
+        id: 'EMP-SP-11',
+        name: 'Sandeep Mahajan',
+        role: 'Area Sales Officer',
+        department: 'Sales',
+        phone: '9814010010',
+        email: 'sandeep.mahajan@durasmart.com',
+        city: 'Punjab/Haryana',
+        monthlyTargetQty: 100,
+      ),
+      Employee(
+        id: 'EMP-SP-12',
+        name: 'Suresh Jindal',
+        role: 'Area Sales Officer',
+        department: 'Sales',
+        phone: '9814010011',
+        email: 'suresh.jindal@durasmart.com',
+        city: 'Punjab/Haryana',
+        monthlyTargetQty: 100,
+      ),
+      Employee(
+        id: 'EMP-SP-13',
+        name: 'VIJAY JI',
+        role: 'Area Sales Officer',
+        department: 'Sales',
+        phone: '9814010012',
+        email: 'vijay.ji@durasmart.com',
+        city: 'Punjab/Haryana',
+        monthlyTargetQty: 100,
       ),
     ]);
 

@@ -47,5 +47,7 @@ worktrees/
 .harness/*.json
 .harness/*.log
 !.harness/agy.version
+.playwright-mcp/
+data/operations.db
 
 

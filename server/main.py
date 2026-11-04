@@ -86,21 +86,7 @@ app.mount("/api/v1/slips", StaticFiles(directory=db.SLIPS_DIR), name="slips")
 INITIAL_CUSTOMERS = []
 INITIAL_ORDERS = []
 
-INITIAL_EMPLOYEES = [
-    {
-        "id": "EMP-DSP-01",
-        "name": "Harpreet Singh",
-        "role": "Yard Dispatch Manager",
-        "department": "Dispatch",
-        "phone": "9814010099",
-        "city": "Ludhiana Yard",
-        "salesTerritory": "Punjab/Haryana",
-        "monthlyTargetQty": "0.000",
-        "targetUnit": "MT",
-        "active": True,
-        "mayDispatch": True
-    }
-]
+INITIAL_EMPLOYEES = []
 
 INITIAL_PRODUCTS = [
     {
@@ -207,7 +193,7 @@ try:
             }
             for i, sp_name in enumerate(sp_set)
         ]
-        STATE["employees"] = list(INITIAL_EMPLOYEES) + sp_employees
+        STATE["employees"] = list(sp_employees)
 
         # Ensure all dealers have unified party attributes and alias customers to debtors
         for idx, d in enumerate(STATE["debtors"]):
@@ -483,86 +469,35 @@ def login(req: LoginRequest):
     if not req.password:
         raise HTTPException(status_code=400, detail="Password is required")
 
-    # 1. Check SQLite Persistent Users
+    # 1. Check SQLite Persistent Users (Owner Ishu Jindal & 13 Real HR-PB Sales Officers)
     db_user = db.get_user_by_identifier(user_id)
-    if db_user:
-        if not db.verify_user_password(db_user, req.password):
-            raise HTTPException(status_code=401, detail="Incorrect password")
-        role = db_user.get("role", "employee")
-        emp_id = db_user.get("employee_id") or None
-        name = db_user.get("name", "Staff Member")
-        email = db_user.get("email", f"{user_id}@steeloperations.com")
-        dept = db_user.get("department", "Sales")
-        phone = db_user.get("phone", "+91 98140 10001")
-        user_db_id = db_user["id"]
-        return {
-            "accessToken": f"jwt-access-token-{role}-{emp_id or 'none'}-{user_db_id}",
-            "refreshToken": f"jwt-refresh-token-{role}-{emp_id or 'none'}-{user_db_id}",
-            "tokenType": "Bearer",
-            "accessExpiresAt": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
-            "expiresIn": 86400,
-            "user": {
-                "id": user_db_id,
-                "name": name,
-                "email": email,
-                "role": role,
-                "department": dept,
-                "employeeId": emp_id,
-                "phone": phone
-            }
-        }
+    if not db_user:
+        raise HTTPException(status_code=401, detail="User account not found. Only authorized personnel may log in.")
 
-    # 2. Fallback to existing mock identity
-    is_owner = "owner" in user_id or user_id in ["admin", "md", "director"]
+    if not db.verify_user_password(db_user, req.password):
+        raise HTTPException(status_code=401, detail="Incorrect password. Please verify your credentials.")
 
-    emp = None
-    for e in STATE.get("employees", []):
-        clean_name = e["name"].lower().replace(" ", "").replace("/", "")
-        clean_user = user_id.replace(" ", "").replace("/", "")
-        if clean_user in clean_name or clean_name in clean_user or user_id == e["id"].lower():
-            emp = e
-            break
-
-    if is_owner:
-        role = "owner"
-        name = "Managing Director (Owner)"
-        email = "owner@steeloperations.com"
-        emp_id = None
-        dept = "Management"
-    elif "dispatch" in user_id or "yard" in user_id or "harpreet" in user_id:
-        role = "employee"
-        name = "Harpreet Singh (Yard Dispatch)"
-        email = "dispatch@steeloperations.com"
-        emp_id = "EMP-DSP-01"
-        dept = "Dispatch"
-    elif emp:
-        role = "employee"
-        name = emp["name"]
-        email = f"{user_id}@steeloperations.com"
-        emp_id = emp["id"]
-        dept = emp.get("department", "Sales")
-    else:
-        role = "employee"
-        first_emp = STATE.get("employees", [{}])[0]
-        name = first_emp.get("name", "Sales Officer")
-        email = f"{user_id}@steeloperations.com"
-        emp_id = first_emp.get("id", "EMP-SP-01")
-        dept = "Sales"
-
+    role = db_user.get("role", "employee")
+    emp_id = db_user.get("employee_id") or None
+    name = db_user.get("name", "Staff Member")
+    email = db_user.get("email", f"{user_id}@durasmart.com")
+    dept = db_user.get("department", "Sales")
+    phone = db_user.get("phone", "+91 98140 10001")
+    user_db_id = db_user["id"]
     return {
-        "accessToken": f"jwt-access-token-{role}-{emp_id or 'owner'}",
-        "refreshToken": f"jwt-refresh-token-{role}-{emp_id or 'owner'}",
+        "accessToken": f"jwt-access-token-{role}-{emp_id or 'none'}-{user_db_id}",
+        "refreshToken": f"jwt-refresh-token-{role}-{emp_id or 'none'}-{user_db_id}",
         "tokenType": "Bearer",
-        "accessExpiresAt": "2026-10-27T20:00:00+05:30",
+        "accessExpiresAt": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
         "expiresIn": 86400,
         "user": {
-            "id": "usr-owner" if is_owner else f"usr-{emp_id.lower() if emp_id else 'emp'}",
+            "id": user_db_id,
             "name": name,
             "email": email,
             "role": role,
             "department": dept,
             "employeeId": emp_id,
-            "phone": "+91 98140 10001"
+            "phone": phone
         }
     }
 
@@ -577,18 +512,15 @@ def get_current_user_profile(
     caller = resolve_caller(authorization, x_user_role, x_user_id, x_employee_id)
 
     db_user = None
-    m = re.search(r"(usr-[a-f0-9]+)", token, re.IGNORECASE)
+    m = re.search(r"(usr-[\w-]+)", token, re.IGNORECASE)
     if m:
-        db_user = db.get_user_by_id(m.group(1))
+        db_user = db.get_user_by_id(m.group(1)) or db.get_user_by_identifier(m.group(1))
     if not db_user and x_user_id:
         db_user = db.get_user_by_id(x_user_id) or db.get_user_by_identifier(x_user_id)
     if not db_user and caller.get("employeeId"):
-        with db.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT * FROM users WHERE employee_id = ? LIMIT 1", (caller["employeeId"],))
-            row = cur.fetchone()
-            if row:
-                db_user = dict(row)
+        db_user = db.get_user_by_identifier(caller["employeeId"])
+    if not db_user and caller.get("isOwner"):
+        db_user = db.get_user_by_identifier("ishujindal")
 
     if db_user:
         emp_match = next((e for e in STATE.get("employees", []) if e["id"] == db_user.get("employee_id")), None)
@@ -612,16 +544,16 @@ def get_current_user_profile(
     emp_id = caller.get("employeeId")
     emp_match = next((e for e in STATE.get("employees", []) if e["id"] == emp_id), None)
     return {
-        "id": "usr-owner" if is_owner else f"usr-{emp_id.lower() if emp_id else 'emp'}",
-        "name": "Managing Director (Owner)" if is_owner else (emp_match.get("name") if emp_match else "Sales Officer"),
-        "email": "owner@steeloperations.com" if is_owner else f"{emp_id.lower() if emp_id else 'staff'}@steeloperations.com",
+        "id": "usr-owner-ishu" if is_owner else f"usr-{emp_id.lower() if emp_id else 'emp'}",
+        "name": "Ishu Jindal" if is_owner else (emp_match.get("name") if emp_match else "Sales Officer"),
+        "email": "ishu.jindal@durasmart.com" if is_owner else f"{emp_id.lower() if emp_id else 'staff'}@durasmart.com",
         "phone": "+91 98140 10001",
         "role": caller["role"],
         "department": caller["department"],
         "employeeId": emp_id,
-        "salesTerritory": emp_match.get("salesTerritory", "Punjab/Haryana") if emp_match else "",
-        "monthlyTargetQty": emp_match.get("monthlyTargetQty", "100.000") if emp_match else "100.000",
-        "targetUnit": emp_match.get("targetUnit", "MT") if emp_match else "MT",
+        "salesTerritory": emp_match.get("salesTerritory", "Punjab/Haryana") if emp_match else "Executive / All Territories",
+        "monthlyTargetQty": emp_match.get("monthlyTargetQty", "0.000") if is_owner else "100.000",
+        "targetUnit": "MT",
         "active": True,
         "isOwner": is_owner,
         "isDispatch": caller["isDispatch"]

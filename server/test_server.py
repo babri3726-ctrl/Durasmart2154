@@ -22,11 +22,31 @@ class TestServerApi(unittest.TestCase):
         self.assertIn("<div id=\"root\"></div>", r.text)
 
     def test_01_login(self):
-        r = self.client.post("/api/v1/auth/login", json={"username": "owner", "password": "demo"})
+        # 1. Owner Ishu Jindal Login
+        r = self.client.post("/api/v1/auth/login", json={"username": "owner", "password": "Ishu@DuraSmart#2026"})
         self.assertEqual(r.status_code, 200, f"Login failed: {r.text}")
         data = r.json()
         self.assertIn("user", data)
         self.assertEqual(data["user"]["role"], "owner")
+        self.assertEqual(data["user"]["name"], "Ishu Jindal")
+
+        # 2. Owner Ishu Jindal Login via username
+        r2 = self.client.post("/api/v1/auth/login", json={"username": "ishujindal", "password": "Ishu@DuraSmart#2026"})
+        self.assertEqual(r2.status_code, 200)
+
+        # 3. Real HR-PB Sales Employee Login
+        r3 = self.client.post("/api/v1/auth/login", json={"username": "EMP-SP-01", "password": "DuraSmart@2026"})
+        self.assertEqual(r3.status_code, 200)
+        emp_data = r3.json()
+        self.assertEqual(emp_data["user"]["name"], "AJAY JI")
+        self.assertEqual(emp_data["user"]["role"], "employee")
+
+        # 4. Insecure / dummy passwords strictly rejected
+        r_bad_pwd = self.client.post("/api/v1/auth/login", json={"username": "owner", "password": "demo"})
+        self.assertEqual(r_bad_pwd.status_code, 401)
+
+        r_bad_user = self.client.post("/api/v1/auth/login", json={"username": "harpreet", "password": "demo"})
+        self.assertEqual(r_bad_user.status_code, 401)
 
     def test_02_stock_watch(self):
         r = self.client.get("/api/v1/imports/excel/stock-watch")

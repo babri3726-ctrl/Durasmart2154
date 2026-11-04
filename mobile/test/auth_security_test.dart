@@ -107,7 +107,7 @@ void main() {
     testWidgets('ProfileScreen: displays user details, role badge, and change password action', (tester) async {
       _useWideScreen(tester, height: 3500);
       final repo = MockRepository();
-      repo.authenticate('harpreet@example.test', MockRepository.demoPasscode);
+      repo.authenticate('ishu.jindal@durasmart.com', MockRepository.ownerPasscode);
 
       await tester.pumpWidget(_wrap(const ProfileScreen(), repo));
       await tester.pumpAndSettle();

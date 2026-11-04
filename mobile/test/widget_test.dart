@@ -61,7 +61,7 @@ void main() {
 
       await tester.enterText(
         find.byType(TextFormField).first,
-        'owner@example.test',
+        'ishu.jindal@durasmart.com',
       );
       await tester.tap(find.text('Sign in'));
       await tester.pumpAndSettle();
@@ -80,17 +80,18 @@ void main() {
 
       await tester.enterText(
         find.byType(TextFormField).first,
-        'owner@example.test',
+        'ishu.jindal@durasmart.com',
       );
       await tester.enterText(
         find.byType(TextFormField).last,
-        MockRepository.demoPasscode,
+        MockRepository.ownerPasscode,
       );
       await tester.tap(find.text('Sign in'));
       await tester.pumpAndSettle();
 
       expect(repo.signedIn, isTrue);
       expect(repo.currentUser!.role, UserRole.owner);
+      expect(repo.currentUser!.name, 'Ishu Jindal');
       expect(find.text('route:/home'), findsOneWidget);
     });
   });
@@ -99,7 +100,7 @@ void main() {
     testWidgets('shows the approved department menu labels', (tester) async {
       _useWideScreen(tester, height: 3200);
       final repo = MockRepository()
-        ..authenticate('owner@example.test', MockRepository.demoPasscode);
+        ..authenticate('ishu.jindal@durasmart.com', MockRepository.ownerPasscode);
       await tester.pumpWidget(_wrap(const HomeShell(), repo));
       await tester.pumpAndSettle();
 
@@ -125,7 +126,7 @@ void main() {
     testWidgets('renders the metric cards', (tester) async {
       _useWideScreen(tester, height: 3400);
       final repo = MockRepository()
-        ..authenticate('owner@example.test', MockRepository.demoPasscode);
+        ..authenticate('ishu.jindal@durasmart.com', MockRepository.ownerPasscode);
       await tester.pumpWidget(_wrap(const SalesDashboardScreen(), repo));
       await tester.pumpAndSettle();
 
@@ -287,7 +288,7 @@ void main() {
       testWidgets('$route renders', (tester) async {
         _usePhoneScreen(tester);
         final repo = MockRepository()
-          ..authenticate('owner@example.test', MockRepository.demoPasscode);
+          ..authenticate('ishu.jindal@durasmart.com', MockRepository.ownerPasscode);
         await tester.pumpWidget(
           ChangeNotifierProvider<MockRepository>.value(
             value: repo,
@@ -307,7 +308,7 @@ void main() {
     testWidgets('detail screens render with real record ids', (tester) async {
       _usePhoneScreen(tester);
       final repo = MockRepository()
-        ..authenticate('owner@example.test', MockRepository.demoPasscode);
+        ..authenticate('ishu.jindal@durasmart.com', MockRepository.ownerPasscode);
       final screens = <Widget>[
         CustomerDetailScreen(customerId: repo.customers.first.id),
         OrderDetailScreen(orderId: repo.orders.first.id),

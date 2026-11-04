@@ -34,40 +34,39 @@ const rs = (paise: number) => paise;
 
 export const demoUsers: Record<string, ServerUser> = {
   owner: {
-    id: 'USR-DEMO-OWNER',
-    name: 'Demo Owner',
-    email: 'owner@example.test',
+    id: 'USR-OWNER-ISHU',
+    name: 'Ishu Jindal',
+    email: 'ishu.jindal@durasmart.com',
     role: 'owner',
-    department: 'Accounts',
-    employeeId: null,
-    phone: '0000000000',
+    department: 'Management',
+    employeeId: 'OWNER-01',
+    phone: '+91 98140 10001',
   },
   employee: {
-    id: 'USR-DEMO-SALES',
-    name: 'Demo Salesperson',
-    email: 'sales@example.test',
+    id: 'USR-EMP-SP-01',
+    name: 'AJAY JI',
+    email: 'ajay.ji@durasmart.com',
     role: 'employee',
     department: 'Sales',
-    employeeId: 'EMP-DEMO-101',
-    phone: '0000000001',
+    employeeId: 'EMP-SP-01',
+    phone: '9814010000',
   },
 };
 
-/** Credentials the mock accepts, keyed `identifier|password`. Not a secret: this file ships in the
- *  bundle, the password is the word `demo`, and no request ever leaves the browser. Both are named
- *  on the sign-in screen, so the panel can be opened without asking anyone for a password. */
+/** Credentials the mock accepts, keyed `identifier|password`. */
 export const demoCredentials: Record<string, keyof typeof demoUsers> = {
-  'owner@example.test|demo': 'owner',
-  'owner|demo': 'owner',
-  'sales@example.test|demo': 'employee',
-  'sales|demo': 'employee',
+  'ishu.jindal@durasmart.com|Ishu@DuraSmart#2026': 'owner',
+  'ishujindal|Ishu@DuraSmart#2026': 'owner',
+  'owner|Ishu@DuraSmart#2026': 'owner',
+  'ajay.ji@durasmart.com|DuraSmart@2026': 'employee',
+  'EMP-SP-01|DuraSmart@2026': 'employee',
+  'ajay|DuraSmart@2026': 'employee',
 };
 
-/** The same two logins, in the words the sign-in screen prints. `role` is what the panel lets that
- *  account reach, so the difference between the two is visible before signing in. */
+/** Authorised login guidance for staff. */
 export const demoLoginHints: { identifier: string; password: string; reaches: string }[] = [
-  { identifier: 'owner@example.test', password: 'demo', reaches: 'Owner — every screen, including the writes' },
-  { identifier: 'sales@example.test', password: 'demo', reaches: 'Salesperson — the day-to-day screens, owner-only ones refused' },
+  { identifier: 'ishujindal', password: 'Ishu@DuraSmart#2026', reaches: 'Owner — Ishu Jindal (Full Executive Control)' },
+  { identifier: 'EMP-SP-01', password: 'DuraSmart@2026', reaches: 'Sales Officer — AJAY JI (Field Sales & Bookings)' },
 ];
 
 const employeeSeed: [string, string, string, string, string, string, boolean][] = [

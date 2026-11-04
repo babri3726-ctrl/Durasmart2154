@@ -85,7 +85,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (user == null) {
       setState(
         () => _inlineError = onlineRes?['error'] as String? ??
-            'Incorrect ID / email or passcode. Try a demo account below.',
+            'Incorrect ID / email or passcode. Please verify your credentials.',
       );
       return;
     }
@@ -94,7 +94,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _useAccount(AppUser account) {
     _idController.text = account.email;
-    _passwordController.text = MockRepository.demoPasscode;
+    _passwordController.text = account.isOwner
+        ? MockRepository.ownerPasscode
+        : MockRepository.employeePasscode;
     setState(() => _inlineError = null);
   }
 
@@ -195,7 +197,7 @@ class _LoginScreenState extends State<LoginScreen> {
             validator: _validateId,
             decoration: const InputDecoration(
               labelText: 'Email or Employee ID',
-              hintText: 'owner@example.test or EMP-101',
+              hintText: 'ishu.jindal@durasmart.com or EMP-SP-01',
               prefixIcon: Icon(Icons.badge_rounded, color: AppColors.purple),
             ),
           ),
@@ -292,7 +294,7 @@ class _LoginScreenState extends State<LoginScreen> {
       children: [
         ListTile(
           leading: const Icon(Icons.groups_rounded, color: AppColors.teal),
-          title: const Text('Demo accounts', style: AppText.heading),
+          title: const Text('Authorized Team Accounts', style: AppText.heading),
           subtitle: const Text(
             'Tap one to autofill the form',
             style: AppText.caption,
@@ -315,8 +317,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      'Common passcode for every demo user: '
-                      '${MockRepository.demoPasscode}  (mock only)',
+                      'Owner: Ishu Jindal | Sales Team: HR-PB Verified Officers',
                       style: TextStyle(fontSize: 12, color: AppColors.muted),
                     ),
                   ),

@@ -109,11 +109,10 @@ export default function Login() {
               Signing in against the active backend at {serverHost()}. Roles & territories are managed on the server.
             </p>
             <div className="mt-3 rounded-field border border-line/60 bg-canvas p-3 text-[11px] leading-relaxed text-muted">
-              <p className="font-bold text-ink">Sign-in Roles:</p>
+              <p className="font-bold text-ink">Authorized Access:</p>
               <ul className="mt-1.5 space-y-1">
-                <li><strong className="text-ink">Executive / Owner:</strong> <span className="font-mono text-ink">owner</span></li>
-                <li><strong className="text-ink">Yard Dispatch Desk:</strong> <span className="font-mono text-ink">harpreet</span></li>
-                <li><strong className="text-ink">Area Sales Officers:</strong> <span className="font-mono text-ink">moziram</span> (Haryana), <span className="font-mono text-ink">jagdeep</span> (Punjab), <span className="font-mono text-ink">ajay</span></li>
+                <li><strong className="text-ink">Executive / Owner:</strong> <span className="font-mono text-ink">ishujindal</span> (Ishu Jindal)</li>
+                <li><strong className="text-ink">Area Sales Officers:</strong> HR-PB verified staff (<span className="font-mono text-ink">EMP-SP-01</span> to <span className="font-mono text-ink">EMP-SP-13</span>)</li>
               </ul>
             </div>
           </div>

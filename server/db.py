@@ -1027,14 +1027,30 @@ def get_user_by_id(user_id: str) -> dict[str, Any] | None:
 
 def get_user_by_identifier(identifier: str) -> dict[str, Any] | None:
     clean = identifier.strip().lower()
+    if clean in ("owner", "ishu", "ishujindal", "ishu.jindal@durasmart.com", "owner@durasmart.com", "owner@example.test"):
+        target_username = "ishujindal"
+    else:
+        target_username = clean
+
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT * FROM users
-            WHERE lower(username) = ? OR lower(email) = ? OR phone = ?
+            WHERE lower(username) = ? 
+               OR lower(email) = ? 
+               OR phone = ? 
+               OR lower(employee_id) = ?
+               OR (? = 'ishujindal' AND lower(username) = 'ishujindal')
             LIMIT 1
-        """, (clean, clean, identifier.strip()))
+        """, (target_username, clean, identifier.strip(), clean, target_username))
         row = cursor.fetchone()
+        if not row and "." not in clean:
+            cursor.execute("""
+                SELECT * FROM users
+                WHERE lower(username) LIKE ? || '.%' OR lower(username) = ?
+                LIMIT 1
+            """, (clean, clean))
+            row = cursor.fetchone()
         return dict(row) if row else None
 
 def verify_user_password(user: dict[str, Any], password: str) -> bool:
@@ -1077,9 +1093,116 @@ def update_user_password(user_id: str, new_password: str) -> bool:
         conn.commit()
         return cursor.rowcount > 0
 
-# Ensure schema tables exist
+DEFAULT_OWNER = {
+    "id": "usr-owner-ishu",
+    "name": "Ishu Jindal",
+    "username": "ishujindal",
+    "email": "ishu.jindal@durasmart.com",
+    "phone": "+91 98140 10001",
+    "role": "owner",
+    "department": "Management",
+    "employee_id": "OWNER-01",
+    "sales_territory": "Executive / All Territories",
+    "password": "Ishu@DuraSmart#2026"
+}
+
+DEFAULT_HRPB_EMPLOYEES = [
+    {"emp_id": "EMP-SP-01", "name": "AJAY JI", "username": "ajay.ji", "email": "ajay.ji@durasmart.com", "phone": "9814010000", "territory": "Punjab/Haryana"},
+    {"emp_id": "EMP-SP-02", "name": "Aksit", "username": "aksit", "email": "aksit@durasmart.com", "phone": "9814010001", "territory": "Punjab/Haryana"},
+    {"emp_id": "EMP-SP-03", "name": "GAURAV JI", "username": "gaurav.ji", "email": "gaurav.ji@durasmart.com", "phone": "9814010002", "territory": "Punjab/Haryana"},
+    {"emp_id": "EMP-SP-04", "name": "JAGDEEP 2/ Aakash Kumar", "username": "aakash.kumar", "email": "aakash.kumar@durasmart.com", "phone": "9814010003", "territory": "Punjab/Haryana"},
+    {"emp_id": "EMP-SP-05", "name": "JAGDEEP 3/ Dalip Kumar", "username": "dalip.kumar", "email": "dalip.kumar@durasmart.com", "phone": "9814010004", "territory": "Punjab/Haryana"},
+    {"emp_id": "EMP-SP-06", "name": "Jagdeep Singh", "username": "jagdeep.singh", "email": "jagdeep.singh@durasmart.com", "phone": "9814010005", "territory": "Punjab/Haryana"},
+    {"emp_id": "EMP-SP-07", "name": "Mozi Ram", "username": "mozi.ram", "email": "mozi.ram@durasmart.com", "phone": "9814010006", "territory": "Punjab/Haryana"},
+    {"emp_id": "EMP-SP-08", "name": "PANKAJ JI", "username": "pankaj.ji", "email": "pankaj.ji@durasmart.com", "phone": "9814010007", "territory": "Punjab/Haryana"},
+    {"emp_id": "EMP-SP-09", "name": "Pankaj Goyal", "username": "pankaj.goyal", "email": "pankaj.goyal@durasmart.com", "phone": "9814010008", "territory": "Punjab/Haryana"},
+    {"emp_id": "EMP-SP-10", "name": "SANDEEP2/Mozi Ram", "username": "sandeep2", "email": "sandeep2@durasmart.com", "phone": "9814010009", "territory": "Punjab/Haryana"},
+    {"emp_id": "EMP-SP-11", "name": "Sandeep Mahajan", "username": "sandeep.mahajan", "email": "sandeep.mahajan@durasmart.com", "phone": "9814010010", "territory": "Punjab/Haryana"},
+    {"emp_id": "EMP-SP-12", "name": "Suresh Jindal", "username": "suresh.jindal", "email": "suresh.jindal@durasmart.com", "phone": "9814010011", "territory": "Punjab/Haryana"},
+    {"emp_id": "EMP-SP-13", "name": "VIJAY JI", "username": "vijay.ji", "email": "vijay.ji@durasmart.com", "phone": "9814010012", "territory": "Punjab/Haryana"},
+]
+DEFAULT_EMPLOYEE_PASSWORD = "DuraSmart@2026"
+
+def seed_real_users(force: bool = False):
+    """Ensures Owner Ishu Jindal and the 13 real HR-PB sales officers exist with secure hashed passwords."""
+    with get_connection() as conn:
+        now = datetime.now().isoformat()
+        # Seed Owner
+        pwd_hash, salt = hash_password(DEFAULT_OWNER["password"])
+        conn.execute("""
+            INSERT INTO users (
+                id, username, email, phone, name, password_hash, salt,
+                role, department, employee_id, sales_territory, active, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                username=excluded.username,
+                email=excluded.email,
+                name=excluded.name,
+                password_hash=excluded.password_hash,
+                salt=excluded.salt,
+                role=excluded.role,
+                department=excluded.department,
+                employee_id=excluded.employee_id,
+                sales_territory=excluded.sales_territory,
+                updated_at=excluded.updated_at
+        """, (
+            DEFAULT_OWNER["id"],
+            DEFAULT_OWNER["username"],
+            DEFAULT_OWNER["email"],
+            DEFAULT_OWNER["phone"],
+            DEFAULT_OWNER["name"],
+            pwd_hash,
+            salt,
+            DEFAULT_OWNER["role"],
+            DEFAULT_OWNER["department"],
+            DEFAULT_OWNER["employee_id"],
+            DEFAULT_OWNER["sales_territory"],
+            now,
+            now
+        ))
+
+        # Seed 13 HR-PB Employees
+        for emp in DEFAULT_HRPB_EMPLOYEES:
+            e_id = f"usr-{emp['emp_id'].lower()}"
+            e_pwd_hash, e_salt = hash_password(DEFAULT_EMPLOYEE_PASSWORD)
+            conn.execute("""
+                INSERT INTO users (
+                    id, username, email, phone, name, password_hash, salt,
+                    role, department, employee_id, sales_territory, active, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'employee', 'Sales', ?, ?, 1, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    username=excluded.username,
+                    email=excluded.email,
+                    name=excluded.name,
+                    employee_id=excluded.employee_id,
+                    sales_territory=excluded.sales_territory,
+                    updated_at=excluded.updated_at
+            """, (
+                e_id,
+                emp["username"],
+                emp["email"],
+                emp["phone"],
+                emp["name"],
+                e_pwd_hash,
+                e_salt,
+                emp["emp_id"],
+                emp["territory"],
+                now,
+                now
+            ))
+
+        # Purge any dummy placeholder users
+        conn.execute("""
+            DELETE FROM users 
+            WHERE username IN ('harpreet', 'dummy', 'admin', 'md', 'director', 'demo')
+               OR email LIKE '%@example.test'
+        """)
+        conn.commit()
+
+# Ensure schema tables exist and real users are seeded
 try:
     init_db()
+    seed_real_users()
 except Exception:
     pass
 
