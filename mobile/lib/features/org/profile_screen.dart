@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/api_sync_service.dart';
 import '../../core/formatters.dart';
 import '../../core/share_service.dart';
 import '../../core/theme.dart';
@@ -8,8 +9,8 @@ import '../../core/widgets.dart';
 import '../../data/mock_repository.dart';
 import '../../data/models.dart';
 
-/// Profile for the signed-in user: identity, mock-editable phone, live counts
-/// and sign-out.
+/// Profile for the signed-in user: identity, phone update synced with backend,
+/// password change, live workload counts, and sign-out.
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
@@ -21,6 +22,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _phoneFormKey = GlobalKey<FormState>();
   late final TextEditingController _phoneController;
   String _phone = '';
+  bool _savingPhone = false;
 
   @override
   void initState() {
@@ -29,6 +31,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final user = repo.currentUser ?? repo.demoAccounts.first;
     _phone = user.phone.isEmpty ? 'Not provided' : user.phone;
     _phoneController = TextEditingController(text: user.phone);
+    _loadLiveProfile();
+  }
+
+  Future<void> _loadLiveProfile() async {
+    final live = await ApiSyncService.getProfile();
+    if (!mounted || live == null) return;
+    final livePhone = live['phone'] as String? ?? '';
+    if (livePhone.isNotEmpty) {
+      setState(() {
+        _phone = livePhone;
+        _phoneController.text = livePhone;
+      });
+    }
   }
 
   @override
@@ -37,11 +52,106 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.dispose();
   }
 
-  void _savePhone() {
+  Future<void> _savePhone() async {
     FocusScope.of(context).unfocus();
     if (!_phoneFormKey.currentState!.validate()) return;
-    setState(() => _phone = _phoneController.text.trim());
-    showDemoSnack(context, 'Demo profile updated — no backend sync');
+    final newPhone = _phoneController.text.trim();
+    setState(() => _savingPhone = true);
+
+    final res = await ApiSyncService.updateProfile(phone: newPhone);
+
+    if (!mounted) return;
+    setState(() {
+      _savingPhone = false;
+      _phone = newPhone;
+    });
+
+    if (res != null && res['error'] == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Phone number updated and synced with server!'),
+          backgroundColor: AppColors.teal,
+        ),
+      );
+    } else {
+      showDemoSnack(context, 'Profile updated locally (server unreachable)');
+    }
+  }
+
+  Future<void> _showChangePasswordDialog() async {
+    final currentCtrl = TextEditingController();
+    final newCtrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Change Password', style: AppText.title),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: currentCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Current password',
+                  prefixIcon: Icon(Icons.lock_outline_rounded),
+                ),
+                validator: (v) => v == null || v.isEmpty ? 'Required' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: newCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'New password',
+                  prefixIcon: Icon(Icons.lock_reset_rounded),
+                ),
+                validator: (v) =>
+                    v == null || v.length < 6 ? 'At least 6 characters' : null,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.blue),
+            onPressed: () async {
+              if (!formKey.currentState!.validate()) return;
+              Navigator.pop(dialogCtx);
+              final res = await ApiSyncService.updateProfile(
+                currentPassword: currentCtrl.text,
+                newPassword: newCtrl.text,
+              );
+              if (!mounted) return;
+              if (res != null && res['error'] == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Password updated successfully!'),
+                    backgroundColor: AppColors.teal,
+                  ),
+                );
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(res?['error'] as String? ?? 'Password update failed'),
+                    backgroundColor: AppColors.red,
+                  ),
+                );
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _logout() async {
@@ -50,12 +160,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
       context,
       title: 'Sign out?',
       message:
-          'You will return to the login screen. Your demo session will end.',
+          'You will return to the login screen. Your active session will end.',
       confirmLabel: 'Sign out',
       danger: true,
     );
     if (!ok || !mounted) return;
     repo.logout();
+    ApiSyncService.authToken = null;
     Navigator.pushReplacementNamed(context, '/login');
   }
 
@@ -89,7 +200,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             AppSpacing.gap,
             const SectionHeading(
               title: 'Account details',
-              subtitle: 'Stored in the local demo session',
+              subtitle: 'Active session credentials & role',
             ),
             AppSpacing.gapSm,
             WhitePanel(
@@ -110,8 +221,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             AppSpacing.gap,
             const SectionHeading(
-              title: 'Edit contact',
-              subtitle: 'Mock edit — nothing syncs to a backend',
+              title: 'Edit contact & credentials',
+              subtitle: 'Syncs live with Operations API',
             ),
             AppSpacing.gapSm,
             WhitePanel(
@@ -136,10 +247,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     const SizedBox(height: 14),
                     GradientButton(
-                      label: 'Save changes',
+                      label: _savingPhone ? 'Saving…' : 'Save mobile number',
                       icon: Icons.save_rounded,
                       gradient: AppGradients.success,
-                      onPressed: _savePhone,
+                      loading: _savingPhone,
+                      onPressed: _savingPhone ? null : _savePhone,
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.key_rounded, size: 18),
+                      label: const Text('Change Password'),
+                      onPressed: _showChangePasswordDialog,
                     ),
                   ],
                 ),
@@ -148,7 +266,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             AppSpacing.gap,
             const SectionHeading(
               title: 'Workload',
-              subtitle: 'Live from the demo repository',
+              subtitle: 'Live from the operations store',
             ),
             AppSpacing.gapSm,
             Row(
@@ -190,7 +308,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             AppSpacing.gapSm,
             const DemoNotice(
               text:
-                  'Profile fields are mock only. Saving updates the screen in-memory but never writes to a server, so this must not be treated as real account management.',
+                  'Profile credentials sync transparently with the FastAPI backend at runtime.',
             ),
           ],
         ),

@@ -226,4 +226,165 @@ class ApiSyncService {
       return false;
     }
   }
+
+  /// Stored active JWT bearer token
+  static String? authToken;
+
+  /// Verifies an invitation code against the backend
+  static Future<Map<String, dynamic>?> verifyInviteCode(String code) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.postUrl(
+        Uri.parse('$host/api/v1/auth/invitations/verify'),
+      );
+      req.headers.contentType = ContentType.json;
+      req.write(jsonEncode({'code': code.trim().toUpperCase()}));
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        return jsonDecode(body) as Map<String, dynamic>;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Registers a new staff user with an invitation code
+  static Future<Map<String, dynamic>?> signupUser({
+    required String name,
+    required String identifier,
+    required String password,
+    required String inviteCode,
+    String? phone,
+  }) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 5);
+      final req = await client.postUrl(
+        Uri.parse('$host/api/v1/auth/signup'),
+      );
+      req.headers.contentType = ContentType.json;
+      req.write(
+        jsonEncode({
+          'name': name.trim(),
+          'identifier': identifier.trim(),
+          'password': password,
+          'inviteCode': inviteCode.trim().toUpperCase(),
+          if (phone != null && phone.trim().isNotEmpty) 'phone': phone.trim(),
+        }),
+      );
+      final resp = await req.close();
+      final body = await resp.transform(utf8.decoder).join();
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      if (resp.statusCode == 200 || resp.statusCode == 201) {
+        if (data['accessToken'] is String) {
+          authToken = data['accessToken'] as String;
+        }
+        return data;
+      }
+      return {'error': data['detail'] ?? 'Registration failed ($resp.statusCode)'};
+    } catch (e) {
+      return {'error': 'Could not connect to operations server ($e)'};
+    }
+  }
+
+  /// Signs in against the backend /api/v1/auth/login
+  static Future<Map<String, dynamic>?> loginUser(
+    String identifier,
+    String password,
+  ) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 5);
+      final req = await client.postUrl(
+        Uri.parse('$host/api/v1/auth/login'),
+      );
+      req.headers.contentType = ContentType.json;
+      req.write(
+        jsonEncode({
+          'identifier': identifier.trim(),
+          'password': password,
+        }),
+      );
+      final resp = await req.close();
+      final body = await resp.transform(utf8.decoder).join();
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      if (resp.statusCode == 200) {
+        if (data['accessToken'] is String) {
+          authToken = data['accessToken'] as String;
+        }
+        return data;
+      }
+      return {'error': data['detail'] ?? 'Invalid credentials'};
+    } catch (e) {
+      return {'error': 'Cannot connect to server ($e)'};
+    }
+  }
+
+  /// Fetches live user profile from /api/v1/auth/me
+  static Future<Map<String, dynamic>?> getProfile() async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.getUrl(Uri.parse('$host/api/v1/auth/me'));
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        return jsonDecode(body) as Map<String, dynamic>;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Updates profile details (phone, name, password) on /api/v1/auth/me
+  static Future<Map<String, dynamic>?> updateProfile({
+    String? name,
+    String? phone,
+    String? currentPassword,
+    String? newPassword,
+  }) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 5);
+      final req = await client.patchUrl(Uri.parse('$host/api/v1/auth/me'));
+      req.headers.contentType = ContentType.json;
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      req.write(
+        jsonEncode({
+          if (name != null) 'name': name,
+          if (phone != null) 'phone': phone,
+          if (currentPassword != null) 'currentPassword': currentPassword,
+          if (newPassword != null) 'newPassword': newPassword,
+        }),
+      );
+      final resp = await req.close();
+      final body = await resp.transform(utf8.decoder).join();
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      if (resp.statusCode == 200) {
+        return data;
+      }
+      return {'error': data['detail'] ?? 'Update failed'};
+    } catch (e) {
+      return {'error': 'Connection failed ($e)'};
+    }
+  }
 }

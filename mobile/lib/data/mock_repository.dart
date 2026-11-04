@@ -36,6 +36,12 @@ class MockRepository extends ChangeNotifier {
     return null;
   }
 
+  void setSignedInUser(AppUser user) {
+    currentUser = user;
+    signedIn = true;
+    notifyListeners();
+  }
+
   void logout() {
     currentUser = null;
     signedIn = false;

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/api_sync_service.dart';
 import '../../core/formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -59,7 +60,22 @@ class _LoginScreenState extends State<LoginScreen> {
       _loading = true;
       _inlineError = null;
     });
-    await Future<void>.delayed(const Duration(milliseconds: 600));
+
+    final onlineRes = await ApiSyncService.loginUser(
+      _idController.text.trim(),
+      _passwordController.text,
+    );
+
+    if (!mounted) return;
+
+    if (onlineRes != null && onlineRes['user'] != null) {
+      final appUser = AppUser.fromJson(onlineRes['user'] as Map<String, dynamic>);
+      repo.setSignedInUser(appUser);
+      setState(() => _loading = false);
+      Navigator.pushReplacementNamed(context, '/home');
+      return;
+    }
+
     final user = repo.authenticate(
       _idController.text,
       _passwordController.text,
@@ -68,7 +84,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _loading = false);
     if (user == null) {
       setState(
-        () => _inlineError =
+        () => _inlineError = onlineRes?['error'] as String? ??
             'Incorrect ID / email or passcode. Try a demo account below.',
       );
       return;

@@ -35,6 +35,20 @@ class AppUser {
       email.toLowerCase().contains('dispatch');
   bool get isSalesperson =>
       !isOwner && !isDispatch && department.toLowerCase() == 'sales';
+  factory AppUser.fromJson(Map<String, dynamic> json) {
+    final roleStr = (json['role'] as String? ?? 'employee').toLowerCase();
+    final role = roleStr == 'owner' ? UserRole.owner : UserRole.employee;
+    return AppUser(
+      id: json['id'] as String? ?? 'usr-unknown',
+      name: json['name'] as String? ?? 'Staff Member',
+      email: json['email'] as String? ?? '',
+      role: role,
+      department: json['department'] as String? ?? 'Sales',
+      employeeId: json['employeeId'] as String?,
+      phone: json['phone'] as String? ?? '',
+    );
+  }
+
   String get initials {
     final parts = name.trim().split(RegExp(r'\s+'));
     return parts
