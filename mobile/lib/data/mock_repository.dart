@@ -729,6 +729,28 @@ class MockRepository extends ChangeNotifier {
     return payment;
   }
 
+  /// Fetches tasks from FastAPI backend and merges into local tasks
+  Future<void> syncTasksFromBackend() async {
+    try {
+      final backendTasks = await ApiSyncService.fetchTasks();
+      if (backendTasks != null && backendTasks.isNotEmpty) {
+        for (final item in backendTasks) {
+          final incoming = WorkTask.fromJson(item);
+          final existingIdx = tasks.indexWhere((t) => t.id == incoming.id);
+          if (existingIdx != -1) {
+            tasks[existingIdx].status = incoming.status;
+            tasks[existingIdx].completedAt = incoming.completedAt;
+            tasks[existingIdx].completionNotes = incoming.completionNotes;
+            tasks[existingIdx].alarmTriggered = incoming.alarmTriggered;
+          } else {
+            tasks.insert(0, incoming);
+          }
+        }
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
   WorkTask addTask({
     required String title,
     required String assignedEmployeeId,
@@ -738,7 +760,7 @@ class MockRepository extends ChangeNotifier {
     bool requiresPhoto = false,
   }) {
     final task = WorkTask(
-      id: 'TSK-${100 + tasks.length + 1}',
+      id: 'TSK-',
       title: title,
       description: description,
       assignedEmployeeId: assignedEmployeeId,
@@ -749,7 +771,28 @@ class MockRepository extends ChangeNotifier {
       requiresPhoto: requiresPhoto,
     );
     tasks.insert(0, task);
-    _pushNotification('Task assigned', '$title • due ${_fmtShort(dueAt)}');
+    _pushNotification('Task assigned', '$title \xe2\x80\xa2 due ${_fmtShort(dueAt)}');
+
+    // Asynchronously synchronize task creation to backend
+    ApiSyncService.postTask({
+      'id': task.id,
+      'title': title,
+      'description': description,
+      'assigned_employee_id': assignedEmployeeId,
+      'assigned_employee_name': salespersonName(assignedEmployeeId),
+      'due_date': dueAt.toIso8601String().substring(0, 10),
+      'due_time': '${dueAt.hour.toString().padLeft(2, "0")}:${dueAt.minute.toString().padLeft(2, "0")}',
+      'due_at': dueAt.toIso8601String(),
+      'priority': switch (priority) {
+        TaskPriority.high => 'high',
+        TaskPriority.low => 'low',
+        _ => 'normal',
+      },
+      'requires_photo': requiresPhoto,
+      'status': 'open',
+      'created_by': currentUser?.name ?? 'Owner',
+    });
+
     notifyListeners();
     return task;
   }
@@ -758,6 +801,7 @@ class MockRepository extends ChangeNotifier {
     final t = taskById(taskId);
     if (t != null && t.status == TaskStatus.open) {
       t.status = TaskStatus.acknowledged;
+      ApiSyncService.updateTaskStatus(taskId, 'acknowledged');
     }
     notifyListeners();
   }
@@ -771,6 +815,7 @@ class MockRepository extends ChangeNotifier {
     t.completedAt = DateTime.now();
     t.completionNotes = notes;
     if (photo != null) t.completionPhoto = photo;
+    ApiSyncService.updateTaskStatus(taskId, 'completed', notes: notes);
     notifyListeners();
   }
 

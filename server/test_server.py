@@ -1035,5 +1035,68 @@ class TestServerApi(unittest.TestCase):
         list_after = self.client.get("/api/v1/tours").json()
         self.assertFalse(any(t["id"] == tour_id for t in list_after))
 
+    def test_24_tasks_and_alarm_trigger_api(self):
+        # 1. Test POST /api/v1/tasks (Create task)
+        task_payload = {
+            "title": "Collect payment from Kalra Traders",
+            "description": "Urgent collection of ₹25,000 pending voucher",
+            "assignedEmployeeId": "EMP-SP-01",
+            "assignedEmployeeName": "AJAY JI",
+            "dueDate": "2026-11-04",
+            "dueTime": "17:00",
+            "priority": "high",
+            "requiresPhoto": True
+        }
+        create_res = self.client.post("/api/v1/tasks", json=task_payload)
+        self.assertEqual(create_res.status_code, 200)
+        created_task = create_res.json()
+        task_id = created_task["id"]
+        self.assertTrue(task_id.startswith("TASK-"))
+        self.assertEqual(created_task["title"], "Collect payment from Kalra Traders")
+        self.assertEqual(created_task["status"], "open")
+        self.assertEqual(created_task["priority"], "high")
+
+        try:
+            # 2. Test GET /api/v1/tasks (with filters)
+            list_res = self.client.get("/api/v1/tasks?employeeId=EMP-SP-01")
+            self.assertEqual(list_res.status_code, 200)
+            tasks = list_res.json()["items"]
+            self.assertTrue(any(t["id"] == task_id for t in tasks))
+
+            # 3. Test POST /api/v1/tasks/{id}/status (Acknowledge task)
+            ack_res = self.client.post(f"/api/v1/tasks/{task_id}/status", json={"status": "acknowledged"})
+            self.assertEqual(ack_res.status_code, 200)
+            self.assertEqual(ack_res.json()["status"], "acknowledged")
+
+            # 4. Test PUT /api/v1/tasks/{id} (Update task notes & priority)
+            update_res = self.client.put(f"/api/v1/tasks/{task_id}", json={
+                "priority": "normal",
+                "description": "Urgent collection updated by Owner Ishu Jindal"
+            })
+            self.assertEqual(update_res.status_code, 200)
+            self.assertEqual(update_res.json()["priority"], "normal")
+
+            # 5. Test GET /api/v1/tasks/due-alarms (Check due alarm endpoint)
+            alarm_res = self.client.get("/api/v1/tasks/due-alarms?employeeId=EMP-SP-01")
+            self.assertEqual(alarm_res.status_code, 200)
+            alarms = alarm_res.json()
+            self.assertIn("dueAlarms", alarms)
+
+            # 6. Test Complete task
+            comp_res = self.client.post(f"/api/v1/tasks/{task_id}/status", json={
+                "status": "completed",
+                "completionNotes": "Payment collected and deposited"
+            })
+            self.assertEqual(comp_res.status_code, 200)
+            self.assertEqual(comp_res.json()["status"], "completed")
+
+        finally:
+            # Clean up test task
+            self.client.delete(f"/api/v1/tasks/{task_id}")
+
+        # Verify deletion
+        list_after = self.client.get("/api/v1/tasks").json()["items"]
+        self.assertFalse(any(t["id"] == task_id for t in list_after))
+
 if __name__ == '__main__':
     unittest.main()

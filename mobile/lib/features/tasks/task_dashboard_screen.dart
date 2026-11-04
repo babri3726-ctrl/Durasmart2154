@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/formatters.dart';
@@ -9,7 +11,8 @@ import '../../data/mock_repository.dart';
 import '../../data/models.dart';
 
 /// Task Alarm — role aware task board. Owner gets the workload summary and the
-/// creation / proof-review entries; an employee gets their own day buckets.
+/// creation / proof-review entries; an employee gets their own day buckets
+/// (Today, Pending, Overdue, Completed) with audible & vibrate alarm triggers.
 class TaskDashboardScreen extends StatefulWidget {
   const TaskDashboardScreen({super.key});
 
@@ -34,6 +37,216 @@ class _TaskDashboardScreenState extends State<TaskDashboardScreen> {
 
   String _status = 'All';
   String _priority = 'Any priority';
+  Timer? _alarmTimer;
+  final Set<String> _rungTaskIds = <String>{};
+  bool _isSyncing = false;
+  bool _alarmDialogShowing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncAndCheck();
+    });
+    // Periodic check every 15 seconds for tasks whose time is up
+    _alarmTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      _checkAlarms();
+    });
+  }
+
+  @override
+  void dispose() {
+    _alarmTimer?.cancel();
+    _alarmTimer = null;
+    super.dispose();
+  }
+
+  Future<void> _syncAndCheck() async {
+    if (!mounted) return;
+    setState(() => _isSyncing = true);
+    final repo = Provider.of<MockRepository>(context, listen: false);
+    await repo.syncTasksFromBackend();
+    if (mounted) {
+      setState(() => _isSyncing = false);
+      _checkAlarms();
+    }
+  }
+
+  void _checkAlarms() {
+    if (!mounted || _alarmDialogShowing) return;
+    final repo = Provider.of<MockRepository>(context, listen: false);
+    final user = repo.currentUser;
+    final myEmployeeId = user?.employeeId;
+    final now = DateTime.now();
+
+    final alarmCandidates = repo.tasks.where((t) {
+      if (t.status == TaskStatus.completed) return false;
+      if (myEmployeeId != null && t.assignedEmployeeId != myEmployeeId) {
+        return false;
+      }
+      return t.dueAt.isBefore(now);
+    }).toList();
+
+    for (final task in alarmCandidates) {
+      if (!_rungTaskIds.contains(task.id)) {
+        _rungTaskIds.add(task.id);
+        _triggerAlarm(task);
+        break; // Show one alarm at a time
+      }
+    }
+  }
+
+  Future<void> _triggerAlarm(WorkTask task, {bool isTest = false}) async {
+    _alarmDialogShowing = true;
+    // Play audible chime and trigger haptic vibration pulses
+    for (var i = 0; i < 3; i++) {
+      HapticFeedback.heavyImpact();
+      SystemSound.play(SystemSoundType.alert);
+      await Future.delayed(const Duration(milliseconds: 350));
+    }
+
+    if (!mounted) {
+      _alarmDialogShowing = false;
+      return;
+    }
+
+    final repo = Provider.of<MockRepository>(context, listen: false);
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        actionsOverflowButtonSpacing: 6,
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.red.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.alarm_on_rounded, color: AppColors.red, size: 28),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                isTest ? '🔔 Test Alarm Triggered' : '🚨 TASK ALARM: Time Up!',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                  color: AppColors.red,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              task.title,
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: AppColors.ink,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.access_time_rounded, size: 15, color: AppColors.muted),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    'Due: ${dateLabel(task.dueAt)} at ${timeLabel(task.dueAt)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.red,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (task.description.trim().isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                task.description.trim(),
+                style: const TextStyle(fontSize: 12, color: AppColors.muted),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF1F2),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFFECDD3)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.vibration_rounded, size: 16, color: AppColors.red),
+                  SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Audible chime & phone vibration fired. Please complete or acknowledge your assignment.',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF9F1239),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _acknowledge(repo, task);
+            },
+            child: const Text('Acknowledge'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.green),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _complete(repo, task);
+            },
+            child: const Text('Mark Complete'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Dismiss', style: TextStyle(color: AppColors.muted)),
+          ),
+        ],
+      ),
+    );
+
+    _alarmDialogShowing = false;
+  }
+
+  void _testAlarm() {
+    final repo = Provider.of<MockRepository>(context, listen: false);
+    final sampleTask = repo.tasks.isNotEmpty
+        ? repo.tasks.first
+        : WorkTask(
+            id: 'TEST-ALARM',
+            title: 'Sample Task Due Alarm',
+            description: 'This is a test alarm demonstrating audible chime and phone vibration.',
+            assignedEmployeeId: repo.currentUser?.employeeId ?? 'EMP-01',
+            dueAt: DateTime.now(),
+            priority: TaskPriority.high,
+          );
+    _triggerAlarm(sampleTask, isTest: true);
+  }
 
   Color _statusColor(TaskStatus status) => switch (status) {
     TaskStatus.open => AppColors.blue,
@@ -76,7 +289,9 @@ class _TaskDashboardScreenState extends State<TaskDashboardScreen> {
 
   Future<void> _acknowledge(MockRepository repo, WorkTask task) async {
     repo.acknowledgeTask(task.id);
-    showDemoSnack(context, 'Acknowledged — ${task.title}');
+    if (mounted) {
+      showDemoSnack(context, 'Acknowledged — ${task.title}');
+    }
   }
 
   Future<void> _complete(MockRepository repo, WorkTask task) async {
@@ -251,63 +466,66 @@ class _TaskDashboardScreenState extends State<TaskDashboardScreen> {
 
   Widget _ownerView(MockRepository repo, String? myEmployeeId) {
     final tasks = _ownerTasks(repo);
-    return ListView(
-      padding: AppSpacing.page,
-      children: [
-        _headerCards(repo),
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(
-              child: ActionPill(
-                icon: Icons.add_task_rounded,
-                label: 'Create task',
-                onTap: () => Navigator.pushNamed(context, '/create-task'),
+    return RefreshIndicator(
+      onRefresh: _syncAndCheck,
+      child: ListView(
+        padding: AppSpacing.page,
+        children: [
+          _headerCards(repo),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: ActionPill(
+                  icon: Icons.add_task_rounded,
+                  label: 'Create task',
+                  onTap: () => Navigator.pushNamed(context, '/create-task'),
+                ),
               ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: ActionPill(
-                icon: Icons.photo_library_outlined,
-                label: 'Review completion photos',
-                onTap: () => Navigator.pushNamed(context, '/task-review'),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ActionPill(
+                  icon: Icons.photo_library_outlined,
+                  label: 'Review completion photos',
+                  onTap: () => Navigator.pushNamed(context, '/task-review'),
+                ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        const DemoNotice(
-          text:
-              'Reminders and alarms in this demo are simulated: nothing is pushed to a device yet, but every action below updates the shared workspace instantly.',
-        ),
-        const SizedBox(height: 14),
-        FilterChipsRow(
-          options: _statusFilters,
-          selected: _status,
-          onSelected: (value) => setState(() => _status = value),
-        ),
-        const SizedBox(height: 8),
-        FilterChipsRow(
-          options: _priorityFilters,
-          selected: _priority,
-          onSelected: (value) => setState(() => _priority = value),
-        ),
-        const SizedBox(height: 10),
-        SectionHeading(
-          title: 'All assignments',
-          subtitle: '${tasks.length} task(s) in this view',
-        ),
-        const SizedBox(height: 10),
-        _taskList(
-          repo: repo,
-          tasks: tasks,
-          myEmployeeId: myEmployeeId,
-          isOwner: true,
-          emptyTitle: 'Nothing in this filter',
-          emptySubtitle:
-              'Change the status or priority chips, or create a new assignment.',
-        ),
-      ],
+            ],
+          ),
+          const SizedBox(height: 14),
+          const DemoNotice(
+            text:
+                'Executive Control: Create assignments in panel or app. Alarms trigger on employee devices when due time is up.',
+          ),
+          const SizedBox(height: 14),
+          FilterChipsRow(
+            options: _statusFilters,
+            selected: _status,
+            onSelected: (value) => setState(() => _status = value),
+          ),
+          const SizedBox(height: 8),
+          FilterChipsRow(
+            options: _priorityFilters,
+            selected: _priority,
+            onSelected: (value) => setState(() => _priority = value),
+          ),
+          const SizedBox(height: 10),
+          SectionHeading(
+            title: 'All assignments',
+            subtitle: '${tasks.length} task(s) in this view',
+          ),
+          const SizedBox(height: 10),
+          _taskList(
+            repo: repo,
+            tasks: tasks,
+            myEmployeeId: myEmployeeId,
+            isOwner: true,
+            emptyTitle: 'Nothing in this filter',
+            emptySubtitle:
+                'Change the status or priority chips, or create a new assignment.',
+          ),
+        ],
+      ),
     );
   }
 
@@ -320,14 +538,8 @@ class _TaskDashboardScreenState extends State<TaskDashboardScreen> {
               myEmployeeId != null && task.assignedEmployeeId == myEmployeeId,
         )
         .toList();
-    final upcoming = mine
-        .where(
-          (task) =>
-              task.status != TaskStatus.completed &&
-              !task.dueAt.isBefore(now) &&
-              DateUtils.dateOnly(task.dueAt).isAfter(today),
-        )
-        .toList();
+
+    // 4 buckets requested by user: Today, Pending, Overdue, Completed
     final dueToday = mine
         .where(
           (task) =>
@@ -336,94 +548,109 @@ class _TaskDashboardScreenState extends State<TaskDashboardScreen> {
               DateUtils.dateOnly(task.dueAt) == today,
         )
         .toList();
+
+    final pending = mine
+        .where(
+          (task) =>
+              task.status != TaskStatus.completed &&
+              !task.dueAt.isBefore(now) &&
+              DateUtils.dateOnly(task.dueAt).isAfter(today),
+        )
+        .toList();
+
     final overdue = mine
         .where(
           (task) =>
               task.status != TaskStatus.completed && task.dueAt.isBefore(now),
         )
         .toList();
+
     final completed =
         mine.where((task) => task.status == TaskStatus.completed).toList()
           ..sort(
             (a, b) =>
                 (b.completedAt ?? b.dueAt).compareTo(a.completedAt ?? a.dueAt),
           );
-    final tabs = <List<WorkTask>>[upcoming, dueToday, overdue, completed];
+
+    final tabs = <List<WorkTask>>[dueToday, pending, overdue, completed];
 
     return DefaultTabController(
       length: tabs.length,
-      child: Column(
-        children: [
-          TabBar(
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            labelColor: AppColors.purple,
-            unselectedLabelColor: AppColors.muted,
-            indicatorColor: AppColors.purple,
-            dividerColor: AppColors.line,
-            labelStyle: const TextStyle(
-              fontWeight: FontWeight.w900,
-              fontSize: 12.5,
-            ),
-            unselectedLabelStyle: const TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 12.5,
-            ),
-            tabs: [
-              Tab(text: 'Upcoming (${upcoming.length})'),
-              Tab(text: 'Due today (${dueToday.length})'),
-              Tab(text: 'Overdue (${overdue.length})'),
-              Tab(text: 'Completed (${completed.length})'),
-            ],
-          ),
-          Expanded(
-            child: TabBarView(
-              children: [
-                for (var i = 0; i < tabs.length; i++)
-                  ListView(
-                    padding: AppSpacing.page,
-                    children: [
-                      DemoNotice(
-                        text: switch (i) {
-                          1 =>
-                            'Due today: ${dueToday.length} assignment(s) must be closed before midnight.',
-                          2 =>
-                            'Overdue: ${overdue.length} assignment(s) are past their due date. Acknowledge and update the owner.',
-                          3 =>
-                            'Completed: ${completed.length} assignment(s) closed by you in this workspace.',
-                          _ =>
-                            'Upcoming: ${upcoming.length} assignment(s) scheduled after today.',
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      _taskList(
-                        repo: repo,
-                        tasks: tabs[i],
-                        myEmployeeId: myEmployeeId,
-                        isOwner: false,
-                        emptyTitle: switch (i) {
-                          1 => 'Nothing due today',
-                          2 => 'No overdue tasks',
-                          3 => 'No completed tasks yet',
-                          _ => 'No upcoming tasks',
-                        },
-                        emptySubtitle: switch (i) {
-                          1 =>
-                            'Enjoy the quiet — or pick a task from the Upcoming tab and finish it early.',
-                          2 =>
-                            'Every assignment you own is still inside its due date.',
-                          3 =>
-                            'Complete a task to see it archived here with its proof.',
-                          _ =>
-                            'New assignments from the owner will appear here.',
-                        },
-                      ),
-                    ],
-                  ),
+      child: RefreshIndicator(
+        onRefresh: _syncAndCheck,
+        child: Column(
+          children: [
+            TabBar(
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              labelColor: AppColors.purple,
+              unselectedLabelColor: AppColors.muted,
+              indicatorColor: AppColors.purple,
+              dividerColor: AppColors.line,
+              labelStyle: const TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 12.5,
+              ),
+              unselectedLabelStyle: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 12.5,
+              ),
+              tabs: [
+                Tab(text: 'Today (${dueToday.length})'),
+                Tab(text: 'Pending (${pending.length})'),
+                Tab(text: 'Overdue (${overdue.length})'),
+                Tab(text: 'Completed (${completed.length})'),
               ],
             ),
-          ),
-        ],
+            Expanded(
+              child: TabBarView(
+                children: [
+                  for (var i = 0; i < tabs.length; i++)
+                    ListView(
+                      padding: AppSpacing.page,
+                      children: [
+                        DemoNotice(
+                          text: switch (i) {
+                            0 =>
+                              'Today: ${dueToday.length} task(s) due today. Phone alarm will sound & vibrate when time is up.',
+                            1 =>
+                              'Pending: ${pending.length} upcoming task(s) scheduled for future dates.',
+                            2 =>
+                              'Overdue: ${overdue.length} task(s) past due time! Alarm active — complete or acknowledge.',
+                            _ =>
+                              'Completed: ${completed.length} assignment(s) closed with proof.',
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        _taskList(
+                          repo: repo,
+                          tasks: tabs[i],
+                          myEmployeeId: myEmployeeId,
+                          isOwner: false,
+                          emptyTitle: switch (i) {
+                            0 => 'Nothing due today',
+                            1 => 'No pending upcoming tasks',
+                            2 => 'No overdue tasks',
+                            _ => 'No completed tasks yet',
+                          },
+                          emptySubtitle: switch (i) {
+                            0 =>
+                              'Enjoy the day or review upcoming tasks from the Pending tab.',
+                            1 =>
+                              'All future assignments will appear here.',
+                            2 =>
+                              'Excellent! Every assignment is on schedule.',
+                            _ =>
+                              'Complete a task to see it archived here with its proof.',
+                          },
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -439,6 +666,22 @@ class _TaskDashboardScreenState extends State<TaskDashboardScreen> {
       appBar: AppBar(
         title: const Text('Task Alarm'),
         actions: [
+          IconButton(
+            tooltip: 'Test Alarm (Chime & Vibrate)',
+            icon: const Icon(Icons.alarm_on_rounded, color: AppColors.red),
+            onPressed: _testAlarm,
+          ),
+          IconButton(
+            tooltip: 'Sync Tasks',
+            icon: _isSyncing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.sync_rounded),
+            onPressed: _syncAndCheck,
+          ),
           IconButton(
             tooltip: 'Review completion photos',
             icon: const Icon(Icons.photo_camera_rounded),

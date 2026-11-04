@@ -9,6 +9,7 @@ import 'package:demo_operations_mobile/features/sales/customer_detail_screen.dar
 import 'package:demo_operations_mobile/features/sales/order_detail_screen.dart';
 import 'package:demo_operations_mobile/features/sales/sales_dashboard_screen.dart';
 import 'package:demo_operations_mobile/features/tasks/task_detail_screen.dart';
+import 'package:demo_operations_mobile/features/tasks/task_dashboard_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -325,6 +326,42 @@ void main() {
           reason: 'layout error on $screen',
         );
       }
+    });
+
+    testWidgets('task dashboard renders employee buckets and test alarm dialog', (tester) async {
+      _usePhoneScreen(tester);
+      final repo = MockRepository()
+        ..authenticate('ajay.ji@durasmart.com', MockRepository.employeePasscode);
+      
+      await tester.pumpWidget(_wrap(const TaskDashboardScreen(), repo));
+      await tester.pumpAndSettle();
+
+      // Check the 4 buckets requested by the user: Today, Pending, Overdue, Completed
+      expect(find.textContaining('Today'), findsWidgets);
+      expect(find.textContaining('Pending'), findsWidgets);
+      expect(find.textContaining('Overdue'), findsWidgets);
+      expect(find.textContaining('Completed'), findsWidgets);
+
+      // Verify Test Alarm action button is present in app bar
+      final testAlarmBtn = find.byTooltip('Test Alarm (Chime & Vibrate)');
+      expect(testAlarmBtn, findsOneWidget);
+
+      // Tap test alarm button
+      await tester.tap(testAlarmBtn);
+      // Advance clock past the 3x350ms vibration & alert sound pulses
+      await tester.pump(const Duration(milliseconds: 1200));
+      await tester.pumpAndSettle();
+
+      // Verify alarm popup dialog appears
+      expect(find.textContaining('Test Alarm Triggered'), findsOneWidget);
+      expect(find.text('Acknowledge'), findsOneWidget);
+      expect(find.text('Mark Complete'), findsOneWidget);
+      expect(find.text('Dismiss'), findsOneWidget);
+
+      // Dismiss dialog
+      await tester.tap(find.text('Dismiss'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Test Alarm Triggered'), findsNothing);
     });
   });
 }

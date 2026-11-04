@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
 import 'package:demo_operations_mobile/data/mock_repository.dart';
-import 'package:demo_operations_mobile/data/models.dart';
 import 'package:demo_operations_mobile/features/auth/login_screen.dart';
 import 'package:demo_operations_mobile/features/auth/register_screen.dart';
 import 'package:demo_operations_mobile/features/auth/forgot_password_screen.dart';

@@ -3523,6 +3523,112 @@ def assign_territory(body: TerritoryAssignRequest):
     }
 
 
+# ----------------- Task Alarm & Work Assignments -----------------
+
+class TaskCreate(BaseModel):
+    title: str
+    description: str | None = ""
+    assignedEmployeeId: str
+    assignedEmployeeName: str | None = ""
+    dueDate: str | None = None
+    dueTime: str | None = "18:00"
+    priority: str | None = "normal"
+    requiresPhoto: bool | None = False
+
+class TaskUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    assignedEmployeeId: str | None = None
+    assignedEmployeeName: str | None = None
+    dueDate: str | None = None
+    dueTime: str | None = None
+    priority: str | None = None
+    requiresPhoto: bool | None = None
+    status: str | None = None
+
+class TaskStatusUpdate(BaseModel):
+    status: str
+    completionNotes: str | None = None
+
+@app.get("/api/v1/tasks")
+def get_tasks_endpoint(
+    employeeId: str | None = None,
+    status: str | None = None,
+    priority: str | None = None,
+):
+    db.seed_default_tasks()
+    items = db.get_tasks(employee_id=employeeId, status=status, priority=priority)
+    
+    all_tasks = db.get_tasks(employee_id=employeeId)
+    today_count = len([t for t in all_tasks if t.get("isToday") and t.get("status") != "completed"])
+    pending_count = len([t for t in all_tasks if t.get("status") in ["open", "acknowledged"]])
+    overdue_count = len([t for t in all_tasks if t.get("isOverdue")])
+    completed_count = len([t for t in all_tasks if t.get("status") == "completed"])
+
+    return {
+        "items": items,
+        "total": len(items),
+        "summary": {
+            "today": today_count,
+            "pending": pending_count,
+            "overdue": overdue_count,
+            "completed": completed_count,
+            "total": len(all_tasks)
+        }
+    }
+
+@app.get("/api/v1/tasks/due-alarms")
+def get_due_alarms_endpoint(employeeId: str | None = None):
+    alarms = db.get_due_alarm_tasks(employee_id=employeeId)
+    return {
+        "dueAlarms": alarms,
+        "count": len(alarms)
+    }
+
+@app.get("/api/v1/tasks/{task_id}")
+def get_task_endpoint(task_id: str):
+    task = db.get_task_by_id(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    return task
+
+@app.post("/api/v1/tasks")
+def create_task_endpoint(body: TaskCreate):
+    task_dict = body.model_dump()
+    saved = db.save_task(task_dict)
+    return saved
+
+@app.put("/api/v1/tasks/{task_id}")
+def update_task_endpoint(task_id: str, body: TaskUpdate):
+    existing = db.get_task_by_id(task_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+
+    update_data = body.model_dump(exclude_unset=True)
+    for k, v in update_data.items():
+        if v is not None:
+            existing[k] = v
+
+    saved = db.save_task(existing)
+    return saved
+
+@app.delete("/api/v1/tasks/{task_id}")
+def delete_task_endpoint(task_id: str):
+    existing = db.get_task_by_id(task_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    db.delete_task(task_id)
+    return {"success": True, "id": task_id, "deleted": True}
+
+@app.post("/api/v1/tasks/{task_id}/status")
+def update_task_status_endpoint(task_id: str, body: TaskStatusUpdate):
+    updated = db.update_task_status(task_id, body.status, notes=body.completionNotes)
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    return updated
+
+
+
 
 # ----------------- 1-Click OneDrive Stock Watch & Sync -----------------
 @app.get("/api/v1/imports/excel/stock-watch")

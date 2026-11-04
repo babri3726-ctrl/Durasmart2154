@@ -271,6 +271,7 @@ class WorkTask {
     this.completedAt,
     this.completionNotes = '',
     this.completionPhoto,
+    this.alarmTriggered = false,
   });
   final String id;
   final String title;
@@ -285,6 +286,70 @@ class WorkTask {
   DateTime? completedAt;
   String completionNotes;
   DemoPhoto? completionPhoto;
+  bool alarmTriggered;
+
+  factory WorkTask.fromJson(Map<String, dynamic> json) {
+    final pStr = (json['priority'] as String? ?? 'normal').toLowerCase();
+    final p = switch (pStr) {
+      'high' => TaskPriority.high,
+      'low' => TaskPriority.low,
+      _ => TaskPriority.normal,
+    };
+    final sStr = (json['status'] as String? ?? 'open').toLowerCase();
+    final s = switch (sStr) {
+      'completed' => TaskStatus.completed,
+      'acknowledged' => TaskStatus.acknowledged,
+      _ => TaskStatus.open,
+    };
+    final dueAtStr = json['dueAt'] as String? ?? json['due_at'] as String? ?? '';
+    final dueAt = DateTime.tryParse(dueAtStr) ?? DateTime.now();
+    final createdAtStr = json['createdAt'] as String? ?? json['created_at'] as String?;
+    final createdAt = createdAtStr != null ? DateTime.tryParse(createdAtStr) : null;
+    final completedAtStr = json['completedAt'] as String? ?? json['completed_at'] as String?;
+    final completedAt = completedAtStr != null ? DateTime.tryParse(completedAtStr) : null;
+
+    return WorkTask(
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? 'Untitled Task',
+      description: json['description'] as String? ?? '',
+      assignedEmployeeId: json['assignedEmployeeId'] as String? ?? json['assigned_employee_id'] as String? ?? '',
+      dueAt: dueAt,
+      createdBy: json['createdBy'] as String? ?? json['created_by'] as String? ?? 'Owner',
+      createdAt: createdAt,
+      priority: p,
+      requiresPhoto: json['requiresPhoto'] == true || json['requires_photo'] == 1 || json['requires_photo'] == true,
+      status: s,
+      completedAt: completedAt,
+      completionNotes: json['completionNotes'] as String? ?? json['completion_notes'] as String? ?? '',
+      alarmTriggered: json['alarmTriggered'] == true || json['alarm_triggered'] == 1,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'description': description,
+      'assignedEmployeeId': assignedEmployeeId,
+      'dueAt': dueAt.toIso8601String(),
+      'createdBy': createdBy,
+      'createdAt': createdAt?.toIso8601String(),
+      'priority': switch (priority) {
+        TaskPriority.high => 'high',
+        TaskPriority.low => 'low',
+        _ => 'normal',
+      },
+      'requiresPhoto': requiresPhoto,
+      'status': switch (status) {
+        TaskStatus.completed => 'completed',
+        TaskStatus.acknowledged => 'acknowledged',
+        _ => 'open',
+      },
+      'completedAt': completedAt?.toIso8601String(),
+      'completionNotes': completionNotes,
+      'alarmTriggered': alarmTriggered,
+    };
+  }
 
   bool get overdue =>
       status != TaskStatus.completed && dueAt.isBefore(DateTime.now());

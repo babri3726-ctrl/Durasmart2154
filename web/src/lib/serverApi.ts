@@ -3173,5 +3173,109 @@ export function assignTerritory(input: {
   });
 }
 
+// ── Task Alarm & Work Assignments ──────────────────────────────────────────
+
+export interface ServerTask {
+  id: string;
+  title: string;
+  description: string;
+  assignedEmployeeId: string;
+  assignedEmployeeName: string;
+  dueDate: string;
+  dueTime: string;
+  dueAt: string;
+  priority: 'low' | 'normal' | 'high';
+  requiresPhoto: boolean;
+  status: 'open' | 'acknowledged' | 'completed';
+  createdBy: string;
+  createdAt: string;
+  completedAt?: string;
+  completionNotes?: string;
+  alarmTriggered?: boolean;
+  isOverdue?: boolean;
+  isToday?: boolean;
+}
+
+export interface TaskSummary {
+  today: number;
+  pending: number;
+  overdue: number;
+  completed: number;
+  total: number;
+}
+
+export interface TaskCreateInput {
+  title: string;
+  description?: string;
+  assignedEmployeeId: string;
+  assignedEmployeeName?: string;
+  dueDate?: string;
+  dueTime?: string;
+  priority?: 'low' | 'normal' | 'high';
+  requiresPhoto?: boolean;
+}
+
+export interface ServerTaskListResponse {
+  items: ServerTask[];
+  total: number;
+  summary: TaskSummary;
+}
+
+export function listTasks(params: {
+  employeeId?: string;
+  status?: string;
+  priority?: string;
+} = {}): Promise<ServerTaskListResponse> {
+  const query = new URLSearchParams();
+  if (params.employeeId) query.set('employeeId', params.employeeId);
+  if (params.status) query.set('status', params.status);
+  if (params.priority) query.set('priority', params.priority);
+  const qStr = query.toString();
+  return send<ServerTaskListResponse>(`/tasks${qStr ? `?${qStr}` : ''}`);
+}
+
+export function getTask(id: string): Promise<ServerTask> {
+  return send<ServerTask>(`/tasks/${encodeURIComponent(id)}`);
+}
+
+export function createTask(body: TaskCreateInput): Promise<ServerTask> {
+  return send<ServerTask>('/tasks', {
+    method: 'POST',
+    body,
+  });
+}
+
+export function updateTask(id: string, body: Partial<TaskCreateInput> & { status?: string }): Promise<ServerTask> {
+  return send<ServerTask>(`/tasks/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body,
+  });
+}
+
+export function deleteTask(id: string): Promise<{ success: boolean; id: string; deleted: boolean }> {
+  return send<{ success: boolean; id: string; deleted: boolean }>(`/tasks/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function updateTaskStatus(
+  id: string,
+  status: 'open' | 'acknowledged' | 'completed',
+  completionNotes?: string,
+): Promise<ServerTask> {
+  return send<ServerTask>(`/tasks/${encodeURIComponent(id)}/status`, {
+    method: 'POST',
+    body: { status, completionNotes },
+  });
+}
+
+export function getDueAlarms(employeeId?: string): Promise<{ dueAlarms: ServerTask[]; count: number }> {
+  const query = new URLSearchParams();
+  if (employeeId) query.set('employeeId', employeeId);
+  const qStr = query.toString();
+  return send<{ dueAlarms: ServerTask[]; count: number }>(`/tasks/due-alarms${qStr ? `?${qStr}` : ''}`);
+}
+
+
 
 

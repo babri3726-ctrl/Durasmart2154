@@ -210,6 +210,25 @@ def init_db(seed_state: dict[str, Any] | None = None):
             completed_at TEXT,
             FOREIGN KEY (plan_id) REFERENCES tour_plans (id) ON DELETE CASCADE
         );
+
+        CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            assigned_employee_id TEXT NOT NULL,
+            assigned_employee_name TEXT DEFAULT '',
+            due_date TEXT NOT NULL,
+            due_time TEXT DEFAULT '18:00',
+            due_at TEXT NOT NULL,
+            priority TEXT DEFAULT 'normal',
+            requires_photo INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'open',
+            created_by TEXT DEFAULT 'Owner',
+            created_at TEXT NOT NULL,
+            completed_at TEXT,
+            completion_notes TEXT DEFAULT '',
+            alarm_triggered INTEGER DEFAULT 0
+        );
         """)
 
         # Schema migrations
@@ -1560,11 +1579,249 @@ def seed_default_tour_plans() -> int:
         count += 1
     return count
 
+def save_task(task: dict[str, Any]) -> dict[str, Any]:
+    now = datetime.now().isoformat()
+    task_id = task.get("id") or f"TASK-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    task["id"] = task_id
+    title = task.get("title", "Work Assignment")
+    description = task.get("description", "")
+    emp_id = task.get("assignedEmployeeId", "")
+    emp_name = task.get("assignedEmployeeName", "")
+    due_date = task.get("dueDate") or datetime.now().strftime("%Y-%m-%d")
+    due_time = task.get("dueTime", "18:00")
+    due_at = task.get("dueAt") or f"{due_date}T{due_time}:00"
+    priority = task.get("priority", "normal")
+    requires_photo = 1 if task.get("requiresPhoto") else 0
+    status = task.get("status", "open")
+    created_by = task.get("createdBy", "Owner")
+    created_at = task.get("createdAt") or now
+
+    with get_connection() as conn:
+        conn.execute("""
+            INSERT OR REPLACE INTO tasks
+            (id, title, description, assigned_employee_id, assigned_employee_name,
+             due_date, due_time, due_at, priority, requires_photo, status,
+             created_by, created_at, completed_at, completion_notes, alarm_triggered)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM tasks WHERE id = ?), ?), ?, ?, ?)
+        """, (
+            task_id, title, description, emp_id, emp_name,
+            due_date, due_time, due_at, priority, requires_photo, status,
+            created_by, task_id, created_at, task.get("completedAt"), task.get("completionNotes", ""),
+            1 if task.get("alarmTriggered") else 0
+        ))
+        conn.commit()
+
+    task["createdAt"] = created_at
+    task["dueAt"] = due_at
+    task["dueDate"] = due_date
+    task["dueTime"] = due_time
+    task["priority"] = priority
+    task["status"] = status
+    task["requiresPhoto"] = bool(requires_photo)
+    task["assignedEmployeeId"] = emp_id
+    task["assignedEmployeeName"] = emp_name
+    return task
+
+def get_tasks(
+    employee_id: str | None = None,
+    status: str | None = None,
+    priority: str | None = None,
+) -> list[dict[str, Any]]:
+    now = datetime.now()
+    now_iso = now.isoformat()
+    today_str = now.strftime("%Y-%m-%d")
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        query = "SELECT * FROM tasks WHERE 1=1"
+        params: list[Any] = []
+        if employee_id and employee_id != "all":
+            query += " AND assigned_employee_id = ?"
+            params.append(employee_id)
+        if priority and priority != "all":
+            query += " AND priority = ?"
+            params.append(priority)
+        
+        query += " ORDER BY due_at ASC, priority DESC"
+        cur.execute(query, params)
+        rows = [dict(r) for r in cur.fetchall()]
+
+        results = []
+        for r in rows:
+            is_overdue = r["status"] != "completed" and r["due_at"] < now_iso
+            is_today = r["due_date"] == today_str
+            is_pending = r["status"] in ["open", "acknowledged"]
+
+            if status:
+                st = status.lower()
+                if st == "today" and (not is_today or r["status"] == "completed"):
+                    continue
+                elif st == "pending" and not is_pending:
+                    continue
+                elif st == "completed" and r["status"] != "completed":
+                    continue
+                elif st == "overdue" and not is_overdue:
+                    continue
+
+            results.append({
+                "id": r["id"],
+                "title": r["title"],
+                "description": r["description"],
+                "assignedEmployeeId": r["assigned_employee_id"],
+                "assignedEmployeeName": r["assigned_employee_name"],
+                "dueDate": r["due_date"],
+                "dueTime": r["due_time"],
+                "dueAt": r["due_at"],
+                "priority": r["priority"],
+                "requiresPhoto": bool(r["requires_photo"]),
+                "status": r["status"],
+                "createdBy": r["created_by"],
+                "createdAt": r["created_at"],
+                "completedAt": r["completed_at"],
+                "completionNotes": r["completion_notes"],
+                "alarmTriggered": bool(r["alarm_triggered"]),
+                "isOverdue": is_overdue,
+                "isToday": is_today,
+            })
+        return results
+
+def get_task_by_id(task_id: str) -> dict[str, Any] | None:
+    tasks = get_tasks()
+    for t in tasks:
+        if t["id"] == task_id:
+            return t
+    return None
+
+def delete_task(task_id: str) -> bool:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        deleted = cur.rowcount > 0
+        conn.commit()
+    return deleted
+
+def update_task_status(
+    task_id: str,
+    status: str,
+    notes: str | None = None,
+) -> dict[str, Any] | None:
+    now = datetime.now().isoformat()
+    completed_at = now if status == "completed" else None
+    with get_connection() as conn:
+        cur = conn.cursor()
+        if notes is not None:
+            cur.execute("""
+                UPDATE tasks 
+                SET status = ?, completion_notes = ?, completed_at = COALESCE(?, completed_at)
+                WHERE id = ?
+            """, (status, notes, completed_at, task_id))
+        else:
+            cur.execute("""
+                UPDATE tasks 
+                SET status = ?, completed_at = COALESCE(?, completed_at)
+                WHERE id = ?
+            """, (status, completed_at, task_id))
+
+        if cur.rowcount == 0:
+            return None
+        conn.commit()
+
+    return get_task_by_id(task_id)
+
+def get_due_alarm_tasks(employee_id: str | None = None) -> list[dict[str, Any]]:
+    now_iso = datetime.now().isoformat()
+    with get_connection() as conn:
+        cur = conn.cursor()
+        query = "SELECT * FROM tasks WHERE status != 'completed' AND due_at <= ?"
+        params: list[Any] = [now_iso]
+        if employee_id and employee_id != "all":
+            query += " AND assigned_employee_id = ?"
+            params.append(employee_id)
+        query += " ORDER BY due_at ASC"
+        cur.execute(query, params)
+        rows = [dict(r) for r in cur.fetchall()]
+
+        return [
+            {
+                "id": r["id"],
+                "title": r["title"],
+                "description": r["description"],
+                "assignedEmployeeId": r["assigned_employee_id"],
+                "assignedEmployeeName": r["assigned_employee_name"],
+                "dueAt": r["due_at"],
+                "priority": r["priority"],
+                "status": r["status"],
+                "isOverdue": True,
+            }
+            for r in rows
+        ]
+
+def seed_default_tasks() -> int:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM tasks")
+        if cur.fetchone()[0] > 0:
+            return 0
+
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    seeds = [
+        {
+            "id": f"TASK-{today.replace('-', '')}-01",
+            "title": "Payment collection from Kalra Traders",
+            "description": "Collect pending voucher receipt of ₹10,360 from Kalra Traders Derabassi.",
+            "assignedEmployeeId": "EMP-SP-07",
+            "assignedEmployeeName": "Mozi Ram",
+            "dueDate": today,
+            "dueTime": "16:00",
+            "dueAt": f"{today}T16:00:00",
+            "priority": "high",
+            "requiresPhoto": True,
+            "status": "open",
+            "createdBy": "Owner Ishu Jindal"
+        },
+        {
+            "id": f"TASK-{today.replace('-', '')}-02",
+            "title": "Physical Stock Audit at Sirsa Depot",
+            "description": "Verify physical coil and sheet inventory matches 1-Click stock register.",
+            "assignedEmployeeId": "EMP-SP-01",
+            "assignedEmployeeName": "AJAY JI",
+            "dueDate": today,
+            "dueTime": "17:30",
+            "dueAt": f"{today}T17:30:00",
+            "priority": "normal",
+            "requiresPhoto": False,
+            "status": "acknowledged",
+            "createdBy": "Owner Ishu Jindal"
+        },
+        {
+            "id": f"TASK-{today.replace('-', '')}-03",
+            "title": "New Profile Catalogue Delivery to Bansal Poles",
+            "description": "Deliver newly printed UPVC profile sample sets to Bahadurgarh showroom.",
+            "assignedEmployeeId": "EMP-SP-03",
+            "assignedEmployeeName": "GAURAV JI",
+            "dueDate": today,
+            "dueTime": "18:00",
+            "dueAt": f"{today}T18:00:00",
+            "priority": "normal",
+            "requiresPhoto": True,
+            "status": "open",
+            "createdBy": "Owner Ishu Jindal"
+        }
+    ]
+
+    count = 0
+    for s in seeds:
+        save_task(s)
+        count += 1
+    return count
+
 # Ensure schema tables exist and real users are seeded
 try:
     init_db()
     seed_real_users()
     seed_default_tour_plans()
+    seed_default_tasks()
 except Exception:
     pass
 

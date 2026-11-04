@@ -130,6 +130,111 @@ class ApiSyncService {
     }
   }
 
+  /// Fetches tasks from backend
+  static Future<List<Map<String, dynamic>>?> fetchTasks({
+    String? employeeId,
+    String? status,
+    String? priority,
+  }) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final params = <String>[];
+      if (employeeId != null && employeeId.isNotEmpty) {
+        params.add('employeeId=${Uri.encodeComponent(employeeId)}');
+      }
+      if (status != null && status.isNotEmpty) {
+        params.add('status=${Uri.encodeComponent(status)}');
+      }
+      if (priority != null && priority.isNotEmpty) {
+        params.add('priority=${Uri.encodeComponent(priority)}');
+      }
+      final query = params.isEmpty ? '' : '?${params.join('&')}';
+      final req = await client.getUrl(Uri.parse('$host/api/v1/tasks$query'));
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body) as Map<String, dynamic>;
+        final items = data['items'] as List<dynamic>? ?? [];
+        return items.map((e) => e as Map<String, dynamic>).toList();
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetches tasks whose alarms are due now or overdue
+  static Future<List<Map<String, dynamic>>?> fetchDueAlarms({
+    String? employeeId,
+  }) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final query = (employeeId != null && employeeId.isNotEmpty)
+          ? '?employeeId=${Uri.encodeComponent(employeeId)}'
+          : '';
+      final req = await client.getUrl(Uri.parse('$host/api/v1/tasks/due-alarms$query'));
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body) as Map<String, dynamic>;
+        final items = data['items'] as List<dynamic>? ?? [];
+        return items.map((e) => e as Map<String, dynamic>).toList();
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Updates task status (e.g. acknowledged, completed) on backend
+  static Future<bool> updateTaskStatus(
+    String taskId,
+    String status, {
+    String? notes,
+    String? photoUrl,
+  }) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return false;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.postUrl(Uri.parse('$host/api/v1/tasks/$taskId/status'));
+      req.headers.contentType = ContentType.json;
+      req.write(jsonEncode({
+        'status': status,
+        if (notes != null) 'notes': notes,
+        if (photoUrl != null) 'photoUrl': photoUrl,
+      }));
+      final resp = await req.close();
+      return resp.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Creates a new task on backend
+  static Future<Map<String, dynamic>?> postTask(Map<String, dynamic> taskPayload) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.postUrl(Uri.parse('$host/api/v1/tasks'));
+      req.headers.contentType = ContentType.json;
+      req.write(jsonEncode(taskPayload));
+      final resp = await req.close();
+      if (resp.statusCode == 200 || resp.statusCode == 201) {
+        final body = await resp.transform(utf8.decoder).join();
+        return jsonDecode(body) as Map<String, dynamic>;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Synchronizes a dispatch to the backend /api/v1/dispatches
   static Future<bool> postDispatch(Map<String, dynamic> dispatchPayload) async {
     final host = await resolveWorkingHost();
