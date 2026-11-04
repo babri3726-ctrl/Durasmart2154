@@ -106,7 +106,8 @@ if ($Check -in @('All', 'Test')) {
     if (Get-Command python -ErrorAction SilentlyContinue) {
         $pyTests = Get-ChildItem (Join-Path $serverDir "test_*.py") -ErrorAction SilentlyContinue
         if ($pyTests.Count -gt 0) {
-            $pyTestOut = python -m unittest discover -s "$serverDir" -p "test_server.py" 2>&1 | Out-String
+            $env:PYTHONPATH = "."
+            $pyTestOut = python -m pytest server/test_server.py server/test_auth_invitations.py server/test_auth_endpoints.py 2>&1 | Out-String
             if ($LASTEXITCODE -eq 0) {
                 Record-Result "UnitTesting" "Server (Python)" "PASS" "Python test suite (FastAPI / SQLite) passed."
             } else {
