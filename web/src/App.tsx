@@ -7,6 +7,8 @@ import { Shell } from './components/layout/Shell';
 import { Toaster } from './components/ui/Toaster';
 import { Card } from './components/ui/Card';
 import Login from './pages/Login';
+import Signup from './pages/Signup';
+import Profile from './pages/Profile';
 import Dashboard from './pages/Dashboard';
 import Sales from './pages/Sales';
 import Payment from './pages/Payment';
@@ -95,8 +97,10 @@ export default function App() {
       <Toaster />
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
         <Route element={<RequireAuth />}>
           <Route path="/" element={<Dashboard />} />
+          <Route path="/profile" element={<Profile />} />
           <Route element={<RequireOwner />}>
             <Route path="/sales" element={<Sales />} />
             <Route path="/account" element={<Account />} />

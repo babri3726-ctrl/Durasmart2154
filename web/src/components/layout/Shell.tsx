@@ -4,7 +4,7 @@ import {
   LayoutDashboard, TrendingUp, Wallet, Truck, Boxes,
   Map, Route, AlarmClock, Users, ShoppingCart, FilePlus2, IdCard, BarChart3, Settings, ReceiptIndianRupee,
   Megaphone, Landmark,
-  ChevronLeft, ChevronRight, LogOut, Menu,
+  ChevronLeft, ChevronRight, LogOut, Menu, User,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useUi } from '../../lib/uiStore';
@@ -96,6 +96,12 @@ function ProfileMenu() {
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute right-0 z-50 mt-2 w-44 overflow-hidden rounded-tile border border-line bg-white py-1 shadow-pop">
             <p className="px-3 py-2 text-[11px] text-muted">{user.email}</p>
+            <button
+              className="flex w-full items-center gap-2 px-3 py-2 text-[13px] font-bold hover:bg-canvas"
+              onClick={() => { setOpen(false); navigate('/profile'); }}
+            >
+              <User size={14} /> My Profile
+            </button>
             <button
               className="flex w-full items-center gap-2 px-3 py-2 text-[13px] font-bold hover:bg-canvas"
               onClick={() => { setOpen(false); navigate('/settings'); }}

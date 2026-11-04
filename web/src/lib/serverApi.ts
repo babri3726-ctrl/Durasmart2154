@@ -2887,3 +2887,110 @@ export function getCustomerLedger(
   query.set('pageSize', String(params.pageSize ?? 50));
   return send<ServerPage<ServerLedgerEntry>>(`/customers/${encodeURIComponent(customerId)}/ledger?${query.toString()}`);
 }
+
+// ── invitations, signup & profile ───────────────────────────────────────
+
+export interface InvitationRecord {
+  id: string;
+  code: string;
+  role: string;
+  department: string;
+  employee_id?: string;
+  sales_territory?: string;
+  monthly_target_qty: number;
+  target_unit: string;
+  may_dispatch: number;
+  max_uses: number;
+  used_count: number;
+  expires_at: string;
+  status: 'active' | 'used' | 'expired' | 'revoked';
+  created_by: string;
+  created_at: string;
+}
+
+export interface VerifyInvitationResult {
+  valid: boolean;
+  code?: string;
+  role?: string;
+  department?: string;
+  salesTerritory?: string;
+  monthlyTargetQty?: number;
+  targetUnit?: string;
+  mayDispatch?: boolean;
+  reason?: string;
+}
+
+export interface SignupInput {
+  name: string;
+  identifier: string;
+  password: string;
+  phone?: string;
+  inviteCode: string;
+}
+
+export function createInvitation(input: {
+  role?: string;
+  department?: string;
+  salesTerritory?: string;
+  monthlyTargetQty?: number;
+  targetUnit?: string;
+  mayDispatch?: boolean;
+  maxUses?: number;
+  expiresInDays?: number;
+}): Promise<InvitationRecord> {
+  return send<InvitationRecord>('/auth/invitations', {
+    method: 'POST',
+    body: input,
+  });
+}
+
+export function listInvitations(): Promise<InvitationRecord[]> {
+  return send<InvitationRecord[]>('/auth/invitations');
+}
+
+export function revokeInvitation(code: string): Promise<{ success: boolean; code: string }> {
+  return send<{ success: boolean; code: string }>(`/auth/invitations/${encodeURIComponent(code)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function verifyInvitationCode(code: string): Promise<VerifyInvitationResult> {
+  return send<VerifyInvitationResult>('/auth/invitations/verify', {
+    method: 'POST',
+    auth: false,
+    body: { code },
+  });
+}
+
+export async function signUpUser(input: SignupInput): Promise<ServerUser> {
+  const result = await send<LoginResult>('/auth/signup', {
+    method: 'POST',
+    auth: false,
+    body: input,
+  });
+  writeTokens(result.accessToken, result.refreshToken);
+  return result.user;
+}
+
+export function fetchUserProfile(): Promise<ServerUser & {
+  salesTerritory?: string;
+  monthlyTargetQty?: string;
+  targetUnit?: string;
+  isOwner?: boolean;
+  isDispatch?: boolean;
+}> {
+  return send('/auth/me');
+}
+
+export function updateUserProfile(input: {
+  name?: string;
+  phone?: string;
+  currentPassword?: string;
+  newPassword?: string;
+}): Promise<ServerUser> {
+  return send('/auth/me', {
+    method: 'PATCH',
+    body: input,
+  });
+}
+

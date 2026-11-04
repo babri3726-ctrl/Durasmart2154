@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import { useLiveSession } from '../lib/liveSession';
 import { ServerError, serverHost, signIn } from '../lib/serverApi';
@@ -97,6 +97,13 @@ export default function Login() {
               {error && <p className="rounded-field bg-brand-red/10 px-3 py-2 text-xs font-bold text-brand-red">{error}</p>}
               <button className="btn-grad w-full" disabled={busy}>{busy ? 'Signing in…' : 'Sign in to Operations Panel'}</button>
             </form>
+
+            <div className="mt-4 text-center text-xs text-muted">
+              Have an invitation code?{' '}
+              <Link to="/signup" className="font-bold text-brand-blue hover:underline">
+                Sign up here
+              </Link>
+            </div>
 
             <p className="mt-5 border-t border-line pt-4 text-[10px] leading-relaxed text-faint">
               Signing in against the active backend at {serverHost()}. Roles & territories are managed on the server.
