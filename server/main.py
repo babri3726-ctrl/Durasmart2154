@@ -3370,6 +3370,160 @@ def purge_test_payments_endpoint():
     return {"success": True, "purgedCount": deleted_count}
 
 
+# ----------------- OpenStreetMap Tour Planning & Route Optimization -----------------
+
+class TourVisitCreate(BaseModel):
+    id: str | None = None
+    customerId: str | None = ""
+    customerName: str | None = ""
+    city: str | None = ""
+    district: str | None = ""
+    sequence: int = 1
+    purpose: str | None = "Order Booking & Relationship"
+    status: str | None = "planned"
+    notes: str | None = ""
+    gpsLat: float | None = None
+    gpsLng: float | None = None
+    completedAt: str | None = None
+
+class TourPlanCreate(BaseModel):
+    salespersonId: str
+    salespersonName: str | None = None
+    date: str | None = None
+    areaName: str | None = None
+    notes: str | None = ""
+    visits: list[TourVisitCreate] = []
+
+class TourPlanUpdate(BaseModel):
+    salespersonId: str | None = None
+    salespersonName: str | None = None
+    date: str | None = None
+    areaName: str | None = None
+    notes: str | None = None
+    status: str | None = None
+    visits: list[TourVisitCreate] | None = None
+
+class VisitStatusUpdate(BaseModel):
+    status: str
+    notes: str | None = None
+    gpsLat: float | None = None
+    gpsLng: float | None = None
+
+class TerritoryAssignRequest(BaseModel):
+    district: str
+    salesperson: str
+    salespersonId: str | None = None
+
+@app.get("/api/v1/tours")
+def get_tours(
+    salespersonId: str | None = None,
+    date: str | None = None,
+    status: str | None = None,
+):
+    db.seed_default_tour_plans()
+    return db.get_tour_plans(salesperson_id=salespersonId, date=date, status=status)
+
+@app.get("/api/v1/tours/{tour_id}")
+def get_tour(tour_id: str):
+    plan = db.get_tour_plan_by_id(tour_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail=f"Tour plan {tour_id} not found")
+    return plan
+
+@app.post("/api/v1/tours")
+def create_tour(body: TourPlanCreate):
+    plan_dict = body.model_dump()
+    saved = db.save_tour_plan(plan_dict)
+    return saved
+
+@app.put("/api/v1/tours/{tour_id}")
+def update_tour(tour_id: str, body: TourPlanUpdate):
+    existing = db.get_tour_plan_by_id(tour_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Tour plan {tour_id} not found")
+    
+    update_data = body.model_dump(exclude_unset=True)
+    for k, v in update_data.items():
+        if v is not None:
+            existing[k] = v
+
+    saved = db.save_tour_plan(existing)
+    return saved
+
+@app.delete("/api/v1/tours/{tour_id}")
+def delete_tour(tour_id: str):
+    existing = db.get_tour_plan_by_id(tour_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Tour plan {tour_id} not found")
+    db.delete_tour_plan(tour_id)
+    return {"success": True, "id": tour_id, "deleted": True}
+
+@app.post("/api/v1/tours/{tour_id}/visits/{visit_id}/status")
+def update_visit_status_endpoint(tour_id: str, visit_id: str, body: VisitStatusUpdate):
+    updated = db.update_tour_visit_status(tour_id, visit_id, body.status, notes=body.notes)
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"Visit {visit_id} in tour {tour_id} not found")
+    visit = next((v for v in updated.get("visits", []) if v["id"] == visit_id), None)
+    return visit or {"status": body.status}
+
+# ----------------- Vacant Area & District Coverage Analytics -----------------
+
+@app.get("/api/v1/territories/vacant-areas")
+def get_vacant_areas():
+    from server.geo_coordinates import get_district_coverage_info
+    districts = get_district_coverage_info()
+    
+    total_districts = len(districts)
+    vacant_districts = len([d for d in districts if d["status"] == "vacant"])
+    assigned_districts = len([d for d in districts if d["status"] == "assigned"])
+    partial_districts = len([d for d in districts if d["status"] == "partial"])
+    total_shops = sum(d["totalShops"] for d in districts)
+
+    return {
+        "summary": {
+            "totalDistricts": total_districts,
+            "vacantDistricts": vacant_districts,
+            "assignedDistricts": assigned_districts,
+            "partialDistricts": partial_districts,
+            "totalShops": total_shops,
+            "coveragePercent": round(((assigned_districts + partial_districts) / total_districts * 100), 1) if total_districts else 0
+        },
+        "districts": districts
+    }
+
+@app.post("/api/v1/territories/assign")
+def assign_territory(body: TerritoryAssignRequest):
+    district_clean = body.district.strip().upper()
+    sp_name = body.salesperson.strip()
+    sp_id = body.salespersonId or "EMP-SP-01"
+
+    with db.get_connection() as conn:
+        conn.execute("""
+            UPDATE parties 
+            SET salesperson = ?, salesperson_id = ?, updated_at = ?
+            WHERE UPPER(TRIM(district)) = ?
+        """, (sp_name, sp_id, datetime.now().isoformat(), district_clean))
+        conn.commit()
+
+    for d in STATE.get("debtors", []):
+        if (d.get("district") or "").strip().upper() == district_clean:
+            d["salesperson"] = sp_name
+            d["salespersonId"] = sp_id
+
+    for c in STATE.get("customers", []):
+        if (c.get("district") or "").strip().upper() == district_clean:
+            c["salesperson"] = sp_name
+            c["salespersonId"] = sp_id
+
+    return {
+        "success": True,
+        "district": body.district,
+        "salesperson": sp_name,
+        "salespersonId": sp_id
+    }
+
+
+
 # ----------------- 1-Click OneDrive Stock Watch & Sync -----------------
 @app.get("/api/v1/imports/excel/stock-watch")
 def get_stock_watch():

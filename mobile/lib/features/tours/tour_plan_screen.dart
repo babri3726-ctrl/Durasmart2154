@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/formatters.dart';
 import '../../core/share_service.dart';
@@ -1583,6 +1584,19 @@ class _VisitTile extends StatelessWidget {
                       '${visit.gpsLat!.toStringAsFixed(3)}, ${visit.gpsLng!.toStringAsFixed(3)}',
                   color: AppColors.blue,
                 ),
+              InkWell(
+                onTap: () {
+                  final url = (visit.gpsLat != null && visit.gpsLng != null)
+                      ? 'https://www.openstreetmap.org/directions?to=${visit.gpsLat},${visit.gpsLng}'
+                      : 'https://www.openstreetmap.org/search?query=${Uri.encodeComponent('${visit.customerName}, ${visit.city}')}';
+                  launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+                },
+                borderRadius: BorderRadius.circular(16),
+                child: const StatusChip(
+                  label: '📍 Open Map',
+                  color: AppColors.purple,
+                ),
+              ),
             ],
           ),
           if (visit.notes.trim().isNotEmpty) ...[

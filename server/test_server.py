@@ -941,5 +941,99 @@ class TestServerApi(unittest.TestCase):
         self.assertEqual(purge_res.status_code, 200)
         self.assertTrue(purge_res.json()["success"])
 
+    def test_23_tour_plans_and_vacant_areas_api(self):
+        # 1. Test GET /api/v1/territories/vacant-areas
+        va_res = self.client.get("/api/v1/territories/vacant-areas")
+        self.assertEqual(va_res.status_code, 200)
+        va_data = va_res.json()
+        self.assertIn("districts", va_data)
+        self.assertIn("summary", va_data)
+        self.assertGreater(len(va_data["districts"]), 30)
+
+        # 2. Test POST /api/v1/tours (Create daily tour plan for an employee)
+        tour_payload = {
+            "salespersonId": "EMP-SP-01",
+            "salespersonName": "AJAY JI",
+            "date": "2026-11-05",
+            "areaName": "Sirsa - Dabwali Daily Beat",
+            "notes": "Dealer collection and stock order check",
+            "visits": [
+                {
+                    "customerId": "DEBTOR-HR-001",
+                    "customerName": "DOORKRM SIRSA ENTERPRISES (GOYAL AGROTECH) SIRSA",
+                    "city": "Sirsa",
+                    "district": "SIRSA",
+                    "purpose": "Payment collection & repeat order",
+                    "sequence": 1
+                },
+                {
+                    "customerId": "DEBTOR-HR-005",
+                    "customerName": "GOYAL AGROTECH (GOYAL AGROTECH) DABWALI",
+                    "city": "Dabwali",
+                    "district": "SIRSA",
+                    "purpose": "Monthly review",
+                    "sequence": 2
+                }
+            ]
+        }
+        create_res = self.client.post("/api/v1/tours", json=tour_payload)
+        self.assertEqual(create_res.status_code, 200)
+        created_tour = create_res.json()
+        tour_id = created_tour["id"]
+        self.assertTrue(tour_id.startswith("TOUR-"))
+        self.assertEqual(len(created_tour["visits"]), 2)
+        visit_1_id = created_tour["visits"][0]["id"]
+
+        try:
+            # 3. Test GET /api/v1/tours (with filters)
+            list_res = self.client.get("/api/v1/tours?salespersonId=EMP-SP-01&date=2026-11-05")
+            self.assertEqual(list_res.status_code, 200)
+            tours = list_res.json()
+            self.assertTrue(any(t["id"] == tour_id for t in tours))
+
+            # 4. Test POST /api/v1/tours/{id}/visits/{visit_id}/status (Mark visit complete)
+            status_res = self.client.post(
+                f"/api/v1/tours/{tour_id}/visits/{visit_1_id}/status",
+                json={"status": "completed", "notes": "Visited in person; collection received"}
+            )
+            self.assertEqual(status_res.status_code, 200)
+            self.assertEqual(status_res.json()["status"], "completed")
+
+            # 5. Test PUT /api/v1/tours/{id} (Owner edit route/stops)
+            update_res = self.client.put(f"/api/v1/tours/{tour_id}", json={
+                "notes": "Updated route notes by Ishu Jindal",
+                "visits": [
+                    {
+                        "id": visit_1_id,
+                        "customerId": "DEBTOR-HR-001",
+                        "customerName": "DOORKRM SIRSA ENTERPRISES (GOYAL AGROTECH) SIRSA",
+                        "city": "Sirsa",
+                        "district": "SIRSA",
+                        "purpose": "Payment collection & repeat order",
+                        "sequence": 1,
+                        "status": "completed"
+                    }
+                ]
+            })
+            self.assertEqual(update_res.status_code, 200)
+            self.assertEqual(len(update_res.json()["visits"]), 1)
+
+            # 6. Test POST /api/v1/territories/assign (Owner assign vacant territory)
+            assign_res = self.client.post("/api/v1/territories/assign", json={
+                "district": "CHUNNI",
+                "salesperson": "Mozi Ram",
+                "salespersonId": "EMP-SP-07"
+            })
+            self.assertEqual(assign_res.status_code, 200)
+            self.assertTrue(assign_res.json()["success"])
+
+        finally:
+            # Clean up test tour
+            self.client.delete(f"/api/v1/tours/{tour_id}")
+
+        # Verify deletion
+        list_after = self.client.get("/api/v1/tours").json()
+        self.assertFalse(any(t["id"] == tour_id for t in list_after))
+
 if __name__ == '__main__':
     unittest.main()

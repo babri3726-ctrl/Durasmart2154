@@ -3041,4 +3041,137 @@ export function resetPassword(input: {
   });
 }
 
+// ── OpenStreetMap Tour Planning & Route Optimization ───────────────────────
+
+export interface ServerTourVisit {
+  id: string;
+  planId?: string;
+  customerId: string;
+  customerName: string;
+  city: string;
+  district: string;
+  sequence: number;
+  purpose: string;
+  status: 'planned' | 'in_progress' | 'completed' | 'missed';
+  notes?: string;
+  gpsLat?: number;
+  gpsLng?: number;
+  completedAt?: string;
+}
+
+export interface ServerTourPlan {
+  id: string;
+  salespersonId: string;
+  salespersonName: string;
+  date: string;
+  areaName: string;
+  area?: string;
+  notes: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  createdAt: string;
+  updatedAt: string;
+  visits: ServerTourVisit[];
+}
+
+export interface TourPlanCreateInput {
+  salespersonId: string;
+  salespersonName?: string;
+  date?: string;
+  areaName?: string;
+  notes?: string;
+  visits: Partial<ServerTourVisit>[];
+}
+
+export function listTourPlans(params: {
+  salespersonId?: string;
+  date?: string;
+  status?: string;
+} = {}): Promise<ServerTourPlan[]> {
+  const query = new URLSearchParams();
+  if (params.salespersonId) query.set('salespersonId', params.salespersonId);
+  if (params.date) query.set('date', params.date);
+  if (params.status) query.set('status', params.status);
+  const qStr = query.toString();
+  return send<ServerTourPlan[]>(`/tours${qStr ? `?${qStr}` : ''}`);
+}
+
+export function getTourPlan(id: string): Promise<ServerTourPlan> {
+  return send<ServerTourPlan>(`/tours/${encodeURIComponent(id)}`);
+}
+
+export function createTourPlan(body: TourPlanCreateInput): Promise<ServerTourPlan> {
+  return send<ServerTourPlan>('/tours', {
+    method: 'POST',
+    body,
+  });
+}
+
+export function updateTourPlan(id: string, body: Partial<TourPlanCreateInput> & { status?: string }): Promise<ServerTourPlan> {
+  return send<ServerTourPlan>(`/tours/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body,
+  });
+}
+
+export function deleteTourPlan(id: string): Promise<{ success: boolean; id: string; deleted: boolean }> {
+  return send<{ success: boolean; id: string; deleted: boolean }>(`/tours/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function updateTourVisitStatus(
+  tourId: string,
+  visitId: string,
+  status: 'planned' | 'in_progress' | 'completed' | 'missed',
+  notes?: string,
+): Promise<ServerTourVisit> {
+  return send<ServerTourVisit>(`/tours/${encodeURIComponent(tourId)}/visits/${encodeURIComponent(visitId)}/status`, {
+    method: 'POST',
+    body: { status, notes },
+  });
+}
+
+// ── Vacant Areas & Territory Coverage ──────────────────────────────────────
+
+export interface ServerVacantDistrict {
+  district: string;
+  state: string;
+  lat: number;
+  lng: number;
+  totalShops: number;
+  assignedSalesperson: string | null;
+  salespersonId: string | null;
+  salespersons: string[];
+  status: 'assigned' | 'partial' | 'vacant';
+  cities: string[];
+}
+
+export interface ServerVacantAreasResponse {
+  summary: {
+    totalDistricts: number;
+    vacantDistricts: number;
+    assignedDistricts: number;
+    partialDistricts: number;
+    totalShops: number;
+    coveragePercent: number;
+  };
+  districts: ServerVacantDistrict[];
+}
+
+export function getVacantAreas(): Promise<ServerVacantAreasResponse> {
+  return send<ServerVacantAreasResponse>('/territories/vacant-areas');
+}
+
+export function assignTerritory(input: {
+  district: string;
+  salesperson: string;
+  salespersonId?: string;
+}): Promise<{ success: boolean; district: string; salesperson: string; salespersonId?: string }> {
+  return send<{ success: boolean; district: string; salesperson: string; salespersonId?: string }>('/territories/assign', {
+    method: 'POST',
+    body: input,
+  });
+}
+
+
 

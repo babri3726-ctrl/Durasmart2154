@@ -181,6 +181,35 @@ def init_db(seed_state: dict[str, Any] | None = None):
             used INTEGER DEFAULT 0,
             created_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS tour_plans (
+            id TEXT PRIMARY KEY,
+            salesperson_id TEXT NOT NULL,
+            salesperson_name TEXT NOT NULL,
+            date TEXT NOT NULL,
+            area_name TEXT DEFAULT '',
+            notes TEXT DEFAULT '',
+            status TEXT DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS tour_visits (
+            id TEXT PRIMARY KEY,
+            plan_id TEXT NOT NULL,
+            customer_id TEXT NOT NULL,
+            customer_name TEXT NOT NULL,
+            city TEXT DEFAULT '',
+            district TEXT DEFAULT '',
+            sequence INTEGER DEFAULT 1,
+            purpose TEXT DEFAULT 'Order Booking & Relationship',
+            status TEXT DEFAULT 'planned',
+            notes TEXT DEFAULT '',
+            gps_lat REAL,
+            gps_lng REAL,
+            completed_at TEXT,
+            FOREIGN KEY (plan_id) REFERENCES tour_plans (id) ON DELETE CASCADE
+        );
         """)
 
         # Schema migrations
@@ -1272,10 +1301,270 @@ def seed_real_users(force: bool = False):
         """)
         conn.commit()
 
+def save_tour_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    from server.geo_coordinates import get_coordinates_for_location
+    now = datetime.now().isoformat()
+    plan_id = plan.get("id") or f"TOUR-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    plan["id"] = plan_id
+    sp_id = plan.get("salespersonId", "")
+    sp_name = plan.get("salespersonName", "Area Sales Officer")
+    date_str = plan.get("date") or datetime.now().strftime("%Y-%m-%d")
+    area_name = plan.get("areaName") or plan.get("area", "")
+    notes = plan.get("notes", "")
+    status = plan.get("status", "pending")
+
+    with get_connection() as conn:
+        conn.execute("""
+            INSERT OR REPLACE INTO tour_plans
+            (id, salesperson_id, salesperson_name, date, area_name, notes, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM tour_plans WHERE id = ?), ?), ?)
+        """, (plan_id, sp_id, sp_name, date_str, area_name, notes, status, plan_id, now, now))
+
+        conn.execute("DELETE FROM tour_visits WHERE plan_id = ?", (plan_id,))
+
+        visits = plan.get("visits", [])
+        saved_visits = []
+        for idx, v in enumerate(visits):
+            v_id = v.get("id") or f"VISIT-{plan_id[-6:]}-{idx+1:02d}"
+            v["id"] = v_id
+            v["planId"] = plan_id
+            v["sequence"] = v.get("sequence", idx + 1)
+            city = v.get("city", "")
+            district = v.get("district", "")
+            purpose = v.get("purpose", "Order Booking & Relationship")
+            v_status = v.get("status", "planned")
+            v_notes = v.get("notes", "")
+            
+            lat = v.get("gpsLat") or v.get("gps_lat")
+            lng = v.get("gpsLng") or v.get("gps_lng")
+            if lat is None or lng is None:
+                lat, lng = get_coordinates_for_location(city, district)
+            v["gpsLat"] = lat
+            v["gpsLng"] = lng
+
+            conn.execute("""
+                INSERT INTO tour_visits
+                (id, plan_id, customer_id, customer_name, city, district, sequence, purpose, status, notes, gps_lat, gps_lng, completed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                v_id, plan_id, v.get("customerId", ""), v.get("customerName", "Dealer Shop"),
+                city, district, v["sequence"], purpose, v_status, v_notes,
+                lat, lng, v.get("completedAt")
+            ))
+            saved_visits.append(v)
+
+        conn.commit()
+
+    plan["visits"] = saved_visits
+    return plan
+
+def get_tour_plans(
+    salesperson_id: str | None = None,
+    date: str | None = None,
+    status: str | None = None,
+) -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        query = "SELECT * FROM tour_plans WHERE 1=1"
+        params: list[Any] = []
+        if salesperson_id:
+            query += " AND salesperson_id = ?"
+            params.append(salesperson_id)
+        if date:
+            query += " AND date = ?"
+            params.append(date)
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY date DESC, created_at DESC"
+
+        cur.execute(query, params)
+        plan_rows = [dict(r) for r in cur.fetchall()]
+
+        results = []
+        for p in plan_rows:
+            p_id = p["id"]
+            cur.execute("SELECT * FROM tour_visits WHERE plan_id = ? ORDER BY sequence ASC", (p_id,))
+            visits = [
+                {
+                    "id": vr["id"],
+                    "planId": vr["plan_id"],
+                    "customerId": vr["customer_id"],
+                    "customerName": vr["customer_name"],
+                    "city": vr["city"],
+                    "district": vr["district"],
+                    "sequence": vr["sequence"],
+                    "purpose": vr["purpose"],
+                    "status": vr["status"],
+                    "notes": vr["notes"],
+                    "gpsLat": vr["gps_lat"],
+                    "gpsLng": vr["gps_lng"],
+                    "completedAt": vr["completed_at"],
+                }
+                for vr in cur.fetchall()
+            ]
+            results.append({
+                "id": p["id"],
+                "salespersonId": p["salesperson_id"],
+                "salespersonName": p["salesperson_name"],
+                "date": p["date"],
+                "areaName": p["area_name"],
+                "area": p["area_name"],
+                "notes": p["notes"],
+                "status": p["status"],
+                "createdAt": p["created_at"],
+                "updatedAt": p["updated_at"],
+                "visits": visits,
+            })
+        return results
+
+def get_tour_plan_by_id(plan_id: str) -> dict[str, Any] | None:
+    plans = get_tour_plans()
+    for p in plans:
+        if p["id"] == plan_id:
+            return p
+    return None
+
+def delete_tour_plan(plan_id: str) -> bool:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM tour_visits WHERE plan_id = ?", (plan_id,))
+        cur.execute("DELETE FROM tour_plans WHERE id = ?", (plan_id,))
+        deleted = cur.rowcount > 0
+        conn.commit()
+    return deleted
+
+def update_tour_visit_status(
+    plan_id: str,
+    visit_id: str,
+    status: str,
+    notes: str | None = None,
+) -> dict[str, Any] | None:
+    now = datetime.now().isoformat()
+    with get_connection() as conn:
+        cur = conn.cursor()
+        completed_at = now if status == "completed" else None
+        if notes is not None:
+            cur.execute("""
+                UPDATE tour_visits 
+                SET status = ?, notes = ?, completed_at = COALESCE(?, completed_at)
+                WHERE plan_id = ? AND id = ?
+            """, (status, notes, completed_at, plan_id, visit_id))
+        else:
+            cur.execute("""
+                UPDATE tour_visits 
+                SET status = ?, completed_at = COALESCE(?, completed_at)
+                WHERE plan_id = ? AND id = ?
+            """, (status, completed_at, plan_id, visit_id))
+
+        if cur.rowcount == 0:
+            return None
+
+        cur.execute("SELECT status FROM tour_visits WHERE plan_id = ?", (plan_id,))
+        statuses = [r[0] for r in cur.fetchall()]
+        if statuses and all(s == "completed" for s in statuses):
+            cur.execute("UPDATE tour_plans SET status = 'completed', updated_at = ? WHERE id = ?", (now, plan_id))
+        elif any(s == "completed" for s in statuses):
+            cur.execute("UPDATE tour_plans SET status = 'in_progress', updated_at = ? WHERE id = ?", (now, plan_id))
+
+        conn.commit()
+
+    return get_tour_plan_by_id(plan_id)
+
+def seed_default_tour_plans() -> int:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM tour_plans")
+        if cur.fetchone()[0] > 0:
+            return 0
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    seeds = [
+        {
+            "id": f"TOUR-{today.replace('-', '')}-01",
+            "salespersonId": "EMP-SP-01",
+            "salespersonName": "AJAY JI",
+            "date": today,
+            "areaName": "Sirsa - Dabwali Daily Beat",
+            "notes": "Payment collection & dealer relationship visit",
+            "status": "in_progress",
+            "visits": [
+                {
+                    "customerId": "DEBTOR-HR-001",
+                    "customerName": "DOORKRM SIRSA ENTERPRISES (GOYAL AGROTECH) SIRSA",
+                    "city": "Sirsa",
+                    "district": "SIRSA",
+                    "purpose": "Payment collection & stock review",
+                    "sequence": 1,
+                    "status": "completed",
+                    "notes": "Collected ₹25,000 cheque; stock adequate"
+                },
+                {
+                    "customerId": "DEBTOR-HR-005",
+                    "customerName": "GOYAL AGROTECH (GOYAL AGROTECH) DABWALI",
+                    "city": "Dabwali",
+                    "district": "SIRSA",
+                    "purpose": "Monthly review & target booking",
+                    "sequence": 2,
+                    "status": "planned"
+                }
+            ]
+        },
+        {
+            "id": f"TOUR-{today.replace('-', '')}-02",
+            "salespersonId": "EMP-SP-07",
+            "salespersonName": "Mozi Ram",
+            "date": today,
+            "areaName": "Dera Bassi - Mohali Beat",
+            "notes": "Industrial dealer survey and color profile pitch",
+            "status": "pending",
+            "visits": [
+                {
+                    "customerId": "DEBTOR-HR-001",
+                    "customerName": "KALRA TRADERS/ STEEL DERABASSI",
+                    "city": "Dera Bassi",
+                    "district": "MOHALI",
+                    "purpose": "New profile sample presentation",
+                    "sequence": 1,
+                    "status": "planned"
+                }
+            ]
+        },
+        {
+            "id": f"TOUR-{tomorrow.replace('-', '')}-03",
+            "salespersonId": "EMP-SP-01",
+            "salespersonName": "AJAY JI",
+            "date": tomorrow,
+            "areaName": "Hisar - Agroha Upcoming Beat",
+            "notes": "Upcoming tour plan scheduled for Agroha commercial zone",
+            "status": "pending",
+            "visits": [
+                {
+                    "customerId": "DEBTOR-HR-010",
+                    "customerName": "ARUL STEEL PRIVATE LTD AGROHA",
+                    "city": "HISAR",
+                    "district": "Agroha",
+                    "purpose": "Contract renewal & dispatch planning",
+                    "sequence": 1,
+                    "status": "planned"
+                }
+            ]
+        }
+    ]
+
+    count = 0
+    for s in seeds:
+        save_tour_plan(s)
+        count += 1
+    return count
+
 # Ensure schema tables exist and real users are seeded
 try:
     init_db()
     seed_real_users()
+    seed_default_tour_plans()
 except Exception:
     pass
 
