@@ -310,6 +310,13 @@ void main() {
       _usePhoneScreen(tester);
       final repo = MockRepository()
         ..authenticate('ishu.jindal@durasmart.com', MockRepository.ownerPasscode);
+      if (repo.tasks.isEmpty) {
+        repo.addTask(
+          title: 'Field review',
+          assignedEmployeeId: 'EMP-SP-01',
+          dueAt: DateTime.now().add(const Duration(hours: 4)),
+        );
+      }
       final screens = <Widget>[
         CustomerDetailScreen(customerId: repo.customers.first.id),
         OrderDetailScreen(orderId: repo.orders.first.id),

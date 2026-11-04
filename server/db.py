@@ -1757,64 +1757,8 @@ def get_due_alarm_tasks(employee_id: str | None = None) -> list[dict[str, Any]]:
         ]
 
 def seed_default_tasks() -> int:
-    with get_connection() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM tasks")
-        if cur.fetchone()[0] > 0:
-            return 0
-
-    today = datetime.now().strftime("%Y-%m-%d")
-
-    seeds = [
-        {
-            "id": f"TASK-{today.replace('-', '')}-01",
-            "title": "Payment collection from Kalra Traders",
-            "description": "Collect pending voucher receipt of ₹10,360 from Kalra Traders Derabassi.",
-            "assignedEmployeeId": "EMP-SP-07",
-            "assignedEmployeeName": "Mozi Ram",
-            "dueDate": today,
-            "dueTime": "16:00",
-            "dueAt": f"{today}T16:00:00",
-            "priority": "high",
-            "requiresPhoto": True,
-            "status": "open",
-            "createdBy": "Owner Ishu Jindal"
-        },
-        {
-            "id": f"TASK-{today.replace('-', '')}-02",
-            "title": "Physical Stock Audit at Sirsa Depot",
-            "description": "Verify physical coil and sheet inventory matches 1-Click stock register.",
-            "assignedEmployeeId": "EMP-SP-01",
-            "assignedEmployeeName": "AJAY JI",
-            "dueDate": today,
-            "dueTime": "17:30",
-            "dueAt": f"{today}T17:30:00",
-            "priority": "normal",
-            "requiresPhoto": False,
-            "status": "acknowledged",
-            "createdBy": "Owner Ishu Jindal"
-        },
-        {
-            "id": f"TASK-{today.replace('-', '')}-03",
-            "title": "New Profile Catalogue Delivery to Bansal Poles",
-            "description": "Deliver newly printed UPVC profile sample sets to Bahadurgarh showroom.",
-            "assignedEmployeeId": "EMP-SP-03",
-            "assignedEmployeeName": "GAURAV JI",
-            "dueDate": today,
-            "dueTime": "18:00",
-            "dueAt": f"{today}T18:00:00",
-            "priority": "normal",
-            "requiresPhoto": True,
-            "status": "open",
-            "createdBy": "Owner Ishu Jindal"
-        }
-    ]
-
-    count = 0
-    for s in seeds:
-        save_task(s)
-        count += 1
-    return count
+    """No dummy tasks seeded; tasks are created exclusively by the owner/dispatch."""
+    return 0
 
 # Ensure schema tables exist and real users are seeded
 try:

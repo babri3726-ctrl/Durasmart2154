@@ -1780,59 +1780,7 @@ class MockRepository extends ChangeNotifier {
       ),
     ]);
 
-    tasks.addAll([
-      WorkTask(
-        id: 'TSK-101',
-        title: 'Collect balance from Gupta Steel Traders',
-        description: 'Follow up on ₹2.44L part-payment promise.',
-        assignedEmployeeId: 'SAL-01',
-        dueAt: DateTime(now.year, now.month, now.day, 11, 30),
-        priority: TaskPriority.high,
-        requiresPhoto: false,
-      ),
-      WorkTask(
-        id: 'TSK-102',
-        title: 'Upload dispatch photos for DS-2601',
-        description: 'Capture loaded goods before release.',
-        assignedEmployeeId: 'OPS-01',
-        dueAt: DateTime(now.year, now.month, now.day, 14, 0),
-        priority: TaskPriority.normal,
-        requiresPhoto: true,
-      ),
-      WorkTask(
-        id: 'TSK-103',
-        title: 'Send weekly target report',
-        assignedEmployeeId: 'SAL-01',
-        dueAt: d(9, monthOffset: 0),
-        priority: TaskPriority.normal,
-        status: TaskStatus.completed,
-        completedAt: d(9),
-      ),
-      WorkTask(
-        id: 'TSK-104',
-        title: 'Visit Brar Traders for onboarding papers',
-        assignedEmployeeId: 'SAL-02',
-        dueAt: d(7),
-        description: 'Pending approval — verify GST and shop photo.',
-        requiresPhoto: true,
-      ),
-      WorkTask(
-        id: 'TSK-105',
-        title: 'Prepare samples for Sharma Roofing Works',
-        assignedEmployeeId: 'SAL-03',
-        dueAt: d(12),
-        priority: TaskPriority.low,
-      ),
-      WorkTask(
-        id: 'TSK-106',
-        title: 'Check stock of UPVC sheets',
-        assignedEmployeeId: 'OPS-02',
-        dueAt: d(8),
-        status: TaskStatus.completed,
-        completedAt: d(8),
-        completionNotes: 'Stock verified against sheet.',
-      ),
-    ]);
+    // No dummy tasks seeded; tasks are created by owner or synced from backend.
 
     debtors.addAll([
       DebtorItem(

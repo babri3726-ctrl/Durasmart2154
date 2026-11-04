@@ -3556,7 +3556,6 @@ def get_tasks_endpoint(
     status: str | None = None,
     priority: str | None = None,
 ):
-    db.seed_default_tasks()
     items = db.get_tasks(employee_id=employeeId, status=status, priority=priority)
     
     all_tasks = db.get_tasks(employee_id=employeeId)
