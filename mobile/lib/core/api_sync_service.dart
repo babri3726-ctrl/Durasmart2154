@@ -387,4 +387,58 @@ class ApiSyncService {
       return {'error': 'Connection failed ($e)'};
     }
   }
+
+  static Future<Map<String, dynamic>?> requestPasswordReset(String identifier) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 5);
+      final req = await client.postUrl(Uri.parse('$host/api/v1/auth/forgot-password'));
+      req.headers.contentType = ContentType.json;
+      req.write(jsonEncode({'identifier': identifier}));
+      final resp = await req.close();
+      final body = await resp.transform(utf8.decoder).join();
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      if (resp.statusCode == 200) {
+        return data;
+      }
+      return {'error': data['detail'] ?? 'Account lookup failed'};
+    } catch (e) {
+      return {'error': 'Connection failed ($e)'};
+    }
+  }
+
+  static Future<Map<String, dynamic>?> resetPassword({
+    required String identifier,
+    required String otp,
+    required String newPassword,
+    String? confirmPassword,
+  }) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 5);
+      final req = await client.postUrl(Uri.parse('$host/api/v1/auth/reset-password'));
+      req.headers.contentType = ContentType.json;
+      req.write(
+        jsonEncode({
+          'identifier': identifier,
+          'otp': otp,
+          'newPassword': newPassword,
+          'confirmPassword': confirmPassword ?? newPassword,
+        }),
+      );
+      final resp = await req.close();
+      final body = await resp.transform(utf8.decoder).join();
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      if (resp.statusCode == 200) {
+        return data;
+      }
+      return {'error': data['detail'] ?? 'Password reset failed'};
+    } catch (e) {
+      return {'error': 'Connection failed ($e)'};
+    }
+  }
 }

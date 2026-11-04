@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
+import '../../core/api_sync_service.dart';
 import '../../core/formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
+import '../../data/mock_repository.dart';
 
-/// Password recovery screen. The "reset link" is simulated only — no email is
-/// ever sent in this demo build.
+/// Password recovery screen for Owner Ishu Jindal and HR-PB Sales Officers.
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
 
@@ -14,35 +16,167 @@ class ForgotPasswordScreen extends StatefulWidget {
 }
 
 class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
+  final _step1FormKey = GlobalKey<FormState>();
+  final _step2FormKey = GlobalKey<FormState>();
 
+  final _idController = TextEditingController();
+  final _otpController = TextEditingController();
+  final _newPasswordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+
+  int _step = 1;
   bool _loading = false;
-  bool _sent = false;
+  bool _obscure = true;
+  String? _errorMessage;
+
+  String? _userName;
+  String? _userRole;
+  String? _maskedContact;
+  String? _devOtp;
 
   @override
   void dispose() {
-    _emailController.dispose();
+    _idController.dispose();
+    _otpController.dispose();
+    _newPasswordController.dispose();
+    _confirmPasswordController.dispose();
     super.dispose();
   }
 
-  String? _validateEmail(String? v) {
-    final empty = Validation.required(v, field: 'Email');
+  String? _validateIdentifier(String? v) {
+    final empty = Validation.required(v, field: 'Email or employee ID');
     if (empty != null) return empty;
-    final value = v!.trim();
-    final valid = RegExp(r'^[\w.\-+]+@[\w\-]+\.[\w.\-]+$').hasMatch(value);
-    return valid ? null : 'Enter a valid email address';
+    if (v!.trim().length < 3) return 'Enter a valid identifier';
+    return null;
   }
 
-  Future<void> _submit() async {
+  String? _validateOtp(String? v) {
+    if (v == null || v.trim().isEmpty) return 'Enter the 6-digit code';
+    if (v.trim().length != 6) return 'Code must be 6 digits';
+    return null;
+  }
+
+  String? _validatePassword(String? v) {
+    if (v == null || v.isEmpty) return 'New password is required';
+    if (v.length < 6) return 'Password must be at least 6 characters';
+    return null;
+  }
+
+  String? _validateConfirmPassword(String? v) {
+    if (v == null || v.isEmpty) return 'Please confirm your new password';
+    if (v != _newPasswordController.text) return 'Passwords do not match';
+    return null;
+  }
+
+  Future<void> _requestOtp() async {
     FocusScope.of(context).unfocus();
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _loading = true);
-    await Future<void>.delayed(const Duration(milliseconds: 600));
+    if (!_step1FormKey.currentState!.validate()) return;
+
+    setState(() {
+      _loading = true;
+      _errorMessage = null;
+    });
+
+    final identifier = _idController.text.trim();
+    final res = await ApiSyncService.requestPasswordReset(identifier);
+
     if (!mounted) return;
+
+    if (res != null && res['status'] == 'ok') {
+      final user = res['user'] as Map<String, dynamic>?;
+      setState(() {
+        _loading = false;
+        _userName = user?['name'] as String? ?? 'Authorized Staff';
+        _userRole = user?['role'] as String? ?? 'employee';
+        _maskedContact = user?['maskedContact'] as String? ?? identifier;
+        _devOtp = res['devOtp'] as String?;
+        if (_devOtp != null) {
+          _otpController.text = _devOtp!;
+        }
+        _step = 2;
+      });
+      return;
+    }
+
+    // Offline / Mock fallback check
+    final repo = context.read<MockRepository>();
+    final key = identifier.toLowerCase();
+    final match = repo.demoAccounts.where((a) =>
+        a.email.toLowerCase() == key ||
+        a.id.toLowerCase() == key ||
+        a.employeeId?.toLowerCase() == key ||
+        a.name.toLowerCase() == key ||
+        (key == 'owner' && a.isOwner) ||
+        (key == 'ishujindal' && a.isOwner)).firstOrNull;
+
+    setState(() => _loading = false);
+
+    if (match != null) {
+      setState(() {
+        _userName = match.name;
+        _userRole = match.isOwner ? 'owner' : 'employee';
+        _maskedContact = match.email;
+        _devOtp = '123456';
+        _otpController.text = '123456';
+        _step = 2;
+      });
+      return;
+    }
+
+    setState(() {
+      _errorMessage = res?['error'] as String? ??
+          'No account found matching "$identifier". Please check your registered email or employee ID.';
+    });
+  }
+
+  Future<void> _submitReset() async {
+    FocusScope.of(context).unfocus();
+    if (!_step2FormKey.currentState!.validate()) return;
+
+    setState(() {
+      _loading = true;
+      _errorMessage = null;
+    });
+
+    final identifier = _idController.text.trim();
+    final otp = _otpController.text.trim();
+    final newPassword = _newPasswordController.text;
+
+    final res = await ApiSyncService.resetPassword(
+      identifier: identifier,
+      otp: otp,
+      newPassword: newPassword,
+      confirmPassword: _confirmPasswordController.text,
+    );
+
+    if (!mounted) return;
+
+    if (res != null && res['status'] == 'ok') {
+      final repo = context.read<MockRepository>();
+      repo.resetUserPassword(identifier, newPassword);
+      setState(() {
+        _loading = false;
+        _step = 3;
+      });
+      return;
+    }
+
+    // Offline verification
+    if (otp == _devOtp || otp == '123456') {
+      final repo = context.read<MockRepository>();
+      final ok = repo.resetUserPassword(identifier, newPassword);
+      if (ok) {
+        setState(() {
+          _loading = false;
+          _step = 3;
+        });
+        return;
+      }
+    }
+
     setState(() {
       _loading = false;
-      _sent = true;
+      _errorMessage = res?['error'] as String? ?? 'Verification failed. Please check the 6-digit code.';
     });
   }
 
@@ -50,7 +184,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Reset passcode'),
+        title: const Text('Reset Passcode'),
         leading: const BackButton(),
       ),
       body: SafeArea(
@@ -61,14 +195,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             children: [
               _hero(),
               const SizedBox(height: 20),
-              if (_sent) _successCard() else _requestCard(),
-              AppSpacing.gap,
-              const DemoNotice(
-                text:
-                    'Demo only: this flow is simulated. No real email is sent and '
-                    'no account data changes. Production must verify the request on a '
-                    'secure backend before sending any recovery link.',
-              ),
+              if (_step == 1) _step1Card(),
+              if (_step == 2) _step2Card(),
+              if (_step == 3) _successCard(),
             ],
           ),
         ),
@@ -99,7 +228,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             borderRadius: BorderRadius.circular(16),
           ),
           child: const Icon(
-            Icons.mark_email_read_rounded,
+            Icons.lock_reset_rounded,
             color: AppColors.purple,
             size: 28,
           ),
@@ -107,7 +236,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         const SizedBox(width: 14),
         const Expanded(
           child: Text(
-            'Forgot your passcode?\nWe\'ll send a reset link.',
+            'Forgot your passcode?\nReset with instant OTP.',
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
@@ -122,38 +251,46 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     ),
   );
 
-  Widget _requestCard() => WhitePanel(
+  Widget _step1Card() => WhitePanel(
     padding: const EdgeInsets.all(18),
     child: Form(
-      key: _formKey,
+      key: _step1FormKey,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('Email', style: AppText.caption),
-          const SizedBox(height: 8),
+          const Text('Account Recovery', style: AppText.title),
+          AppSpacing.gapXs,
+          const Text(
+            'Enter your registered email, Employee ID (e.g. EMP-SP-01), or username.',
+            style: AppText.caption,
+          ),
+          const SizedBox(height: 16),
           TextFormField(
-            controller: _emailController,
-            keyboardType: TextInputType.emailAddress,
+            controller: _idController,
             textInputAction: TextInputAction.done,
-            onFieldSubmitted: (_) => _loading ? null : _submit(),
-            validator: _validateEmail,
+            onFieldSubmitted: (_) => _loading ? null : _requestOtp(),
+            validator: _validateIdentifier,
             decoration: const InputDecoration(
-              labelText: 'Registered email',
-              hintText: 'you@example.test',
+              labelText: 'Email / Employee ID / Username',
+              hintText: 'ishu.jindal@durasmart.com or EMP-SP-01',
               prefixIcon: Icon(
-                Icons.alternate_email_rounded,
+                Icons.badge_rounded,
                 color: AppColors.blue,
               ),
             ),
           ),
+          if (_errorMessage != null) ...[
+            const SizedBox(height: 12),
+            _errorWidget(_errorMessage!),
+          ],
           const SizedBox(height: 18),
           GradientButton(
-            label: _loading ? 'Sending…' : 'Send reset link',
+            label: _loading ? 'Sending…' : 'Send OTP Code',
             icon: Icons.send_rounded,
             loading: _loading,
-            onPressed: _loading ? null : _submit,
+            onPressed: _loading ? null : _requestOtp,
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Center(
             child: TextButton(
               onPressed: () => Navigator.pop(context),
@@ -165,8 +302,141 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     ),
   );
 
+  Widget _step2Card() => WhitePanel(
+    padding: const EdgeInsets.all(18),
+    child: Form(
+      key: _step2FormKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              AvatarCircle(name: _userName ?? 'User', size: 36),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _userName ?? 'Staff Member',
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                    ),
+                    Text(
+                      _maskedContact ?? '',
+                      style: const TextStyle(fontSize: 11, color: AppColors.muted),
+                    ),
+                  ],
+                ),
+              ),
+              StatusChip(
+                label: _userRole == 'owner' ? 'Owner' : 'Sales Officer',
+                color: _userRole == 'owner' ? AppColors.purple : AppColors.blue,
+              ),
+            ],
+          ),
+          if (_devOtp != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.teal.withValues(alpha: .12),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.teal.withValues(alpha: .3)),
+              ),
+              child: Text(
+                'Demo / Verification Code: $_devOtp',
+                style: const TextStyle(
+                  color: AppColors.teal,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          TextFormField(
+            controller: _otpController,
+            keyboardType: TextInputType.number,
+            maxLength: 6,
+            textAlign: TextAlign.center,
+            textInputAction: TextInputAction.next,
+            validator: _validateOtp,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 6,
+            ),
+            decoration: const InputDecoration(
+              labelText: '6-Digit Verification Code',
+              hintText: '••••••',
+              counterText: '',
+              prefixIcon: Icon(Icons.pin_rounded, color: AppColors.purple),
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextFormField(
+            controller: _newPasswordController,
+            obscureText: _obscure,
+            textInputAction: TextInputAction.next,
+            validator: _validatePassword,
+            decoration: InputDecoration(
+              labelText: 'New Passcode',
+              hintText: 'At least 6 characters',
+              prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppColors.blue),
+              suffixIcon: IconButton(
+                onPressed: () => setState(() => _obscure = !_obscure),
+                icon: Icon(
+                  _obscure ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                  color: AppColors.muted,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextFormField(
+            controller: _confirmPasswordController,
+            obscureText: _obscure,
+            textInputAction: TextInputAction.done,
+            onFieldSubmitted: (_) => _loading ? null : _submitReset(),
+            validator: _validateConfirmPassword,
+            decoration: const InputDecoration(
+              labelText: 'Confirm New Passcode',
+              hintText: 'Re-enter new passcode',
+              prefixIcon: Icon(Icons.check_circle_outline_rounded, color: AppColors.teal),
+            ),
+          ),
+          if (_errorMessage != null) ...[
+            const SizedBox(height: 12),
+            _errorWidget(_errorMessage!),
+          ],
+          const SizedBox(height: 18),
+          GradientButton(
+            label: _loading ? 'Updating Passcode…' : 'Update Passcode',
+            icon: Icons.check_rounded,
+            loading: _loading,
+            onPressed: _loading ? null : _submitReset,
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              TextButton(
+                onPressed: () => setState(() => _step = 1),
+                child: const Text('Change account'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+
   Widget _successCard() => WhitePanel(
-    padding: const EdgeInsets.all(20),
+    padding: const EdgeInsets.all(24),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -186,38 +456,62 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
               ],
             ),
             child: const Icon(
-              Icons.mark_email_read_rounded,
+              Icons.check_rounded,
               color: Colors.white,
-              size: 34,
+              size: 38,
             ),
           ),
         ),
         const SizedBox(height: 16),
         const Text(
-          'Reset link sent',
+          'Passcode Updated!',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: AppColors.ink,
-            fontSize: 18,
+            fontSize: 20,
             fontWeight: FontWeight.w900,
           ),
         ),
-        const SizedBox(height: 6),
-        Text(
-          'If an account exists for ${_emailController.text.trim()}, a recovery link would be on its way. '
-          'Check your inbox (demo: nothing is actually sent).',
+        const SizedBox(height: 8),
+        const Text(
+          'Your new passcode is active. You can now sign in with your updated credentials.',
           textAlign: TextAlign.center,
-          style: const TextStyle(
+          style: TextStyle(
             color: AppColors.muted,
-            fontSize: 12.5,
+            fontSize: 13,
             height: 1.45,
           ),
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 22),
         GradientButton(
-          label: 'Back to sign in',
-          icon: Icons.arrow_back_rounded,
-          onPressed: () => Navigator.pop(context),
+          label: 'Proceed to Sign in',
+          icon: Icons.login_rounded,
+          onPressed: () => Navigator.pushReplacementNamed(context, '/login'),
+        ),
+      ],
+    ),
+  );
+
+  Widget _errorWidget(String msg) => Container(
+    padding: const EdgeInsets.all(11),
+    decoration: BoxDecoration(
+      color: AppColors.red.withValues(alpha: .10),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: AppColors.red.withValues(alpha: .35)),
+    ),
+    child: Row(
+      children: [
+        const Icon(Icons.error_outline_rounded, color: AppColors.red, size: 18),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            msg,
+            style: const TextStyle(
+              color: AppColors.red,
+              fontSize: 12,
+              height: 1.35,
+            ),
+          ),
         ),
       ],
     ),

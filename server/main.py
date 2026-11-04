@@ -297,6 +297,15 @@ class SignupRequest(BaseModel):
     phone: str | None = None
     inviteCode: str
 
+class ForgotPasswordRequest(BaseModel):
+    identifier: str
+
+class ResetPasswordRequest(BaseModel):
+    identifier: str
+    otp: str
+    newPassword: str
+    confirmPassword: str | None = None
+
 class UpdateProfileRequest(BaseModel):
     name: str | None = None
     phone: str | None = None
@@ -499,6 +508,69 @@ def login(req: LoginRequest):
             "employeeId": emp_id,
             "phone": phone
         }
+    }
+
+@app.post("/api/v1/auth/forgot-password")
+def forgot_password(req: ForgotPasswordRequest):
+    identifier = req.identifier.strip()
+    if not identifier:
+        raise HTTPException(status_code=400, detail="Identifier is required")
+
+    user = db.get_user_by_identifier(identifier)
+    if not user:
+        raise HTTPException(status_code=404, detail="No registered account found with that email, employee ID or username.")
+
+    otp_info = db.create_password_reset_otp(user["id"], identifier)
+
+    email = user.get("email", "")
+    phone = user.get("phone", "")
+    masked_email = f"{email[:3]}***@{email.split('@')[1]}" if "@" in email else email
+    masked_phone = f"+91 {phone[:5]}*****" if len(phone) >= 10 else phone
+    masked = f"{masked_email} / {masked_phone}" if phone else masked_email
+
+    return {
+        "status": "ok",
+        "message": "Verification code has been generated. Use the OTP to reset your password.",
+        "identifier": identifier,
+        "devOtp": otp_info["otp"],
+        "expiresAt": otp_info["expires_at"],
+        "user": {
+            "id": user["id"],
+            "name": user["name"],
+            "role": user["role"],
+            "maskedContact": masked
+        }
+    }
+
+@app.post("/api/v1/auth/reset-password")
+def reset_password(req: ResetPasswordRequest):
+    identifier = req.identifier.strip()
+    otp = req.otp.strip()
+    new_pwd = req.newPassword
+    confirm_pwd = req.confirmPassword
+
+    if not identifier or not otp or not new_pwd:
+        raise HTTPException(status_code=400, detail="Identifier, OTP code, and new password are required.")
+
+    if confirm_pwd is not None and new_pwd != confirm_pwd:
+        raise HTTPException(status_code=400, detail="Passwords do not match.")
+
+    if len(new_pwd) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters long.")
+
+    reset_rec = db.verify_password_reset_otp(identifier, otp)
+    if not reset_rec:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code.")
+
+    success = db.update_user_password(reset_rec["user_id"], new_pwd)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to update password.")
+
+    db.mark_password_reset_used(reset_rec["id"])
+
+    return {
+        "status": "ok",
+        "message": "Password updated successfully. You can now log in with your new password."
     }
 
 @app.get("/api/v1/auth/me")

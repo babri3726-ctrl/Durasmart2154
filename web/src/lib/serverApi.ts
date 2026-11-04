@@ -2994,3 +2994,39 @@ export function updateUserProfile(input: {
   });
 }
 
+export interface ForgotPasswordResult {
+  status: string;
+  message: string;
+  identifier: string;
+  devOtp?: string;
+  expiresAt?: string;
+  user?: {
+    id: string;
+    name: string;
+    role: string;
+    maskedContact: string;
+  };
+}
+
+export function requestPasswordReset(identifier: string): Promise<ForgotPasswordResult> {
+  return send<ForgotPasswordResult>('/auth/forgot-password', {
+    method: 'POST',
+    auth: false,
+    body: { identifier },
+  });
+}
+
+export function resetPassword(input: {
+  identifier: string;
+  otp: string;
+  newPassword: string;
+  confirmPassword?: string;
+}): Promise<{ status: string; message: string }> {
+  return send<{ status: string; message: string }>('/auth/reset-password', {
+    method: 'POST',
+    auth: false,
+    body: input,
+  });
+}
+
+

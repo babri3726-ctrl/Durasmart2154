@@ -5,7 +5,7 @@ import re
 import secrets
 import sqlite3
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -170,6 +170,16 @@ def init_db(seed_state: dict[str, Any] | None = None):
             active INTEGER DEFAULT 1,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS password_resets (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            identifier TEXT NOT NULL,
+            otp TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            used INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL
         );
         """)
 
@@ -1092,6 +1102,50 @@ def update_user_password(user_id: str, new_password: str) -> bool:
         """, (pwd_hash, salt, now, user_id))
         conn.commit()
         return cursor.rowcount > 0
+
+def create_password_reset_otp(user_id: str, identifier: str) -> dict[str, Any]:
+    reset_id = f"rst-{uuid.uuid4().hex[:12]}"
+    now = datetime.now()
+    expires_at = (now + timedelta(minutes=15)).isoformat()
+    otp = f"{secrets.randbelow(900000) + 100000}"
+    with get_connection() as conn:
+        conn.execute("""
+            INSERT INTO password_resets (id, user_id, identifier, otp, expires_at, used, created_at)
+            VALUES (?, ?, ?, ?, ?, 0, ?)
+        """, (reset_id, user_id, identifier.strip().lower(), otp, expires_at, now.isoformat()))
+        conn.commit()
+    return {
+        "id": reset_id,
+        "user_id": user_id,
+        "otp": otp,
+        "expires_at": expires_at
+    }
+
+def verify_password_reset_otp(identifier: str, otp: str) -> dict[str, Any] | None:
+    user = get_user_by_identifier(identifier)
+    if not user:
+        return None
+    clean_otp = otp.strip()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM password_resets
+            WHERE user_id = ? AND otp = ? AND used = 0
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, (user["id"], clean_otp))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        now = datetime.now().isoformat()
+        if now > row["expires_at"]:
+            return None
+        return dict(row)
+
+def mark_password_reset_used(reset_id: str):
+    with get_connection() as conn:
+        conn.execute("UPDATE password_resets SET used = 1 WHERE id = ?", (reset_id,))
+        conn.commit()
 
 DEFAULT_OWNER = {
     "id": "usr-owner-ishu",

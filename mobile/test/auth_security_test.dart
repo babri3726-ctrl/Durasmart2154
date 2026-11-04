@@ -6,6 +6,7 @@ import 'package:demo_operations_mobile/data/mock_repository.dart';
 import 'package:demo_operations_mobile/data/models.dart';
 import 'package:demo_operations_mobile/features/auth/login_screen.dart';
 import 'package:demo_operations_mobile/features/auth/register_screen.dart';
+import 'package:demo_operations_mobile/features/auth/forgot_password_screen.dart';
 import 'package:demo_operations_mobile/features/org/profile_screen.dart';
 
 Widget _wrap(Widget child, MockRepository repo) {
@@ -122,6 +123,42 @@ void main() {
 
       expect(find.text('Current password'), findsOneWidget);
       expect(find.text('New password'), findsOneWidget);
+    });
+
+    testWidgets('ForgotPasswordScreen: Owner and Employee OTP recovery flow', (tester) async {
+      _useWideScreen(tester, height: 3500);
+      final repo = MockRepository();
+
+      await tester.pumpWidget(_wrap(const ForgotPasswordScreen(), repo));
+      await tester.pumpAndSettle();
+
+      // 1. Initial State: Account recovery prompt
+      expect(find.text('Account Recovery'), findsOneWidget);
+
+      // 2. Submit empty -> validation error
+      await tester.tap(find.text('Send OTP Code'));
+      await tester.pumpAndSettle();
+      expect(find.text('Email or employee ID is required'), findsOneWidget);
+
+      // 3. Enter Owner identifier
+      await tester.enterText(find.byType(TextFormField).first, 'ishujindal');
+      await tester.tap(find.text('Send OTP Code'));
+      await tester.pumpAndSettle();
+
+      // Step 2 reached
+      expect(find.text('Enter Verification Code'), findsNothing); // Title is in custom widget
+      expect(find.text('Owner'), findsOneWidget);
+      expect(find.text('New Passcode'), findsOneWidget);
+
+      // 4. Enter new passcode & confirm
+      await tester.enterText(find.byType(TextFormField).at(1), 'BrandNewPass#2026');
+      await tester.enterText(find.byType(TextFormField).at(2), 'BrandNewPass#2026');
+      await tester.tap(find.text('Update Passcode'));
+      await tester.pumpAndSettle();
+
+      // Step 3 Success reached
+      expect(find.text('Passcode Updated!'), findsOneWidget);
+      expect(find.text('Proceed to Sign in'), findsOneWidget);
     });
   });
 }

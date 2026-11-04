@@ -79,7 +79,12 @@ export default function Login() {
                 <input className="input" value={idOrEmail} onChange={(e) => setIdOrEmail(e.target.value)} placeholder="name@company.com" autoComplete="username" />
               </div>
               <div>
-                <label className="label">Password</label>
+                <div className="flex items-center justify-between">
+                  <label className="label">Password</label>
+                  <Link to="/forgot-password" className="text-xs font-bold text-brand-blue hover:underline">
+                    Forgot password?
+                  </Link>
+                </div>
                 <div className="relative">
                   <input
                     className="input pr-10"

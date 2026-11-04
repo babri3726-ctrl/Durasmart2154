@@ -20,6 +20,27 @@ class MockRepository extends ChangeNotifier {
   // ── session ──────────────────────────────────────────────────────────
   AppUser? currentUser;
   bool signedIn = false;
+  final _customPasswords = <String, String>{};
+
+  bool resetUserPassword(String identifier, String newPassword) {
+    final key = identifier.trim().toLowerCase();
+    for (final u in _accounts) {
+      final matches =
+          u.email.toLowerCase() == key ||
+          u.id.toLowerCase() == key ||
+          (u.employeeId?.toLowerCase() == key) ||
+          u.name.toLowerCase() == key ||
+          (key == 'owner' && u.isOwner) ||
+          (key == 'ishujindal' && u.isOwner) ||
+          (key == 'ishu' && u.isOwner);
+      if (matches) {
+        _customPasswords[u.id] = newPassword;
+        notifyListeners();
+        return true;
+      }
+    }
+    return false;
+  }
 
   AppUser? authenticate(String idOrEmail, String password) {
     final key = idOrEmail.trim().toLowerCase();
@@ -34,7 +55,7 @@ class MockRepository extends ChangeNotifier {
           (key == 'ishu' && u.isOwner);
 
       if (matches) {
-        final expected = u.isOwner ? ownerPasscode : employeePasscode;
+        final expected = _customPasswords[u.id] ?? (u.isOwner ? ownerPasscode : employeePasscode);
         if (password == expected) {
           currentUser = u;
           signedIn = true;
