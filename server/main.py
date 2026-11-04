@@ -3271,6 +3271,105 @@ def void_payment(payment_id: str):
 
     return pay
 
+@app.delete("/api/v1/payments/{payment_id}")
+def delete_payment_endpoint(payment_id: str):
+    pay = next((p for p in STATE.get("payments", []) if p.get("id") == payment_id), None)
+    
+    if not pay:
+        with db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM payments WHERE id = ?", (payment_id,))
+            row = cur.fetchone()
+            if row:
+                pay = dict(row)
+                pay["voidedAt"] = pay.get("voided_at")
+                pay["amountPaise"] = pay.get("amount_paise", 0)
+                pay["customerId"] = pay.get("customer_id", "")
+                pay["customerName"] = pay.get("customer_name", "")
+
+    if not pay:
+        raise HTTPException(status_code=404, detail=f"Payment {payment_id} not found")
+
+    # If the payment was active (not voided), revert balances before deletion
+    if not pay.get("voidedAt"):
+        amt_paise = pay.get("amountPaise", 0)
+        cust_id = pay.get("customerId", "")
+        cust_name = pay.get("customerName", "")
+
+        revert_order_paise = amt_paise
+        for o in STATE.get("orders", []):
+            if o.get("status") in ["cancelled", "draft"]:
+                continue
+            if o.get("customerId") == cust_id or (cust_name and (o.get("customerName") or "").strip().lower() == cust_name.strip().lower()):
+                paid = int(o.get("paidPaise", 0))
+                if paid > 0:
+                    rev = min(paid, revert_order_paise)
+                    o["paidPaise"] = paid - rev
+                    o["orderBalancePaise"] = int(o.get("orderBalancePaise", 0)) + rev
+                    revert_order_paise -= rev
+                    if revert_order_paise <= 0:
+                        break
+
+        if revert_order_paise > 0:
+            for d in STATE.get("debtors", []):
+                if d.get("id") == cust_id or (cust_name and d.get("name", "").strip().lower() == cust_name.strip().lower()):
+                    old_paise = round(float(d.get("balance", 0.0)) * 100)
+                    new_paise = old_paise + revert_order_paise
+                    d["balance"] = round(new_paise / 100.0, 2)
+                    d["balance_formatted"] = f"{d['balance']:.2f}"
+                    try:
+                        db.save_party(d)
+                    except Exception as e:
+                        print(f"Warning: Failed to save debtor party: {e}")
+
+        if revert_order_paise > 0:
+            for c in STATE.get("customers", []):
+                if c.get("id") == cust_id or (cust_name and c.get("name", "").strip().lower() == cust_name.strip().lower()):
+                    c["outstandingPaise"] = c.get("outstandingPaise", 0) + revert_order_paise
+                    c["overduePaise"] = c.get("overduePaise", 0) + revert_order_paise
+                    c["isOverdue"] = c["overduePaise"] > 0
+                    try:
+                        db.save_party(c)
+                    except Exception as e:
+                        print(f"Warning: Failed to save customer party: {e}")
+
+    # Delete permanently from SQLite
+    db.delete_payment(payment_id)
+
+    # Remove from memory
+    STATE["payments"] = [p for p in STATE.get("payments", []) if p.get("id") != payment_id]
+
+    return {"success": True, "id": payment_id, "deleted": True}
+
+@app.post("/api/v1/payments/purge-tests")
+def purge_test_payments_endpoint():
+    # Revert active test payments first
+    active_tests = [
+        p for p in STATE.get("payments", [])
+        if not p.get("voidedAt") and (
+            (p.get("reference") or "").startswith("TEST-")
+            or (p.get("id") or "").startswith("TEST-")
+            or (p.get("customerName") or "").startswith("TEST")
+        )
+    ]
+    for p in active_tests:
+        try:
+            void_payment(p["id"])
+        except Exception:
+            pass
+
+    deleted_count = db.purge_test_payments()
+    STATE["payments"] = [
+        p for p in STATE.get("payments", [])
+        if not (
+            (p.get("reference") or "").startswith("TEST-")
+            or (p.get("id") or "").startswith("TEST-")
+            or (p.get("customerName") or "").startswith("TEST")
+        )
+    ]
+    return {"success": True, "purgedCount": deleted_count}
+
+
 # ----------------- 1-Click OneDrive Stock Watch & Sync -----------------
 @app.get("/api/v1/imports/excel/stock-watch")
 def get_stock_watch():

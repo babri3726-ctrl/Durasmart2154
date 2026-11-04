@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useState } from 'react';
-import { Plus, Share2, X } from 'lucide-react';
+import { Plus, Share2, Trash2, X } from 'lucide-react';
 import { Card, PageHeader, StatusBadge } from '../components/ui/Card';
 import { LiveSyncBar } from '../components/ui/LiveSync';
 import { Pager } from '../components/ui/Pager';
@@ -9,8 +9,10 @@ import { invalidate, syncKeys } from '../lib/syncStore';
 import { toast } from '../lib/toast';
 import { useLiveList } from '../lib/useLiveList';
 import {
+  deletePayment,
   listCustomers,
   listPayments,
+  purgeTestPayments,
   recordPayment,
   serverHost,
   ServerCustomer,
@@ -157,6 +159,55 @@ export default function Payment() {
     }
   };
 
+  const handleDelete = async (payment: ServerPayment) => {
+    const ok = window.confirm(
+      `Delete payment receipt for ${payment.customerName} (${exactRupees(payment.amountPaise)}) permanently?\n\n` +
+        (!payment.voidedAt
+          ? 'This payment is active. Deleting it will restore the customer balance and permanently erase this record.'
+          : 'This will permanently remove this voided voucher.'),
+    );
+    if (!ok) return;
+
+    try {
+      await deletePayment(payment.id);
+      toast.success('Payment voucher permanently deleted.');
+      sync.refresh();
+      invalidate(
+        syncKeys.payments,
+        syncKeys.debtors,
+        syncKeys.customers,
+        syncKeys.dashboard,
+        syncKeys.orderList(),
+      );
+    } catch (err: unknown) {
+      const errObj = err as { message?: string };
+      toast.error(errObj?.message || 'Failed to delete payment');
+    }
+  };
+
+  const handlePurgeTests = async () => {
+    const ok = window.confirm(
+      'Clean all test and duplicate entries?\n\nThis will purge any test vouchers (TEST-*) and restore party balances.',
+    );
+    if (!ok) return;
+
+    try {
+      const res = await purgeTestPayments();
+      toast.success(`Purged ${res.purgedCount} test/duplicate payments.`);
+      sync.refresh();
+      invalidate(
+        syncKeys.payments,
+        syncKeys.debtors,
+        syncKeys.customers,
+        syncKeys.dashboard,
+        syncKeys.orderList(),
+      );
+    } catch (err: unknown) {
+      const errObj = err as { message?: string };
+      toast.error(errObj?.message || 'Failed to purge test payments');
+    }
+  };
+
   const formatWhatsAppMessage = (p: ServerPayment) => {
     return encodeURIComponent(
       `*DURA SMART - PAYMENT RECEIPT*\n` +
@@ -226,9 +277,19 @@ export default function Payment() {
 
       <Card>
         <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-          <p className="text-[11px] text-muted">
-            Every receipt the backend holds, voided rows included. Balances elsewhere never count a voided one.
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[11px] text-muted">
+              Receipt ledger history. Voided vouchers or duplicates can be permanently deleted.
+            </p>
+            <button
+              type="button"
+              onClick={handlePurgeTests}
+              className="inline-flex items-center gap-1 rounded border border-line px-2 py-0.5 text-[11px] font-medium text-muted hover:bg-canvas hover:text-ink"
+              title="Purge any residual test/duplicate payments"
+            >
+              <Trash2 size={12} /> Clean Test Data
+            </button>
+          </div>
           <input
             className="input !w-auto !py-2"
             value={term}
@@ -286,7 +347,7 @@ export default function Payment() {
                       <span className="chip bg-canvas text-muted">source: {r.source}</span>
                     </p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-3">
+                  <div className="flex shrink-0 items-center gap-2">
                     <span
                       className={`text-[12px] font-semibold ${r.voidedAt ? 'text-faint line-through' : 'text-emerald-700 dark:text-emerald-400 font-bold'}`}
                       title={r.voidedAt ? 'Voided — excluded from every balance' : undefined}
@@ -297,12 +358,20 @@ export default function Payment() {
                       <button
                         type="button"
                         onClick={() => handleVoid(r)}
-                        className="rounded border border-red-200 px-2 py-0.5 text-[11px] font-semibold text-brand-red transition hover:bg-brand-red hover:text-white dark:border-red-900"
+                        className="rounded border border-amber-300 px-2 py-0.5 text-[11px] font-semibold text-amber-700 transition hover:bg-amber-500 hover:text-white dark:border-amber-800 dark:text-amber-400"
                         title="Void payment & restore balance"
                       >
                         Void
                       </button>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(r)}
+                      className="inline-flex items-center gap-1 rounded border border-red-200 px-2 py-0.5 text-[11px] font-semibold text-brand-red transition hover:bg-brand-red hover:text-white dark:border-red-900"
+                      title="Permanently delete payment voucher"
+                    >
+                      <Trash2 size={11} /> Delete
+                    </button>
                   </div>
                 </div>
               ))}

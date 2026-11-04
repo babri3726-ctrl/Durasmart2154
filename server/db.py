@@ -510,6 +510,25 @@ def void_payment(payment_id: str) -> dict[str, Any] | None:
         payment["voidedAt"] = now
         return payment
 
+def delete_payment(payment_id: str) -> bool:
+    """Permanently deletes a payment from SQLite."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM payments WHERE id = ?", (payment_id,))
+        deleted = cur.rowcount > 0
+        conn.commit()
+    return deleted
+
+def purge_test_payments() -> int:
+    """Purges all test payment vouchers from SQLite."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM payments WHERE reference LIKE 'TEST-%' OR id LIKE 'TEST-%' OR customer_name LIKE 'TEST%'")
+        count = cur.rowcount
+        conn.commit()
+    return count
+
+
 def save_dispatch(dispatch: dict[str, Any]) -> dict[str, Any]:
     """Persists dispatch and dispatch lines."""
     now = datetime.now().isoformat()

@@ -1353,6 +1353,18 @@ export function voidPayment(paymentId: string): Promise<ServerPayment> {
   });
 }
 
+export function deletePayment(paymentId: string): Promise<{ success: boolean; id: string; deleted: boolean }> {
+  return send<{ success: boolean; id: string; deleted: boolean }>(`/payments/${encodeURIComponent(paymentId)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function purgeTestPayments(): Promise<{ success: boolean; purgedCount: number }> {
+  return send<{ success: boolean; purgedCount: number }>('/payments/purge-tests', {
+    method: 'POST',
+  });
+}
+
 // ── products and stock ───────────────────────────────────────────────────
 
 export interface ServerProduct {

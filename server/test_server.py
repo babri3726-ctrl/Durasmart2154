@@ -9,6 +9,11 @@ class TestServerApi(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.client = TestClient(app)
+        cls.client.post("/api/v1/payments/purge-tests")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.client.post("/api/v1/payments/purge-tests")
 
     def test_00_health(self):
         r = self.client.get("/health")
@@ -74,6 +79,7 @@ class TestServerApi(unittest.TestCase):
         if not test_cust:
             test_cust = next((c for c in STATE["customers"] if c["id"] == "DEBTOR-HR-001"), None)
 
+        initial_bal = float(test_cust.get("balance", 0.0))
         test_cust["balance"] = 50000.0
         test_cust["balance_formatted"] = "50000.00"
         test_cust["outstandingPaise"] = 5000000
@@ -84,6 +90,7 @@ class TestServerApi(unittest.TestCase):
         except Exception:
             pass
 
+        payment_id = None
         try:
             # 1. Baseline summary
             r0 = self.client.get("/api/v1/dashboard/summary")
@@ -123,11 +130,16 @@ class TestServerApi(unittest.TestCase):
             self.assertEqual(s2["outstandingPaise"], base_outstanding, "outstandingPaise must revert after voiding")
             self.assertEqual(s2["overduePaise"], base_overdue, "overduePaise must revert after voiding")
         finally:
-            test_cust["balance"] = 0.0
-            test_cust["balance_formatted"] = "0.00"
-            test_cust["outstandingPaise"] = 0
-            test_cust["overduePaise"] = 0
-            test_cust["isOverdue"] = False
+            if payment_id:
+                try:
+                    self.client.delete(f"/api/v1/payments/{payment_id}")
+                except Exception:
+                    pass
+            test_cust["balance"] = initial_bal
+            test_cust["balance_formatted"] = f"{initial_bal:.2f}"
+            test_cust["outstandingPaise"] = round(initial_bal * 100)
+            test_cust["overduePaise"] = round(initial_bal * 100)
+            test_cust["isOverdue"] = initial_bal > 0
             try:
                 db.save_party(test_cust)
             except Exception:
@@ -186,24 +198,32 @@ class TestServerApi(unittest.TestCase):
         self.client.delete(f"/api/v1/orders/{target_order_id}", headers={"X-User-Role": "owner"})
 
     def test_07_full_overdue_clearance(self):
-        # Paying exact balance of a customer clears overdue flag and balance
-        pay_res = self.client.post("/api/v1/payments", json={
-            "customerId": "DEBTOR-HR-001",
-            "customerName": "KALRA TRADERS/ STEEL DERABASSI",
-            "amount": 500.0,
-            "method": "RTGS",
-            "reference": "TEST-RTGS-CLEAR"
-        })
-        self.assertEqual(pay_res.status_code, 200)
-        pay_id = pay_res.json()["id"]
+        pay_id = None
+        try:
+            # Paying exact balance of a customer clears overdue flag and balance
+            pay_res = self.client.post("/api/v1/payments", json={
+                "customerId": "DEBTOR-HR-001",
+                "customerName": "KALRA TRADERS/ STEEL DERABASSI",
+                "amount": 500.0,
+                "method": "RTGS",
+                "reference": "TEST-RTGS-CLEAR"
+            })
+            self.assertEqual(pay_res.status_code, 200)
+            pay_id = pay_res.json()["id"]
 
-        # Verify summary reflect clearance
-        r = self.client.get("/api/v1/dashboard/summary")
-        self.assertEqual(r.status_code, 200)
+            # Verify summary reflect clearance
+            r = self.client.get("/api/v1/dashboard/summary")
+            self.assertEqual(r.status_code, 200)
 
-        # Revert payment via void
-        void_res = self.client.post(f"/api/v1/payments/{pay_id}/void")
-        self.assertEqual(void_res.status_code, 200)
+            # Revert payment via void
+            void_res = self.client.post(f"/api/v1/payments/{pay_id}/void")
+            self.assertEqual(void_res.status_code, 200)
+        finally:
+            if pay_id:
+                try:
+                    self.client.delete(f"/api/v1/payments/{pay_id}")
+                except Exception:
+                    pass
 
     def test_08_new_order_creation_not_delayed(self):
         # An order created today should NOT be counted as delayed
@@ -706,17 +726,24 @@ class TestServerApi(unittest.TestCase):
             self.assertEqual(void_res.status_code, 200)
 
         finally:
+            if p_id:
+                try:
+                    self.client.delete(f"/api/v1/payments/{p_id}")
+                except Exception:
+                    pass
             if o_id:
                 self.client.delete(f"/api/v1/orders/{o_id}", headers={"X-User-Role": "owner"})
             from server.main import STATE
             import server.db as db
             cust = next((c for c in STATE.get("customers", []) if c["id"] == cust_id), None)
+            if not cust:
+                cust = next((d for d in STATE.get("debtors", []) if d["id"] == cust_id), None)
             if cust:
-                cust["balance"] = 0.0
-                cust["balance_formatted"] = "0.00"
-                cust["outstandingPaise"] = 0
-                cust["overduePaise"] = 0
-                cust["isOverdue"] = False
+                cust["balance"] = base_bal
+                cust["balance_formatted"] = f"{base_bal:.2f}"
+                cust["outstandingPaise"] = round(base_bal * 100)
+                cust["overduePaise"] = round(base_bal * 100)
+                cust["isOverdue"] = base_bal > 0
                 try:
                     db.save_party(cust)
                 except Exception:
@@ -883,6 +910,36 @@ class TestServerApi(unittest.TestCase):
         sp_clean = next((s for s in tgts_clean["salesperson_summary"] if s["salesperson"].lower() == sp_name.lower()), None)
         self.assertAlmostEqual(float(sp_clean["total_dispatched_mt"]), initial_disp, places=3)
         self.assertAlmostEqual(float(sp_clean["total_pending_mt"]), initial_pending, places=3)
+
+    def test_22_payment_permanent_deletion_and_purge(self):
+        # 1. Create a payment
+        res = self.client.post("/api/v1/payments", json={
+            "customerId": "DEBTOR-HR-001",
+            "customerName": "KALRA TRADERS/ STEEL DERABASSI",
+            "amount": 10000.0,
+            "method": "NEFT",
+            "reference": "TEST-DELETE-VERIFY"
+        })
+        self.assertEqual(res.status_code, 200)
+        pay_id = res.json()["id"]
+
+        # 2. Check it appears in payments list
+        p_list = self.client.get("/api/v1/payments").json()["items"]
+        self.assertTrue(any(p["id"] == pay_id for p in p_list))
+
+        # 3. Permanently delete payment
+        del_res = self.client.delete(f"/api/v1/payments/{pay_id}")
+        self.assertEqual(del_res.status_code, 200)
+        self.assertTrue(del_res.json()["deleted"])
+
+        # 4. Confirm it no longer exists anywhere
+        p_list2 = self.client.get("/api/v1/payments").json()["items"]
+        self.assertFalse(any(p["id"] == pay_id for p in p_list2))
+
+        # 5. Purge test endpoint
+        purge_res = self.client.post("/api/v1/payments/purge-tests")
+        self.assertEqual(purge_res.status_code, 200)
+        self.assertTrue(purge_res.json()["success"])
 
 if __name__ == '__main__':
     unittest.main()
