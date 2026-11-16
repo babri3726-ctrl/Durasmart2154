@@ -1787,9 +1787,20 @@ def sync_accounting_books_excel():
     """1-Click sync for local sales.xlsx, hdfc.xlsx, and yes.xlsx."""
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     candidates = ["sales.xlsx", "hdfc.xlsx", "yes.xlsx"]
-    found = [os.path.join(base_dir, f) for f in candidates if os.path.exists(os.path.join(base_dir, f))]
+    found = []
+    for f in candidates:
+        for p in [
+            os.path.join(base_dir, f),
+            os.path.join(base_dir, "data", f),
+            os.path.join(os.getcwd(), f),
+            os.path.join(os.getcwd(), "data", f)
+        ]:
+            if os.path.exists(p) and p not in found:
+                found.append(p)
+                break
+
     if not found:
-        raise HTTPException(status_code=404, detail="No accounting books (sales.xlsx, hdfc.xlsx, yes.xlsx) found in workspace root.")
+        raise HTTPException(status_code=404, detail=f"No accounting books found in workspace root or data folder.")
     
     from .voucher_parser import parse_accounting_workbook
     total_inserted = 0
