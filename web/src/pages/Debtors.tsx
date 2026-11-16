@@ -1114,7 +1114,7 @@ function DebtorListCard() {
           <label
             htmlFor="debtor-workbook-file-input"
             className="btn-primary !py-1.5 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-sm bg-indigo-600 hover:bg-indigo-700 text-white"
-            title="Upload and import sales.xlsx, hdfc.xlsx, or yes.xlsx from your computer"
+            title="Upload and import sales.xlsx, individual customer ledgers (e.g. S S Kalra Zira.xlsx), or HR-PB.xlsx"
           >
             <FileSearch size={13} /> 📁 Upload Excel File
           </label>
@@ -2180,7 +2180,7 @@ function DebtorWorkbookPreview() {
           </div>
           <p className="text-sm font-bold text-ink">Click to Choose or Drag & Drop Excel File</p>
           <p className="mt-1 text-xs text-muted max-w-md">
-            Upload <strong>sales.xlsx</strong> (Sales Register) or <strong>HR-PB.xlsx</strong> (Dealer Targets). <em>Bank Books (hdfc.xlsx, yes.xlsx) must be uploaded in the Payment section.</em>
+            Upload <strong>sales.xlsx</strong> (Sales Register), individual debtor ledgers (e.g. <strong>S S Kalra Zira.xlsx</strong>), or <strong>HR-PB.xlsx</strong> (Dealer Targets). <em>Bank &amp; Cash Books must be uploaded in the Payment section.</em>
           </p>
           <span className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-brand-blue px-3 py-1.5 text-xs font-bold text-white shadow-sm group-hover:bg-brand-blue/90">
             Browse Excel File

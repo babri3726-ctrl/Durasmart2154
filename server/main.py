@@ -4155,8 +4155,14 @@ async def preview_debtor_bytes(request: Request, fileName: str | None = "HR-PB.x
             book_src = acct_data["bookSource"]
 
             ALLOWED_PAYMENT_BOOKS = ("HDFC Bank Book", "Yes Bank Book", "Cash Book", "Khan Cash Book", "Cash GBD Book")
+            is_cust_ledger = book_src.startswith("Customer Ledger") or acct_data.get("isCustomerLedger", False)
 
             # Section-based validation gates
+            if section == "payments" and is_cust_ledger:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"This is a Customer Ledger statement ({book_src}). Please upload customer ledgers in the Debtor section."
+                )
             if section == "debtors" and book_src in ALLOWED_PAYMENT_BOOKS:
                 raise HTTPException(
                     status_code=400,
@@ -4359,8 +4365,14 @@ async def apply_debtor_bytes(
             book_src = acct_data["bookSource"]
 
             ALLOWED_PAYMENT_BOOKS = ("HDFC Bank Book", "Yes Bank Book", "Cash Book", "Khan Cash Book", "Cash GBD Book")
+            is_cust_ledger = book_src.startswith("Customer Ledger") or acct_data.get("isCustomerLedger", False)
 
             # Section-based validation gates
+            if section == "payments" and is_cust_ledger:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"This is a Customer Ledger statement ({book_src}). Please upload customer ledgers in the Debtor section."
+                )
             if section == "debtors" and book_src in ALLOWED_PAYMENT_BOOKS:
                 raise HTTPException(
                     status_code=400,
@@ -4379,6 +4391,28 @@ async def apply_debtor_bytes(
 
             vouchers = acct_data["vouchers"]
             batch_res = db.save_vouchers_batch(vouchers, file_sha=file_sha)
+
+            if is_cust_ledger and acct_data.get("customerName"):
+                cust_name = acct_data["customerName"]
+                ob_paise = acct_data.get("openingBalancePaise", 0)
+                tot_dr = sum(v["debitPaise"] for v in vouchers)
+                tot_cr = sum(v["creditPaise"] for v in vouchers)
+                closing_paise = max(0, ob_paise + tot_dr - tot_cr)
+                with db.get_connection() as conn:
+                    party_id, _ = db.find_or_create_party_by_name(conn, cust_name)
+                    if ob_paise != 0:
+                        conn.execute(
+                            """
+                            INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                            """,
+                            (party_id, datetime.now().strftime("%Y-%m-%d"), abs(ob_paise), "debit" if ob_paise >= 0 else "credit", "customer_ledger", datetime.now().isoformat())
+                        )
+                    conn.execute(
+                        "UPDATE parties SET balance_paise = ?, updated_at = ? WHERE id = ?",
+                        (closing_paise, datetime.now().isoformat(), party_id)
+                    )
+                    conn.commit()
 
             # Rehydrate in-memory state so UI updates instantly
             persisted = db.load_all_persisted_state()

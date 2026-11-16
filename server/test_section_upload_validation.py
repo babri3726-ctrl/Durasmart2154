@@ -167,3 +167,53 @@ def test_bank_transactions_endpoint():
     assert "summary" in data
     assert "totalReceiptsPaise" in data["summary"]
     assert "totalPaymentsPaise" in data["summary"]
+
+
+def test_customer_ledger_upload_preview_and_apply():
+    """Individual debtor customer ledger (e.g. S S Kalra Zira.xlsx) uploaded in Debtor section."""
+    kalra_path = os.path.join(os.path.dirname(__file__), "..", "data", "S S Kalra Zira.xlsx")
+    if not os.path.exists(kalra_path):
+        pytest.skip("data/S S Kalra Zira.xlsx not found")
+
+    with open(kalra_path, "rb") as f:
+        data = f.read()
+
+    # 1. Preview in Debtor Section
+    resp = client.post(
+        "/api/v1/debtors/imports/preview?fileName=S S Kalra Zira.xlsx&section=debtors",
+        content=data,
+        headers={"Content-Type": "application/octet-stream"}
+    )
+    assert resp.status_code == 200
+    res = resp.json()
+    assert res["applyAvailable"] is True
+    assert "S S Kalra Zira" in res["sheetName"]
+    # Check party name in rows is S S Kalra Zira, not Sales Dura
+    assert res["rows"][0]["partyName"] == "S S Kalra Zira"
+    assert res["rows"][0]["resolvedCustomerName"] == "S S Kalra Zira"
+
+    # 2. Rejection in Payment Section (must be uploaded in Debtor section)
+    resp_pay = client.post(
+        "/api/v1/payments/imports/preview?fileName=S S Kalra Zira.xlsx",
+        content=data,
+        headers={"Content-Type": "application/octet-stream"}
+    )
+    assert resp_pay.status_code == 400
+    assert "Debtor section" in resp_pay.json()["detail"]
+
+    # 3. Apply in Debtor Section
+    resp_apply = client.post(
+        "/api/v1/debtors/imports/apply?fileName=S S Kalra Zira.xlsx&section=debtors",
+        content=data,
+        headers={"Content-Type": "application/octet-stream"}
+    )
+    assert resp_apply.status_code == 200
+
+    # 4. Verify party balance in DB matches 267355000 paise (₹2,673,550.00)
+    from server import db
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT balance_paise FROM parties WHERE name = 'S S Kalra Zira'")
+        row = cur.fetchone()
+        assert row is not None
+        assert row["balance_paise"] == 267355000

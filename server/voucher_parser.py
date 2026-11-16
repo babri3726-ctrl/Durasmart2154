@@ -118,8 +118,25 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
 
     # Detect book title and period from top rows and filename
     fn_lower = os.path.basename(filename or filepath).lower()
-    top_text = f"{ws.cell(1, 1).value or ''} {ws.cell(2, 1).value or ''}".strip().lower()
-    if "khan" in top_text or "khan" in fn_lower:
+    top_3_rows = " ".join(str(ws.cell(r, 1).value or "") for r in range(1, 4)).strip()
+    top_text = top_3_rows.lower()
+    row2_val = str(ws.cell(2, 1).value or "").strip()
+    row3_val = str(ws.cell(3, 1).value or "").strip()
+
+    is_customer_ledger = False
+    customer_name = ""
+    opening_balance_paise = 0
+
+    if "ledger account" in top_text or "ledger" in row3_val.lower() or "ledger" in row2_val.lower():
+        is_customer_ledger = True
+        if "ledger" in row2_val.lower():
+            customer_name = clean_party_name(ws.cell(1, 1).value)
+        else:
+            customer_name = clean_party_name(row2_val)
+        if not customer_name and filename:
+            customer_name = clean_party_name(os.path.splitext(os.path.basename(filename))[0])
+        book_source = f"Customer Ledger: {customer_name}"
+    elif "khan" in top_text or "khan" in fn_lower:
         book_source = "Khan Cash Book"
     elif "gbd" in top_text or "gbd" in fn_lower:
         book_source = "Cash GBD Book"
@@ -150,22 +167,39 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
         if date_str_raw.startswith(("total", "amount", "date", "grand total")):
             continue
 
-        # Extract party name
+        # Extract particulars
         p_col = col_map["particulars"]
         raw_part = ws.cell(r, p_col).value
         prefix = ""
+        part_detail = ""
         if str(raw_part).strip().lower() in ["to", "by"]:
             prefix = str(raw_part).strip()
-            party_name = clean_party_name(ws.cell(r, p_col + 1).value)
+            part_detail = clean_party_name(ws.cell(r, p_col + 1).value)
         else:
-            party_name = clean_party_name(raw_part)
+            part_detail = clean_party_name(raw_part)
+
+        # Check for Opening Balance row
+        if "opening balance" in str(raw_part or "").lower() or "opening balance" in str(part_detail or "").lower():
+            dr_ob = float(ws.cell(r, col_map.get("debit", 5)).value or 0.0)
+            cr_ob = float(ws.cell(r, col_map.get("credit", 6)).value or 0.0)
+            opening_balance_paise = round(dr_ob * 100) if dr_ob > 0 else -round(cr_ob * 100)
+            continue
+
+        if is_customer_ledger:
+            party_name = customer_name
+            opposing_account = part_detail
+            narration = f"{prefix} {opposing_account}".strip()
+        else:
+            party_name = part_detail
+            narration = ""
 
         if not party_name or party_name.lower().startswith(("opening balance", "total", "grand total")):
             skipped_count += 1
             continue
 
         # Voucher type and number
-        vch_type = str(ws.cell(r, col_map.get("vch_type", p_col + 1)).value or "").strip()
+        vch_type_val = ws.cell(r, col_map.get("vch_type", p_col + 1)).value if "vch_type" in col_map else ""
+        vch_type = str(vch_type_val or "").strip()
         vch_no_val = ws.cell(r, col_map.get("vch_no", p_col + 2)).value if "vch_no" in col_map else ""
         if isinstance(vch_no_val, datetime):
             vch_no = vch_no_val.strftime("%d-%b-%y")
@@ -184,6 +218,9 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
         if debit_paise == 0 and credit_paise == 0:
             continue
 
+        if not vch_type:
+            vch_type = "Sales" if debit_paise > 0 else "Receipt"
+
         # Format date as YYYY-MM-DD
         vch_date = normalize_date_str(date_cell)
 
@@ -197,12 +234,13 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
             "voucherType": vch_type or ("Sales" if "Sales" in book_source else "Receipt"),
             "voucherDate": vch_date,
             "partyName": party_name,
+            "narration": narration,
             "prefix": prefix,
             "debitPaise": debit_paise,
             "creditPaise": credit_paise,
             "debitAmount": debit,
             "creditAmount": credit,
-            "bookSource": book_source,
+            "bookSource": book_source
         })
 
     total_debit_paise = sum(v["debitPaise"] for v in vouchers)
@@ -210,6 +248,9 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
 
     return {
         "bookSource": book_source,
+        "isCustomerLedger": is_customer_ledger,
+        "customerName": customer_name,
+        "openingBalancePaise": opening_balance_paise,
         "periodText": period_text,
         "headerRow": header_row_idx,
         "voucherCount": len(vouchers),
