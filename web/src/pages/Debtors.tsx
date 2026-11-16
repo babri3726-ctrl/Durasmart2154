@@ -154,6 +154,17 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
   const [openingBusy, setOpeningBusy] = useState(false);
 
   const debtorId = debtor.id || debtor.customerId;
+  const initialOpeningPaise = debtor.openingPaise !== undefined && debtor.openingPaise !== null
+    ? debtor.openingPaise
+    : (debtor.openingBalance !== undefined ? Math.round(Number(debtor.openingBalance) * 100) : 0);
+  const [currentOpeningPaise, setCurrentOpeningPaise] = useState<number>(initialOpeningPaise);
+
+  useEffect(() => {
+    const ob = debtor.openingPaise !== undefined && debtor.openingPaise !== null
+      ? debtor.openingPaise
+      : (debtor.openingBalance !== undefined ? Math.round(Number(debtor.openingBalance) * 100) : 0);
+    setCurrentOpeningPaise(ob);
+  }, [debtor]);
 
   const reloadVouchers = useCallback(() => {
     setLoading(true);
@@ -173,11 +184,23 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
 
   const totalSalesDebit = vouchers
     .filter((v) => v.voucher_type.toLowerCase() === 'sales')
-    .reduce((sum, v) => sum + v.debit_paise, 0);
+    .reduce((sum, v) => sum + (v.debit_paise || 0), 0);
 
   const totalReceipts = vouchers
     .filter((v) => v.voucher_type.toLowerCase() === 'receipt')
-    .reduce((sum, v) => sum + v.debit_paise, 0);
+    .reduce((sum, v) => sum + (v.credit_paise || v.debit_paise || 0), 0);
+
+  const totalJournalCredit = vouchers
+    .filter((v) => v.voucher_type.toLowerCase() === 'journal')
+    .reduce((sum, v) => sum + (v.credit_paise || 0), 0);
+
+  const totalJournalDebit = vouchers
+    .filter((v) => v.voucher_type.toLowerCase() === 'journal')
+    .reduce((sum, v) => sum + (v.debit_paise || 0), 0);
+
+  const currentOutstandingPaise = vouchers.length > 0
+    ? Math.max(0, currentOpeningPaise + totalSalesDebit + totalJournalDebit - totalReceipts - totalJournalCredit)
+    : (debtor.balance !== undefined ? Math.round(Number(debtor.balance) * 100) : (debtor.debitPaise || 0));
 
   // FIFO Aging Calculation
   const aging = useMemo(() => {
@@ -188,7 +211,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
 
     let remainingReceipts = vouchers
       .filter((v) => v.voucher_type.toLowerCase() === 'receipt')
-      .reduce((sum, v) => sum + v.debit_paise, 0);
+      .reduce((sum, v) => sum + (v.credit_paise || v.debit_paise || 0), 0);
 
     const buckets = {
       bucket0_30: 0,
@@ -248,9 +271,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
 
   const handleShareWhatsApp = () => {
     const partyName = debtor.name || debtor.customerName || 'Customer';
-    const currentBal = debtor.balance !== undefined
-      ? `₹${parseFloat(String(debtor.balance)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
-      : money(debtor.debitPaise || 0);
+    const currentBal = rupees(currentOutstandingPaise);
 
     const phone = (debtor.mobile || '').replace(/[^0-9]/g, '');
     const cleanPhone = phone.length === 10 ? `91${phone}` : phone;
@@ -260,9 +281,10 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
       `--------------------------------`,
       `*Party:* ${partyName}`,
       `*City:* ${debtor.city || debtor.state || 'Punjab'}`,
-      `*Current Outstanding:* ${currentBal}`,
+      `*Opening Balance:* ${rupees(currentOpeningPaise)}`,
       `*Total Billed Sales:* ${rupees(totalSalesDebit)}`,
       `*Total Bank Receipts:* ${rupees(totalReceipts)}`,
+      `*Current Outstanding:* ${currentBal}`,
       ``,
       `*Aging Breakdown:*`,
       `• 0-30 Days: ${rupees(aging.bucket0_30)}`,
@@ -354,7 +376,8 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
     if (isNaN(val) || val < 0) return;
     setOpeningBusy(true);
     try {
-      await updateOpeningBalance(debtorId, val);
+      const res = await updateOpeningBalance(debtorId, val);
+      setCurrentOpeningPaise(res.openingBalancePaise ?? Math.round(val * 100));
       setEditingOpening(false);
       reloadVouchers();
       invalidate(syncKeys.debtors, syncKeys.customers);
@@ -421,7 +444,24 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
         </div>
 
         {/* Balance Tiles */}
-        <div className="grid grid-cols-3 gap-4 border-b border-slate-200 bg-white px-6 py-4">
+        <div className="grid grid-cols-4 gap-3 border-b border-slate-200 bg-white px-6 py-4">
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Opening Balance</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpeningAmount(String(currentOpeningPaise / 100));
+                  setEditingOpening(true);
+                }}
+                className="text-[10px] text-blue-600 hover:underline no-print font-bold"
+                title="Edit Opening Balance"
+              >
+                ✏️ Edit
+              </button>
+            </div>
+            <p className="font-mono text-base font-extrabold text-slate-800">{rupees(currentOpeningPaise)}</p>
+          </div>
           <div>
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Total Billed Sales</span>
             <p className="font-mono text-base font-extrabold text-blue-700">{rupees(totalSalesDebit)}</p>
@@ -431,24 +471,9 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
             <p className="font-mono text-base font-extrabold text-emerald-700">{rupees(totalReceipts)}</p>
           </div>
           <div>
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Current Outstanding</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setOpeningAmount(String(debtor.balance || 0));
-                  setEditingOpening(true);
-                }}
-                className="text-[10px] text-blue-600 hover:underline no-print font-bold"
-                title="Edit Opening Balance"
-              >
-                ✏️ Edit Opening
-              </button>
-            </div>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Current Outstanding</span>
             <p className="font-mono text-base font-extrabold text-slate-900">
-              {debtor.balance !== undefined
-                ? `₹${parseFloat(String(debtor.balance)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
-                : money(debtor.debitPaise || 0)}
+              {rupees(currentOutstandingPaise)}
             </p>
           </div>
         </div>

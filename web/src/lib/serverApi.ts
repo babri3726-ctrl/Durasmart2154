@@ -2001,6 +2001,8 @@ export interface ServerDebtor {
   balance?: number;
   balance_formatted?: string;
   status?: string;
+  openingBalance?: number;
+  openingPaise?: number;
   asOf: string;
   debitPaise: number;
   creditPaise: number;

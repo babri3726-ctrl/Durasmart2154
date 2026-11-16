@@ -240,3 +240,77 @@ def test_voucher_crud_and_transfer_and_journal_and_merge():
         conn.execute("DELETE FROM opening_balances WHERE customer_id IN ('TEST-HR-1', 'TEST-PB-2')")
         conn.commit()
 
+
+def test_opening_balance_and_receipt_credit_recomputation():
+    """Verify that opening balance with debit direction and customer ledger receipts with credit_paise recompute party balance accurately."""
+    from fastapi.testclient import TestClient
+    from server.main import app
+    client = TestClient(app)
+
+    party_id = "TEST-RECOMP-1"
+    with db.get_connection() as conn:
+        conn.execute("DELETE FROM parties WHERE id = ?", (party_id,))
+        conn.execute("DELETE FROM opening_balances WHERE customer_id = ?", (party_id,))
+        conn.execute("DELETE FROM vouchers WHERE party_id = ?", (party_id,))
+
+        # 1. Insert party with 0 balance
+        conn.execute(
+            "INSERT INTO parties (id, name, state, city, balance_paise, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (party_id, "Test Party Recompute", "Punjab", "Ludhiana", 0, "2026-11-16T12:00:00", "2026-11-16T12:00:00")
+        )
+
+        # 2. Add opening balance: 20,000 (2000000 paise) with direction 'debit'
+        conn.execute(
+            "INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (party_id, "2026-04-01", 2000000, "debit", "customer_ledger", "2026-11-16T12:00:00")
+        )
+
+        # 3. Add Sales voucher: 50,000 (5000000 debit_paise)
+        conn.execute(
+            "INSERT INTO vouchers (id, voucher_no, voucher_type, voucher_date, party_name, party_id, debit_paise, credit_paise, book_source, file_sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("VCH-REC-S1", "INV-101", "Sales", "2026-04-05", "Test Party Recompute", party_id, 5000000, 0, "Ledger", "sha", "2026-11-16T12:00:00")
+        )
+
+        # 4. Add Customer Ledger Receipt voucher: 30,000 (3000000 credit_paise, 0 debit_paise)
+        conn.execute(
+            "INSERT INTO vouchers (id, voucher_no, voucher_type, voucher_date, party_name, party_id, debit_paise, credit_paise, book_source, file_sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("VCH-REC-R1", "REC-201", "Receipt", "2026-04-10", "Test Party Recompute", party_id, 0, 3000000, "Ledger", "sha", "2026-11-16T12:00:00")
+        )
+
+        # Recompute
+        db.recompute_party_balance(party_id, conn)
+
+        # Net balance should be: 20,000 (OB) + 50,000 (Sales) - 30,000 (Receipt) = 40,000 (4000000 paise)
+        cur = conn.cursor()
+        cur.execute("SELECT balance_paise FROM parties WHERE id = ?", (party_id,))
+        assert cur.fetchone()[0] == 4000000
+
+    # Test load_all_persisted_state correctly surfaces openingBalance and openingPaise
+    state = db.load_all_persisted_state()
+    test_d = next((d for d in state["debtors"] if d["id"] == party_id), None)
+    assert test_d is not None
+    assert test_d["openingPaise"] == 2000000
+    assert test_d["openingBalance"] == 20000.0
+    assert test_d["balance"] == 40000.0
+
+    # Rehydrate in-memory STATE for API testing
+    from server.main import STATE
+    STATE["debtors"] = state["debtors"]
+    STATE["customers"] = state["customers"]
+
+    # Test API endpoint /api/v1/debtors returns openingBalance
+    resp = client.get(f"/api/v1/debtors?q=Test Party Recompute")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["items"]) >= 1
+    api_item = next(i for i in data["items"] if i["id"] == party_id)
+    assert api_item["openingBalance"] == 20000.0
+    assert api_item["openingPaise"] == 2000000
+
+    # Clean up
+    with db.get_connection() as conn:
+        conn.execute("DELETE FROM parties WHERE id = ?", (party_id,))
+        conn.execute("DELETE FROM opening_balances WHERE customer_id = ?", (party_id,))
+        conn.execute("DELETE FROM vouchers WHERE party_id = ?", (party_id,))
+        conn.commit()
+

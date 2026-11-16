@@ -882,13 +882,13 @@ def load_all_persisted_state() -> dict[str, Any]:
 
         for cust in customers:
             c_id = cust["id"]
-            if c_id in opening_balances:
-                for ob in opening_balances[c_id]:
-                    if ob["direction"] == "owes":
-                        cust["openingPaise"] = cust.get("openingPaise", 0) + ob["amountPaise"]
-                        cust["outstandingPaise"] = cust.get("outstandingPaise", 0) + ob["amountPaise"]
-                    else:
-                        cust["advancePaise"] = cust.get("advancePaise", 0) + ob["amountPaise"]
+            if c_id in opening_balances and opening_balances[c_id]:
+                latest_ob = opening_balances[c_id][-1]
+                if latest_ob["direction"] in ("owes", "debit"):
+                    cust["openingPaise"] = latest_ob["amountPaise"]
+                else:
+                    cust["advancePaise"] = latest_ob["amountPaise"]
+                cust["openingBalance"] = round(cust.get("openingPaise", 0) / 100.0, 2)
 
         stock_movements = load_stock_movements()
 
@@ -1057,7 +1057,7 @@ def recompute_party_balance(party_id: str, conn = None):
         # Receipts (money in from customer reduces debtor balance)
         cur.execute(
             """
-            SELECT COALESCE(SUM(debit_paise), 0)
+            SELECT COALESCE(SUM(CASE WHEN credit_paise > 0 THEN credit_paise ELSE debit_paise END), 0)
             FROM vouchers
             WHERE party_id = ? AND LOWER(voucher_type) = 'receipt'
             """,

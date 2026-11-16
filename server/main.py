@@ -1568,6 +1568,8 @@ def get_debtors(
         row["asOf"] = "2026-10-23"
         row["debitPaise"] = int(float(d.get("balance", 0.0)) * 100)
         row["creditPaise"] = 0
+        row["openingPaise"] = int(d.get("openingPaise", 0))
+        row["openingBalance"] = float(d.get("openingBalance", round(int(d.get("openingPaise", 0)) / 100.0, 2)))
         row["importedAt"] = STATE.get("hrpb_snapshot", {}).get("synced_at", "2026-10-23T20:00:00+05:30")
         enriched.append(row)
 
