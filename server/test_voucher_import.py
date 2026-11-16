@@ -132,3 +132,111 @@ def test_1click_sync_accounting_books_endpoint():
     from server.main import STATE
     STATE["debtors"] = persisted["debtors"]
     STATE["customers"] = persisted["customers"]
+
+
+def test_voucher_crud_and_transfer_and_journal_and_merge():
+    from fastapi.testclient import TestClient
+    from server.main import app
+
+    client = TestClient(app)
+
+    with db.get_connection() as conn:
+        # Create Party A (Haryana) and Party B (Punjab)
+        conn.execute("INSERT OR REPLACE INTO parties (id, name, state, balance_paise, created_at, updated_at) VALUES ('TEST-HR-1', 'Alpha Steels HR', 'Haryana', 0, '2026-11-16', '2026-11-16')")
+        conn.execute("INSERT OR REPLACE INTO parties (id, name, state, balance_paise, created_at, updated_at) VALUES ('TEST-PB-2', 'Alpha Steels PB', 'Punjab', 0, '2026-11-16', '2026-11-16')")
+        # Insert initial sales voucher for Party A: ₹50,000 (5000000 paise)
+        conn.execute("INSERT INTO vouchers (id, voucher_no, voucher_type, voucher_date, party_name, party_id, debit_paise, credit_paise, book_source, file_sha256, created_at) VALUES ('VCH-TEST-1', 'INV-101', 'Sales', '2026-11-16', 'Alpha Steels HR', 'TEST-HR-1', 5000000, 0, 'Sales Book', 'test_sha', '2026-11-16')")
+        conn.commit()
+    db.recompute_party_balance("TEST-HR-1")
+
+    # 1. Verify initial balance of Party A is 50,000
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT balance_paise FROM parties WHERE id = 'TEST-HR-1'")
+        assert cur.fetchone()[0] == 5000000
+
+    # 2. Test Journal Entry: Credit note (discount) of ₹5,000
+    jv_resp = client.post("/api/v1/debtors/TEST-HR-1/journal", json={
+        "type": "CREDIT",
+        "amount": 5000.0,
+        "reference": "JV-DISCOUNT",
+        "notes": "5000 discount"
+    })
+    assert jv_resp.status_code == 200
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT balance_paise FROM parties WHERE id = 'TEST-HR-1'")
+        # Balance should now be 50,000 - 5,000 = 45,000 (4500000 paise)
+        assert cur.fetchone()[0] == 4500000
+
+    # 3. Test Voucher Edit: Update INV-101 from 50,000 to 60,000
+    edit_resp = client.put("/api/v1/vouchers/VCH-TEST-1", json={
+        "debitAmount": 60000.0,
+        "voucherNo": "INV-101-REV"
+    })
+    assert edit_resp.status_code == 200
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT balance_paise FROM parties WHERE id = 'TEST-HR-1'")
+        # Balance should now be 60,000 - 5,000 = 55,000 (5500000 paise)
+        assert cur.fetchone()[0] == 5500000
+
+    # 4. Test Voucher Transfer: Shift VCH-TEST-1 from Party A (HR) to Party B (PB)
+    xfer_resp = client.post("/api/v1/vouchers/VCH-TEST-1/transfer", json={
+        "targetPartyId": "TEST-PB-2",
+        "notes": "Booked to HR by mistake"
+    })
+    assert xfer_resp.status_code == 200
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        # Party A balance: only the credit note remains (0 net receivable)
+        cur.execute("SELECT balance_paise FROM parties WHERE id = 'TEST-HR-1'")
+        assert cur.fetchone()[0] == 0
+        # Party B balance: gets the 60,000 sales voucher
+        cur.execute("SELECT balance_paise FROM parties WHERE id = 'TEST-PB-2'")
+        assert cur.fetchone()[0] == 6000000
+
+    # 5. Test Opening Balance Update on Party A
+    ob_resp = client.put("/api/v1/debtors/TEST-HR-1/opening-balance", json={
+        "amount": 25000.0,
+        "asOf": "2026-11-01"
+    })
+    assert ob_resp.status_code == 200
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        # 25,000 opening - 5,000 credit note = 20,000
+        cur.execute("SELECT balance_paise FROM parties WHERE id = 'TEST-HR-1'")
+        assert cur.fetchone()[0] == 2000000
+
+    # 6. Test Merge Parties: Consolidate Party A into Party B
+    merge_resp = client.post("/api/v1/debtors/merge", json={
+        "sourcePartyId": "TEST-HR-1",
+        "targetPartyId": "TEST-PB-2"
+    })
+    assert merge_resp.status_code == 200
+    merge_data = merge_resp.json()
+    assert merge_data["targetPartyId"] == "TEST-PB-2"
+    assert merge_data["vouchersMoved"] == 1  # The JV credit note moved
+
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        # Party A is gone
+        cur.execute("SELECT id FROM parties WHERE id = 'TEST-HR-1'")
+        assert cur.fetchone() is None
+        # Party B has combined: 60,000 sales + 25,000 opening - 5,000 JV = 80,000 (8000000 paise)
+        cur.execute("SELECT balance_paise FROM parties WHERE id = 'TEST-PB-2'")
+        assert cur.fetchone()[0] == 8000000
+
+        # 7. Test Voucher Delete: delete the sales voucher
+        del_resp = client.delete("/api/v1/vouchers/VCH-TEST-1")
+        assert del_resp.status_code == 200
+        # Party B balance drops by 60,000 -> 20,000
+        cur.execute("SELECT balance_paise FROM parties WHERE id = 'TEST-PB-2'")
+        assert cur.fetchone()[0] == 2000000
+
+        # Clean up test records
+        conn.execute("DELETE FROM parties WHERE id = 'TEST-PB-2'")
+        conn.execute("DELETE FROM vouchers WHERE party_id IN ('TEST-HR-1', 'TEST-PB-2')")
+        conn.execute("DELETE FROM opening_balances WHERE customer_id IN ('TEST-HR-1', 'TEST-PB-2')")
+        conn.commit()
+

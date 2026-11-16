@@ -34,7 +34,22 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, FileSearch, ShieldAlert, Plus, Pencil, Trash2, RefreshCw, FileText, X, Printer, MessageCircle } from 'lucide-react';
+import {
+  CheckCircle2,
+  FileSearch,
+  ShieldAlert,
+  Plus,
+  Pencil,
+  Trash2,
+  RefreshCw,
+  FileText,
+  X,
+  Printer,
+  MessageCircle,
+  GitMerge,
+  ArrowRightLeft,
+  Edit2,
+} from 'lucide-react';
 import { Card, EmptyState, PageHeader, Spinner } from '../components/ui/Card';
 import { LiveSyncBar } from '../components/ui/LiveSync';
 import { Pager } from '../components/ui/Pager';
@@ -52,6 +67,12 @@ import {
   syncHrPbTargets,
   syncAccountingBooks,
   listVouchers,
+  updateVoucher,
+  deleteVoucher,
+  transferVoucher,
+  addJournalEntry,
+  mergeDebtors,
+  updateOpeningBalance,
   listEmployees,
   serverHost,
   ServerError,
@@ -101,23 +122,53 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
   const [loading, setLoading] = useState(true);
   const [filterType, setFilterType] = useState<'ALL' | 'SALES' | 'RECEIPT'>('ALL');
 
-  useEffect(() => {
-    let alive = true;
-    const debtorId = debtor.id || debtor.customerId;
+  // Debtor directory for transfer dropdown
+  const [debtorDirectory, setDebtorDirectory] = useState<ServerDebtor[]>([]);
+
+  // Journal Entry modal
+  const [showJvModal, setShowJvModal] = useState(false);
+  const [jvType, setJvType] = useState<'CREDIT' | 'DEBIT'>('CREDIT');
+  const [jvAmount, setJvAmount] = useState('');
+  const [jvRef, setJvRef] = useState('');
+  const [jvNotes, setJvNotes] = useState('');
+  const [jvBusy, setJvBusy] = useState(false);
+
+  // Edit voucher modal
+  const [editingVoucher, setEditingVoucher] = useState<ServerVoucher[] | ServerVoucher | null>(null);
+  const curEdit = editingVoucher && !Array.isArray(editingVoucher) ? editingVoucher : null;
+  const [editVoucherNo, setEditVoucherNo] = useState('');
+  const [editAmount, setEditAmount] = useState('');
+  const [editDate, setEditDate] = useState('');
+  const [editBusy, setEditBusy] = useState(false);
+
+  // Transfer voucher modal
+  const [transferringVoucher, setTransferringVoucher] = useState<ServerVoucher | null>(null);
+  const [targetPartyId, setTargetPartyId] = useState('');
+  const [transferNotes, setTransferNotes] = useState('');
+  const [transferBusy, setTransferBusy] = useState(false);
+
+  // Edit opening balance
+  const [editingOpening, setEditingOpening] = useState(false);
+  const [openingAmount, setOpeningAmount] = useState('');
+  const [openingBusy, setOpeningBusy] = useState(false);
+
+  const debtorId = debtor.id || debtor.customerId;
+
+  const reloadVouchers = useCallback(() => {
+    setLoading(true);
     listVouchers(debtorId)
       .then((items) => {
-        if (alive) {
-          setVouchers(items);
-          setLoading(false);
-        }
+        setVouchers(items);
+        setLoading(false);
       })
       .catch(() => {
-        if (alive) setLoading(false);
+        setLoading(false);
       });
-    return () => {
-      alive = false;
-    };
-  }, [debtor]);
+  }, [debtorId]);
+
+  useEffect(() => {
+    reloadVouchers();
+  }, [reloadVouchers]);
 
   const totalSalesDebit = vouchers
     .filter((v) => v.voucher_type.toLowerCase() === 'sales')
@@ -235,6 +286,93 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
     window.print();
   };
 
+  const handleAddJv = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const val = parseFloat(jvAmount);
+    if (isNaN(val) || val <= 0) return;
+    setJvBusy(true);
+    try {
+      await addJournalEntry(debtorId, {
+        type: jvType,
+        amount: val,
+        reference: jvRef,
+        notes: jvNotes,
+      });
+      setShowJvModal(false);
+      setJvAmount('');
+      setJvRef('');
+      setJvNotes('');
+      reloadVouchers();
+      invalidate(syncKeys.debtors, syncKeys.customers);
+    } finally {
+      setJvBusy(false);
+    }
+  };
+
+  const handleSaveVoucherEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!curEdit) return;
+    const val = parseFloat(editAmount);
+    if (isNaN(val) || val < 0) return;
+    setEditBusy(true);
+    try {
+      const isSales = curEdit.voucher_type.toLowerCase() === 'sales';
+      await updateVoucher(curEdit.id, {
+        voucherNo: editVoucherNo,
+        voucherDate: editDate,
+        debitAmount: isSales ? val : 0,
+        creditAmount: !isSales ? val : 0,
+      });
+      setEditingVoucher(null);
+      reloadVouchers();
+      invalidate(syncKeys.debtors, syncKeys.customers);
+    } finally {
+      setEditBusy(false);
+    }
+  };
+
+  const handleTransferVoucher = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!transferringVoucher || !targetPartyId) return;
+    setTransferBusy(true);
+    try {
+      await transferVoucher(transferringVoucher.id, targetPartyId, transferNotes);
+      setTransferringVoucher(null);
+      setTargetPartyId('');
+      setTransferNotes('');
+      reloadVouchers();
+      invalidate(syncKeys.debtors, syncKeys.customers);
+    } finally {
+      setTransferBusy(false);
+    }
+  };
+
+  const handleUpdateOpening = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const val = parseFloat(openingAmount);
+    if (isNaN(val) || val < 0) return;
+    setOpeningBusy(true);
+    try {
+      await updateOpeningBalance(debtorId, val);
+      setEditingOpening(false);
+      reloadVouchers();
+      invalidate(syncKeys.debtors, syncKeys.customers);
+    } finally {
+      setOpeningBusy(false);
+    }
+  };
+
+  const handleDeleteVoucher = async (v: ServerVoucher) => {
+    if (!window.confirm(`Permanently delete ${v.voucher_type} voucher ${v.voucher_no || v.id} (${rupees(v.debit_paise || v.credit_paise)})?`)) return;
+    try {
+      await deleteVoucher(v.id);
+      reloadVouchers();
+      invalidate(syncKeys.debtors, syncKeys.customers);
+    } catch (err) {
+      alert('Failed to delete voucher');
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4 backdrop-blur-sm">
       <style>{`
@@ -256,7 +394,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
           .no-print { display: none !important; }
         }
       `}</style>
-      <div id="printable-debtor-ledger" className="flex max-h-[85vh] w-full max-w-4xl flex-col rounded-xl border border-line bg-surface shadow-2xl">
+      <div id="printable-debtor-ledger" className="flex max-h-[88vh] w-full max-w-5xl flex-col rounded-xl border border-line bg-surface shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <div>
@@ -266,9 +404,19 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
               {debtor.mobile ? ` · Mobile: ${debtor.mobile}` : ''}
             </p>
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-muted hover:bg-line hover:text-ink no-print">
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-2 no-print">
+            <button
+              type="button"
+              onClick={() => setShowJvModal(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 transition"
+              title="Add Journal Entry (Credit Note / Debit Note / Discount)"
+            >
+              <Plus size={14} /> Add JV / Note
+            </button>
+            <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-muted hover:bg-line hover:text-ink">
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Balance Tiles */}
@@ -282,7 +430,20 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
             <p className="font-mono text-sm font-bold text-brand-green">{rupees(totalReceipts)}</p>
           </div>
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Current Outstanding</span>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Current Outstanding</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpeningAmount(String(debtor.balance || 0));
+                  setEditingOpening(true);
+                }}
+                className="text-[10px] text-brand-blue hover:underline no-print font-medium"
+                title="Edit Opening Balance"
+              >
+                ✏️ Edit Opening
+              </button>
+            </div>
             <p className="font-mono text-sm font-bold text-ink">
               {debtor.balance !== undefined
                 ? `₹${parseFloat(String(debtor.balance)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
@@ -365,12 +526,14 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
                   <th className="pb-2">Source</th>
                   <th className="pb-2 text-right">Debit (+)</th>
                   <th className="pb-2 text-right">Credit (-)</th>
+                  <th className="pb-2 text-center no-print">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line/40 font-mono">
                 {filteredVouchers.map((v) => {
                   const isSales = v.voucher_type.toLowerCase() === 'sales';
                   const isReceipt = v.voucher_type.toLowerCase() === 'receipt';
+                  const isJv = v.voucher_type.toLowerCase() === 'journal';
                   return (
                     <tr key={v.id} className="hover:bg-canvas/40">
                       <td className="py-2 text-muted">{v.voucher_date}</td>
@@ -381,6 +544,8 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
                               ? 'bg-brand-blue/10 text-brand-blue'
                               : isReceipt
                               ? 'bg-brand-green/10 text-brand-green'
+                              : isJv
+                              ? 'bg-indigo-500/10 text-indigo-600'
                               : 'bg-canvas text-muted'
                           }`}
                         >
@@ -394,6 +559,44 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
                       </td>
                       <td className="py-2 text-right text-muted">
                         {v.credit_paise > 0 ? rupees(v.credit_paise) : '—'}
+                      </td>
+                      <td className="py-2 text-center no-print whitespace-nowrap">
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingVoucher(v);
+                              setEditVoucherNo(v.voucher_no || '');
+                              setEditAmount(String((v.debit_paise || v.credit_paise) / 100));
+                              setEditDate(v.voucher_date || '');
+                            }}
+                            className="rounded p-1 text-muted hover:bg-line hover:text-ink"
+                            title="Edit voucher amount or number"
+                          >
+                            <Edit2 size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTransferringVoucher(v);
+                              if (debtorDirectory.length === 0) {
+                                listDebtors({ pageSize: 500 }).then((res) => setDebtorDirectory(res.items));
+                              }
+                            }}
+                            className="rounded p-1 text-muted hover:bg-line hover:text-brand-blue"
+                            title="Transfer / Shift this entry to another party ledger"
+                          >
+                            <ArrowRightLeft size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteVoucher(v)}
+                            className="rounded p-1 text-muted hover:bg-rose-50 hover:text-rose-600"
+                            title="Delete voucher"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -430,6 +633,231 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
           </button>
         </div>
       </div>
+
+      {/* Journal Entry Modal */}
+      {showJvModal && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-ink/50 p-4">
+          <div className="w-full max-w-md rounded-xl border border-line bg-surface p-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-line pb-3 mb-4">
+              <h4 className="text-sm font-bold text-ink">Add Journal Entry (JV)</h4>
+              <button type="button" onClick={() => setShowJvModal(false)} className="text-muted hover:text-ink">
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleAddJv} className="space-y-3 text-xs">
+              <div>
+                <label className="block text-muted mb-1 font-semibold">Entry Type</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setJvType('CREDIT')}
+                    className={`rounded p-2 text-center font-bold border transition ${
+                      jvType === 'CREDIT' ? 'border-brand-green bg-brand-green/10 text-brand-green' : 'border-line text-muted'
+                    }`}
+                  >
+                    Credit Note / Discount (-)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setJvType('DEBIT')}
+                    className={`rounded p-2 text-center font-bold border transition ${
+                      jvType === 'DEBIT' ? 'border-brand-blue bg-brand-blue/10 text-brand-blue' : 'border-line text-muted'
+                    }`}
+                  >
+                    Debit Note / Charge (+)
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="block text-muted mb-1 font-semibold">Amount (₹)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="e.g. 5000"
+                  value={jvAmount}
+                  onChange={(e) => setJvAmount(e.target.value)}
+                  className="input w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-muted mb-1 font-semibold">Reference / Voucher No</label>
+                <input
+                  type="text"
+                  placeholder="e.g. JV-101 / Cash Discount"
+                  value={jvRef}
+                  onChange={(e) => setJvRef(e.target.value)}
+                  className="input w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-muted mb-1 font-semibold">Particulars / Notes</label>
+                <input
+                  type="text"
+                  placeholder="Reason for adjustment..."
+                  value={jvNotes}
+                  onChange={(e) => setJvNotes(e.target.value)}
+                  className="input w-full"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-line">
+                <button type="button" onClick={() => setShowJvModal(false)} className="btn-secondary !py-1 text-xs">
+                  Cancel
+                </button>
+                <button type="submit" disabled={jvBusy} className="btn-primary !py-1 text-xs font-bold">
+                  {jvBusy ? 'Saving...' : 'Post Journal Entry'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Voucher Modal */}
+      {curEdit && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-ink/50 p-4">
+          <div className="w-full max-w-md rounded-xl border border-line bg-surface p-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-line pb-3 mb-4">
+              <h4 className="text-sm font-bold text-ink">Edit {curEdit.voucher_type} Voucher</h4>
+              <button type="button" onClick={() => setEditingVoucher(null)} className="text-muted hover:text-ink">
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleSaveVoucherEdit} className="space-y-3 text-xs">
+              <div>
+                <label className="block text-muted mb-1 font-semibold">Voucher / Bill No</label>
+                <input
+                  type="text"
+                  value={editVoucherNo}
+                  onChange={(e) => setEditVoucherNo(e.target.value)}
+                  className="input w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-muted mb-1 font-semibold">Date</label>
+                <input
+                  type="date"
+                  value={editDate}
+                  onChange={(e) => setEditDate(e.target.value)}
+                  className="input w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-muted mb-1 font-semibold">Amount (₹)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  value={editAmount}
+                  onChange={(e) => setEditAmount(e.target.value)}
+                  className="input w-full font-mono font-bold"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-line">
+                <button type="button" onClick={() => setEditingVoucher(null)} className="btn-secondary !py-1 text-xs">
+                  Cancel
+                </button>
+                <button type="submit" disabled={editBusy} className="btn-primary !py-1 text-xs font-bold">
+                  {editBusy ? 'Updating...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Transfer Voucher Modal */}
+      {transferringVoucher && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-ink/50 p-4">
+          <div className="w-full max-w-md rounded-xl border border-line bg-surface p-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-line pb-3 mb-4">
+              <h4 className="text-sm font-bold text-ink">Shift Entry to Another Ledger</h4>
+              <button type="button" onClick={() => setTransferringVoucher(null)} className="text-muted hover:text-ink">
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleTransferVoucher} className="space-y-3 text-xs">
+              <p className="text-muted">
+                Shift <span className="font-bold text-ink">{transferringVoucher.voucher_type} #{transferringVoucher.voucher_no || transferringVoucher.id}</span> ({rupees(transferringVoucher.debit_paise || transferringVoucher.credit_paise)}) from {debtor.name} to another customer ledger.
+              </p>
+              <div>
+                <label className="block text-muted mb-1 font-semibold">Select Destination Customer</label>
+                <select
+                  required
+                  value={targetPartyId}
+                  onChange={(e) => setTargetPartyId(e.target.value)}
+                  className="input w-full"
+                >
+                  <option value="">-- Choose Party --</option>
+                  {debtorDirectory
+                    .filter((d) => (d.id || d.customerId) !== debtorId)
+                    .map((d) => (
+                      <option key={d.id || d.customerId} value={d.id || d.customerId}>
+                        {d.name || d.customerName} ({d.city || d.state || 'Punjab'})
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-muted mb-1 font-semibold">Transfer Reason / Note</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Invoiced to wrong account by mistake"
+                  value={transferNotes}
+                  onChange={(e) => setTransferNotes(e.target.value)}
+                  className="input w-full"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-line">
+                <button type="button" onClick={() => setTransferringVoucher(null)} className="btn-secondary !py-1 text-xs">
+                  Cancel
+                </button>
+                <button type="submit" disabled={transferBusy} className="btn-primary !py-1 text-xs font-bold">
+                  {transferBusy ? 'Shifting...' : 'Confirm Transfer'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Opening Balance Modal */}
+      {editingOpening && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-ink/50 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-line bg-surface p-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-line pb-3 mb-4">
+              <h4 className="text-sm font-bold text-ink">Edit Opening Balance</h4>
+              <button type="button" onClick={() => setEditingOpening(false)} className="text-muted hover:text-ink">
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleUpdateOpening} className="space-y-3 text-xs">
+              <p className="text-muted">
+                Set opening balance for <span className="font-bold text-ink">{debtor.name}</span>. Net outstanding will be recalculated immediately.
+              </p>
+              <div>
+                <label className="block text-muted mb-1 font-semibold">Opening Amount (₹)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  value={openingAmount}
+                  onChange={(e) => setOpeningAmount(e.target.value)}
+                  className="input w-full font-mono font-bold"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2 border-t border-line">
+                <button type="button" onClick={() => setEditingOpening(false)} className="btn-secondary !py-1 text-xs">
+                  Cancel
+                </button>
+                <button type="submit" disabled={openingBusy} className="btn-primary !py-1 text-xs font-bold">
+                  {openingBusy ? 'Saving...' : 'Update Opening'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -467,6 +895,13 @@ function DebtorListCard() {
   // Delete Debtor State
   const [deletingDebtor, setDeletingDebtor] = useState<ServerDebtor | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+
+  // Merge Debtors State
+  const [showMergeModal, setShowMergeModal] = useState(false);
+  const [mergeSourceId, setMergeSourceId] = useState('');
+  const [mergeTargetId, setMergeTargetId] = useState('');
+  const [merging, setMerging] = useState(false);
+  const [allDebtorsDirectory, setAllDebtorsDirectory] = useState<ServerDebtor[]>([]);
 
   useEffect(() => {
     let alive = true;
@@ -621,6 +1056,33 @@ function DebtorListCard() {
     }
   };
 
+  const handleConfirmMerge = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mergeSourceId || !mergeTargetId) {
+      alert('Please select both a source account to merge and a target account to keep.');
+      return;
+    }
+    if (mergeSourceId === mergeTargetId) {
+      alert('Source and target cannot be the same account.');
+      return;
+    }
+    setMerging(true);
+    try {
+      const res = await mergeDebtors(mergeSourceId, mergeTargetId);
+      alert(`Merged successfully! Moved ${res.vouchersMoved} vouchers and consolidated balances under ${res.targetPartyName}.`);
+      setShowMergeModal(false);
+      setMergeSourceId('');
+      setMergeTargetId('');
+      invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
+      sync.refresh();
+    } catch (err: unknown) {
+      const errObj = err as { message?: string };
+      alert(`Merge failed: ${errObj?.message || 'Error merging parties'}`);
+    } finally {
+      setMerging(false);
+    }
+  };
+
   return (
     <Card>
       {/* 1-Click Sync Banner */}
@@ -656,6 +1118,19 @@ function DebtorListCard() {
           >
             <RefreshCw size={13} className={syncingHrPb ? 'animate-spin' : ''} />
             {syncingHrPb ? 'Syncing...' : '1-Click Sync HR-PB'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setShowMergeModal(true);
+              if (allDebtorsDirectory.length === 0) {
+                listDebtors({ pageSize: 500 }).then((res) => setAllDebtorsDirectory(res.items));
+              }
+            }}
+            className="btn-secondary !py-1.5 text-xs font-bold inline-flex items-center gap-1.5"
+            title="Consolidate duplicate accounts (e.g. combine Haryana and Punjab duplicates)"
+          >
+            <GitMerge size={13} className="text-amber-600" /> Merge Accounts
           </button>
           <button
             type="button"
@@ -969,6 +1444,84 @@ function DebtorListCard() {
                 {deleteBusy ? 'Deleting...' : 'Delete'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Merge Duplicate Accounts Modal */}
+      {showMergeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-2xl border border-line">
+            <div className="flex items-center justify-between border-b border-line pb-3 mb-4">
+              <div className="flex items-center gap-2">
+                <GitMerge size={18} className="text-amber-600" />
+                <h3 className="text-sm font-bold text-ink">Merge Duplicate Customer Accounts</h3>
+              </div>
+              <button type="button" onClick={() => setShowMergeModal(false)} className="text-muted hover:text-ink">
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleConfirmMerge} className="space-y-4 text-xs">
+              <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 p-3 text-amber-900 dark:text-amber-300">
+                <p className="font-semibold mb-1">Account Consolidation Warning</p>
+                <p className="text-[11px] leading-relaxed">
+                  All sales bills, bank receipts, orders, and ledger vouchers from the <strong>Source Account</strong> will be transferred into the <strong>Target Account</strong>. The source duplicate account will then be permanently merged.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-muted mb-1 font-semibold">1. Select Duplicate Account to Merge (Source - will be removed)</label>
+                <select
+                  required
+                  value={mergeSourceId}
+                  onChange={(e) => setMergeSourceId(e.target.value)}
+                  className="input w-full"
+                >
+                  <option value="">-- Choose Account to Merge --</option>
+                  {allDebtorsDirectory.map((d) => (
+                    <option key={d.id || d.customerId} value={d.id || d.customerId}>
+                      {d.name || d.customerName} ({d.city || d.state || 'Punjab'}) · Outstanding: ₹{d.balance || 0}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-muted mb-1 font-semibold">2. Select Primary Account to Keep (Target - receives all entries)</label>
+                <select
+                  required
+                  value={mergeTargetId}
+                  onChange={(e) => setMergeTargetId(e.target.value)}
+                  className="input w-full"
+                >
+                  <option value="">-- Choose Primary Target Account --</option>
+                  {allDebtorsDirectory
+                    .filter((d) => (d.id || d.customerId) !== mergeSourceId)
+                    .map((d) => (
+                      <option key={d.id || d.customerId} value={d.id || d.customerId}>
+                        {d.name || d.customerName} ({d.city || d.state || 'Punjab'}) · Outstanding: ₹{d.balance || 0}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-line">
+                <button
+                  type="button"
+                  onClick={() => setShowMergeModal(false)}
+                  className="btn-secondary text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={merging}
+                  className="rounded-field bg-amber-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-amber-700 shadow-sm"
+                >
+                  {merging ? 'Consolidating Accounts...' : 'Confirm & Merge'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

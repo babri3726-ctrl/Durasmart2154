@@ -1697,9 +1697,128 @@ def delete_debtor(debtor_id: str):
         print(f"Warning: Failed to delete party from DB: {e}")
     return {"deleted": True, "id": debtor_id, "name": deleted["name"]}
 
+class VoucherUpdateRequest(BaseModel):
+    voucherNo: str | None = None
+    voucherType: str | None = None
+    voucherDate: str | None = None
+    debitAmount: float | None = None
+    creditAmount: float | None = None
+    bookSource: str | None = None
+
+class VoucherTransferRequest(BaseModel):
+    targetPartyId: str
+    notes: str | None = ""
+
+class JournalEntryRequest(BaseModel):
+    type: str  # DEBIT or CREDIT
+    amount: float
+    voucherDate: str | None = None
+    reference: str | None = ""
+    notes: str | None = ""
+
+class MergePartiesRequest(BaseModel):
+    sourcePartyId: str
+    targetPartyId: str
+
+class OpeningBalanceUpdateRequest(BaseModel):
+    amount: float
+    asOf: str | None = None
+
 @app.get("/api/v1/vouchers")
 def get_vouchers(partyId: str | None = None, limit: int = 200):
     return db.load_vouchers(party_id=partyId, limit=limit)
+
+@app.put("/api/v1/vouchers/{voucher_id}")
+def update_voucher_endpoint(voucher_id: str, body: VoucherUpdateRequest):
+    updates = {}
+    if body.voucherNo is not None:
+        updates["voucher_no"] = body.voucherNo.strip()
+    if body.voucherType is not None:
+        updates["voucher_type"] = body.voucherType.strip()
+    if body.voucherDate is not None:
+        updates["voucher_date"] = body.voucherDate.strip()
+    if body.debitAmount is not None:
+        updates["debit_paise"] = round(body.debitAmount * 100)
+    if body.creditAmount is not None:
+        updates["credit_paise"] = round(body.creditAmount * 100)
+    if body.bookSource is not None:
+        updates["book_source"] = body.bookSource.strip()
+
+    res = db.update_voucher(voucher_id, updates)
+    if not res:
+        raise HTTPException(status_code=404, detail="Voucher not found")
+    
+    persisted = db.load_all_persisted_state()
+    for k in ["debtors", "customers"]:
+        if k in persisted:
+            STATE[k] = persisted[k]
+    return res
+
+@app.delete("/api/v1/vouchers/{voucher_id}")
+def delete_voucher_endpoint(voucher_id: str):
+    ok = db.delete_voucher(voucher_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Voucher not found")
+    persisted = db.load_all_persisted_state()
+    for k in ["debtors", "customers"]:
+        if k in persisted:
+            STATE[k] = persisted[k]
+    return {"status": "success", "deletedId": voucher_id}
+
+@app.post("/api/v1/vouchers/{voucher_id}/transfer")
+def transfer_voucher_endpoint(voucher_id: str, body: VoucherTransferRequest):
+    res = db.transfer_voucher(voucher_id, body.targetPartyId.strip(), notes=body.notes or "")
+    if not res:
+        raise HTTPException(status_code=400, detail="Voucher or target party not found")
+    persisted = db.load_all_persisted_state()
+    for k in ["debtors", "customers"]:
+        if k in persisted:
+            STATE[k] = persisted[k]
+    return res
+
+@app.post("/api/v1/debtors/{debtor_id}/journal")
+def add_journal_entry_endpoint(debtor_id: str, body: JournalEntryRequest):
+    if body.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than 0")
+    paise = round(body.amount * 100)
+    res = db.add_journal_entry(
+        party_id=debtor_id,
+        entry_type=body.type,
+        amount_paise=paise,
+        voucher_date=body.voucherDate or "",
+        reference=body.reference or "",
+        notes=body.notes or ""
+    )
+    if not res:
+        raise HTTPException(status_code=404, detail="Debtor not found")
+    persisted = db.load_all_persisted_state()
+    for k in ["debtors", "customers"]:
+        if k in persisted:
+            STATE[k] = persisted[k]
+    return res
+
+@app.post("/api/v1/debtors/merge")
+def merge_parties_endpoint(body: MergePartiesRequest):
+    res = db.merge_parties(body.sourcePartyId.strip(), body.targetPartyId.strip())
+    if not res:
+        raise HTTPException(status_code=400, detail="Could not merge parties (check that both IDs exist and are not identical)")
+    persisted = db.load_all_persisted_state()
+    for k in ["debtors", "customers"]:
+        if k in persisted:
+            STATE[k] = persisted[k]
+    return res
+
+@app.put("/api/v1/debtors/{debtor_id}/opening-balance")
+def update_opening_balance_endpoint(debtor_id: str, body: OpeningBalanceUpdateRequest):
+    paise = round(body.amount * 100)
+    res = db.update_party_opening_balance(debtor_id, paise, as_of=body.asOf or "")
+    if not res:
+        raise HTTPException(status_code=404, detail="Debtor not found")
+    persisted = db.load_all_persisted_state()
+    for k in ["debtors", "customers"]:
+        if k in persisted:
+            STATE[k] = persisted[k]
+    return res
 
 # ----------------- 1-Click HR-PB Sales Targets & Dealers Sync -----------------
 @app.post("/api/v1/imports/excel/hr-pb/sync")

@@ -1076,7 +1076,18 @@ def recompute_party_balance(party_id: str, conn = None):
         )
         direct_payment_paise = cur.fetchone()[0]
 
-        new_balance_paise = max(0, ob_paise + sales_paise - receipt_paise - direct_payment_paise)
+        # Journal vouchers (debit notes increase balance, credit notes deduct)
+        cur.execute(
+            """
+            SELECT COALESCE(SUM(debit_paise - credit_paise), 0)
+            FROM vouchers
+            WHERE party_id = ? AND LOWER(voucher_type) = 'journal'
+            """,
+            (party_id,)
+        )
+        journal_paise = cur.fetchone()[0]
+
+        new_balance_paise = max(0, ob_paise + sales_paise + journal_paise - receipt_paise - direct_payment_paise)
         c.execute(
             "UPDATE parties SET balance_paise = ?, updated_at = ? WHERE id = ?",
             (new_balance_paise, datetime.now().isoformat(), party_id)
@@ -1153,6 +1164,235 @@ def load_vouchers(party_id: str | None = None, limit: int = 200) -> list[dict[st
         else:
             cur.execute("SELECT * FROM vouchers ORDER BY voucher_date DESC, id DESC LIMIT ?", (limit,))
         return [dict(r) for r in cur.fetchall()]
+
+def update_voucher(voucher_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    """Updates voucher fields (voucher_no, voucher_date, debit_paise, credit_paise, notes) and recomputes balance."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM vouchers WHERE id = ?", (voucher_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        party_id = row["party_id"]
+
+        fields = []
+        params = []
+        for col in ["voucher_no", "voucher_type", "voucher_date", "debit_paise", "credit_paise", "book_source"]:
+            if col in updates:
+                fields.append(f"{col} = ?")
+                params.append(updates[col])
+
+        if fields:
+            params.append(voucher_id)
+            cur.execute(f"UPDATE vouchers SET {', '.join(fields)} WHERE id = ?", tuple(params))
+            recompute_party_balance(party_id, conn)
+            conn.commit()
+
+        cur.execute("SELECT * FROM vouchers WHERE id = ?", (voucher_id,))
+        updated = cur.fetchone()
+        return dict(updated) if updated else None
+
+def delete_voucher(voucher_id: str) -> bool:
+    """Deletes a voucher and recomputes party balance."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT party_id FROM vouchers WHERE id = ?", (voucher_id,))
+        row = cur.fetchone()
+        if not row:
+            return False
+        party_id = row["party_id"]
+        cur.execute("DELETE FROM vouchers WHERE id = ?", (voucher_id,))
+        recompute_party_balance(party_id, conn)
+        conn.commit()
+        return True
+
+def transfer_voucher(voucher_id: str, target_party_id: str, notes: str = "") -> dict[str, Any] | None:
+    """Transfers a voucher to target_party_id and recomputes balances for both parties."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM vouchers WHERE id = ?", (voucher_id,))
+        v_row = cur.fetchone()
+        if not v_row:
+            return None
+        old_party_id = v_row["party_id"]
+
+        cur.execute("SELECT id, name FROM parties WHERE id = ?", (target_party_id,))
+        target_row = cur.fetchone()
+        if not target_row:
+            return None
+        target_name = target_row["name"]
+
+        new_source = f"{v_row['book_source'] or ''} (xfer)".strip()
+        cur.execute(
+            "UPDATE vouchers SET party_id = ?, party_name = ?, book_source = ? WHERE id = ?",
+            (target_party_id, target_name, new_source, voucher_id),
+        )
+        recompute_party_balance(old_party_id, conn)
+        recompute_party_balance(target_party_id, conn)
+        conn.commit()
+
+        cur.execute("SELECT * FROM vouchers WHERE id = ?", (voucher_id,))
+        updated = cur.fetchone()
+        return {
+            "voucher": dict(updated) if updated else {},
+            "oldPartyId": old_party_id,
+            "targetPartyId": target_party_id,
+            "targetPartyName": target_name,
+        }
+
+def add_journal_entry(party_id: str, entry_type: str, amount_paise: int, voucher_date: str, reference: str = "", notes: str = "") -> dict[str, Any] | None:
+    """Creates a debit or credit Journal Entry (JV) for a debtor and recomputes balance."""
+    now = datetime.now().isoformat()
+    jv_id = f"JV-{int(datetime.now().timestamp()*1000)}"
+    is_debit = entry_type.upper() == "DEBIT"
+    debit_paise = amount_paise if is_debit else 0
+    credit_paise = 0 if is_debit else amount_paise
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name FROM parties WHERE id = ?", (party_id,))
+        p_row = cur.fetchone()
+        if not p_row:
+            return None
+        party_name = p_row["name"]
+
+        cur.execute(
+            """
+            INSERT INTO vouchers 
+            (id, voucher_no, voucher_type, voucher_date, party_name, party_id, debit_paise, credit_paise, book_source, file_sha256, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                jv_id,
+                reference or f"JV-{jv_id[-4:]}",
+                "Journal",
+                voucher_date or now[:10],
+                party_name,
+                party_id,
+                debit_paise,
+                credit_paise,
+                f"Manual JV: {notes}".strip() if notes else "Manual Journal Entry",
+                "manual_jv",
+                now,
+            ),
+        )
+        recompute_party_balance(party_id, conn)
+        conn.commit()
+
+        cur.execute("SELECT * FROM vouchers WHERE id = ?", (jv_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+def merge_parties(source_party_id: str, target_party_id: str) -> dict[str, Any] | None:
+    """Consolidates source party into target party. Moves all vouchers, orders, payments, dispatches."""
+    if source_party_id == target_party_id:
+        return None
+
+    now = datetime.now().isoformat()
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name FROM parties WHERE id = ?", (source_party_id,))
+        source_row = cur.fetchone()
+        cur.execute("SELECT id, name FROM parties WHERE id = ?", (target_party_id,))
+        target_row = cur.fetchone()
+
+        if not source_row or not target_row:
+            return None
+
+        source_name = source_row["name"]
+        target_name = target_row["name"]
+
+        # 1. Reassign vouchers
+        cur.execute(
+            "UPDATE vouchers SET party_id = ?, party_name = ? WHERE party_id = ?",
+            (target_party_id, target_name, source_party_id),
+        )
+        vouchers_moved = cur.rowcount
+
+        # 2. Reassign orders
+        cur.execute(
+            "UPDATE orders SET customer_id = ?, customer_name = ? WHERE customer_id = ?",
+            (target_party_id, target_name, source_party_id),
+        )
+        orders_moved = cur.rowcount
+
+        # 3. Reassign payments
+        cur.execute(
+            "UPDATE payments SET customer_id = ?, customer_name = ? WHERE customer_id = ?",
+            (target_party_id, target_name, source_party_id),
+        )
+        payments_moved = cur.rowcount
+
+        # 4. Reassign dispatches
+        cur.execute(
+            "UPDATE dispatches SET customer_id = ?, customer_name = ? WHERE customer_id = ?",
+            (target_party_id, target_name, source_party_id),
+        )
+        dispatches_moved = cur.rowcount
+
+        # 5. Add source opening balance into target opening balance if exists
+        cur.execute("SELECT amount_paise FROM opening_balances WHERE customer_id = ? ORDER BY id DESC LIMIT 1", (source_party_id,))
+        s_ob = cur.fetchone()
+        if s_ob and s_ob[0]:
+            cur.execute("SELECT amount_paise FROM opening_balances WHERE customer_id = ? ORDER BY id DESC LIMIT 1", (target_party_id,))
+            t_ob = cur.fetchone()
+            combined_ob = (t_ob[0] if t_ob else 0) + s_ob[0]
+            cur.execute(
+                "INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (target_party_id, now[:10], combined_ob, "debit", f"Merged from {source_name}", now),
+            )
+
+        # 6. Delete source party from parties
+        cur.execute("DELETE FROM parties WHERE id = ?", (source_party_id,))
+
+        # 7. Recompute target balance
+        recompute_party_balance(target_party_id, conn)
+
+        # Get updated target
+        cur.execute("SELECT balance_paise FROM parties WHERE id = ?", (target_party_id,))
+        new_bal = cur.fetchone()
+        new_balance_paise = new_bal[0] if new_bal else 0
+
+        conn.commit()
+
+        return {
+            "sourcePartyId": source_party_id,
+            "sourcePartyName": source_name,
+            "targetPartyId": target_party_id,
+            "targetPartyName": target_name,
+            "vouchersMoved": vouchers_moved,
+            "ordersMoved": orders_moved,
+            "paymentsMoved": payments_moved,
+            "dispatchesMoved": dispatches_moved,
+            "newBalancePaise": new_balance_paise,
+        }
+
+def update_party_opening_balance(party_id: str, amount_paise: int, as_of: str = "") -> dict[str, Any] | None:
+    """Updates or sets opening balance for a party and recomputes net balance."""
+    now = datetime.now().isoformat()
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name FROM parties WHERE id = ?", (party_id,))
+        p = cur.fetchone()
+        if not p:
+            return None
+
+        cur.execute(
+            """
+            INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (party_id, as_of or now[:10], amount_paise, "debit", "Manual Edit", now),
+        )
+        recompute_party_balance(party_id, conn)
+        cur.execute("SELECT balance_paise FROM parties WHERE id = ?", (party_id,))
+        b_row = cur.fetchone()
+        conn.commit()
+        return {
+            "partyId": party_id,
+            "openingBalancePaise": amount_paise,
+            "newBalancePaise": b_row[0] if b_row else 0,
+        }
 
 # ----------------- Invitations & User Management -----------------
 

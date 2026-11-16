@@ -2084,6 +2084,85 @@ export function syncAccountingBooks(): Promise<{
   });
 }
 
+export function updateVoucher(
+  id: string,
+  payload: {
+    voucherNo?: string;
+    voucherType?: string;
+    voucherDate?: string;
+    debitAmount?: number;
+    creditAmount?: number;
+    bookSource?: string;
+  },
+): Promise<ServerVoucher> {
+  return send<ServerVoucher>(`/vouchers/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: payload,
+  });
+}
+
+export function deleteVoucher(id: string): Promise<{ status: string; deletedId: string }> {
+  return send<{ status: string; deletedId: string }>(`/vouchers/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+export function transferVoucher(
+  id: string,
+  targetPartyId: string,
+  notes?: string,
+): Promise<{ voucher: ServerVoucher; oldPartyId: string; targetPartyId: string; targetPartyName: string }> {
+  return send(`/vouchers/${encodeURIComponent(id)}/transfer`, {
+    method: 'POST',
+    body: { targetPartyId, notes },
+  });
+}
+
+export function addJournalEntry(
+  debtorId: string,
+  payload: {
+    type: 'DEBIT' | 'CREDIT';
+    amount: number;
+    voucherDate?: string;
+    reference?: string;
+    notes?: string;
+  },
+): Promise<ServerVoucher> {
+  return send<ServerVoucher>(`/debtors/${encodeURIComponent(debtorId)}/journal`, {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export function mergeDebtors(
+  sourcePartyId: string,
+  targetPartyId: string,
+): Promise<{
+  sourcePartyId: string;
+  sourcePartyName: string;
+  targetPartyId: string;
+  targetPartyName: string;
+  vouchersMoved: number;
+  ordersMoved: number;
+  newBalancePaise: number;
+}> {
+  return send('/debtors/merge', {
+    method: 'POST',
+    body: { sourcePartyId, targetPartyId },
+  });
+}
+
+export function updateOpeningBalance(
+  debtorId: string,
+  amount: number,
+  asOf?: string,
+): Promise<{ partyId: string; openingBalancePaise: number; newBalancePaise: number }> {
+  return send(`/debtors/${encodeURIComponent(debtorId)}/opening-balance`, {
+    method: 'PUT',
+    body: { amount, asOf },
+  });
+}
+
 export async function uploadExcelWorkbook(file: File): Promise<Record<string, unknown>> {
   const formData = new FormData();
   formData.append('file', file);
