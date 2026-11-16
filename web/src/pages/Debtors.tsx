@@ -1110,6 +1110,13 @@ function DebtorListCard() {
             <RefreshCw size={13} className={syncingBooks ? 'animate-spin' : ''} />
             {syncingBooks ? 'Syncing Books...' : '⚡ 1-Click Sync Sales & Bank'}
           </button>
+          <label
+            htmlFor="debtor-workbook-file-input"
+            className="btn-primary !py-1.5 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-sm bg-indigo-600 hover:bg-indigo-700 text-white"
+            title="Upload and import sales.xlsx, hdfc.xlsx, or yes.xlsx from your computer"
+          >
+            <FileSearch size={13} /> 📁 Upload Excel File
+          </label>
           <button
             type="button"
             onClick={handle1ClickSync}
@@ -2043,7 +2050,7 @@ function DebtorWorkbookPreview() {
   );
 
   return (
-    <Card className="mt-4">
+    <Card className="mb-4 border-2 border-brand-blue/20">
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
         <div>
           <h2 className="text-[15px] font-black text-ink">Debtor Workbook Import & Preview</h2>
@@ -2053,10 +2060,11 @@ function DebtorWorkbookPreview() {
           </p>
         </div>
         <input
+          id="debtor-workbook-file-input"
           ref={inputRef}
           type="file"
-          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          className="hidden"
+          accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+          className="sr-only"
           onChange={(event) => {
             const file = event.target.files?.[0];
             event.target.value = '';
@@ -2065,9 +2073,12 @@ function DebtorWorkbookPreview() {
             void run(file);
           }}
         />
-        <button type="button" className="btn-ghost btn-sm" onClick={() => inputRef.current?.click()}>
+        <label
+          htmlFor="debtor-workbook-file-input"
+          className="btn-primary !py-1.5 px-3 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-sm"
+        >
           <FileSearch size={15} /> Choose workbook
-        </button>
+        </label>
       </div>
 
       {fileName !== '' && (
@@ -2083,10 +2094,30 @@ function DebtorWorkbookPreview() {
       )}
 
       {phase.kind === 'idle' && (
-        <EmptyState
-          title="No debtor workbook read yet"
-          hint="Choose an .xlsx workbook. Supports Tally Sales Registers, HDFC & Yes Bank Books, or HR-PB Dealer Targets to auto-calculate and update customer ledger balances."
-        />
+        <label
+          htmlFor="debtor-workbook-file-input"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            e.preventDefault();
+            const file = e.dataTransfer.files?.[0];
+            if (file) {
+              setFileName(file.name);
+              void run(file);
+            }
+          }}
+          className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-line hover:border-brand-blue bg-canvas/40 hover:bg-brand-blue/5 p-8 text-center cursor-pointer transition group"
+        >
+          <div className="rounded-full bg-brand-blue/10 p-3 text-brand-blue mb-2 group-hover:scale-110 transition">
+            <FileSearch size={28} />
+          </div>
+          <p className="text-sm font-bold text-ink">Click to Choose or Drag & Drop Excel File</p>
+          <p className="mt-1 text-xs text-muted max-w-md">
+            Upload <strong>sales.xlsx</strong> (Sales Register), <strong>hdfc.xlsx</strong>, <strong>yes.xlsx</strong> (Bank Books), or <strong>HR-PB.xlsx</strong> to auto-calculate and update customer ledger balances.
+          </p>
+          <span className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-brand-blue px-3 py-1.5 text-xs font-bold text-white shadow-sm group-hover:bg-brand-blue/90">
+            Browse Excel File
+          </span>
+        </label>
       )}
       {phase.kind === 'reading' && <Spinner label="Reading the file in this browser…" />}
       {phase.kind === 'uploading' && (
@@ -2138,8 +2169,8 @@ export default function Debtors() {
         subtitle={`Imported closing balances on ${serverHost()} — dated snapshots, debit and credit separate`}
       />
 
-      <DebtorListCard />
       {user?.role === 'owner' && <DebtorWorkbookPreview />}
+      <DebtorListCard />
     </div>
   );
 }
