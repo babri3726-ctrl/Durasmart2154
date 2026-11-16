@@ -2124,8 +2124,7 @@ function DebtorWorkbookPreview() {
         <div>
           <h2 className="text-[15px] font-black text-ink">Debtor Workbook Import & Preview</h2>
           <p className="text-[11px] text-muted">
-            Owner only. Upload Sales Register, HDFC / Yes Bank Book, or HR-PB Target workbooks. Reading reports
-            vouchers and party matches without writing; apply is the confirmed step below.
+            Owner only. Upload Sales Register (sales.xlsx) or HR-PB Target workbooks. <em>Note: Upload HDFC &amp; Yes Bank statements in the Payment section.</em>
           </p>
         </div>
         <input
@@ -2181,7 +2180,7 @@ function DebtorWorkbookPreview() {
           </div>
           <p className="text-sm font-bold text-ink">Click to Choose or Drag & Drop Excel File</p>
           <p className="mt-1 text-xs text-muted max-w-md">
-            Upload <strong>sales.xlsx</strong> (Sales Register), <strong>hdfc.xlsx</strong>, <strong>yes.xlsx</strong> (Bank Books), or <strong>HR-PB.xlsx</strong> to auto-calculate and update customer ledger balances.
+            Upload <strong>sales.xlsx</strong> (Sales Register) or <strong>HR-PB.xlsx</strong> (Dealer Targets). <em>Bank Books (hdfc.xlsx, yes.xlsx) must be uploaded in the Payment section.</em>
           </p>
           <span className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-brand-blue px-3 py-1.5 text-xs font-bold text-white shadow-sm group-hover:bg-brand-blue/90">
             Browse Excel File

@@ -2063,6 +2063,7 @@ export interface ServerVoucher {
   debit_paise: number;
   credit_paise: number;
   book_source: string;
+  narration?: string;
   created_at: string;
 }
 
@@ -2313,13 +2314,74 @@ export async function previewDebtorWorkbook(
   bytes: Uint8Array | ArrayBuffer,
   fileName: string,
 ): Promise<ServerDebtorPreview> {
-  const query = new URLSearchParams({ fileName: workbookLabel(fileName) });
+  const query = new URLSearchParams({ fileName: workbookLabel(fileName), section: 'debtors' });
   const payload = await send<unknown>(`/debtors/imports/preview?${query.toString()}`, {
     method: 'POST',
     bytes,
     timeoutMs: STOCK_PREVIEW_TIMEOUT_MS,
   });
   return readDebtorPreviewPayload(payload);
+}
+
+export async function previewPaymentWorkbook(
+  bytes: Uint8Array | ArrayBuffer,
+  fileName: string,
+): Promise<ServerDebtorPreview> {
+  const query = new URLSearchParams({ fileName: workbookLabel(fileName) });
+  const payload = await send<unknown>(`/payments/imports/preview?${query.toString()}`, {
+    method: 'POST',
+    bytes,
+    timeoutMs: STOCK_PREVIEW_TIMEOUT_MS,
+  });
+  return readDebtorPreviewPayload(payload);
+}
+
+export async function applyPaymentWorkbook(
+  bytes: Uint8Array | ArrayBuffer,
+  input: ApplyDebtorInput,
+): Promise<ServerDebtorApply> {
+  const query = new URLSearchParams({
+    fileSha256: input.fileSha256,
+    previewDigest: input.previewDigest,
+    confirm: 'true',
+    fileName: workbookLabel(input.fileName),
+    section: 'payments',
+  });
+  if (input.allowReplacement) query.set('allowReplacement', 'true');
+  const payload = await send<unknown>(`/payments/imports/apply?${query.toString()}`, {
+    method: 'POST',
+    bytes,
+    timeoutMs: STOCK_PREVIEW_TIMEOUT_MS,
+  });
+  return readDebtorApplyPayload(payload);
+}
+
+export interface BankSummary {
+  totalVouchers: number;
+  totalReceiptsPaise: number;
+  totalPaymentsPaise: number;
+  netPaise: number;
+}
+
+export interface BankTransactionsResponse {
+  items: ServerVoucher[];
+  summary: BankSummary;
+}
+
+export async function listBankTransactions(params: {
+  bank?: string;
+  voucherType?: string;
+  q?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<BankTransactionsResponse> {
+  const query = new URLSearchParams();
+  if (params.bank) query.set('bank', params.bank);
+  if (params.voucherType) query.set('voucher_type', params.voucherType);
+  if (params.q) query.set('q', params.q);
+  if (params.limit) query.set('limit', String(params.limit));
+  if (params.offset) query.set('offset', String(params.offset));
+  return send<BankTransactionsResponse>(`/bank-transactions?${query.toString()}`);
 }
 
 /** The outcome of one confirmed debtor apply. The three counts together cover `snapshotRowCount`
@@ -2390,6 +2452,7 @@ export async function applyDebtorWorkbook(
     previewDigest: input.previewDigest,
     confirm: 'true',
     fileName: workbookLabel(input.fileName),
+    section: 'debtors',
   });
   if (input.allowReplacement) query.set('allowReplacement', 'true');
   const payload = await send<unknown>(`/debtors/imports/apply?${query.toString()}`, {

@@ -4139,7 +4139,7 @@ async def preview_uploaded_stock_bytes(request: Request, fileName: str | None = 
                 pass
 
 @app.post("/api/v1/debtors/imports/preview")
-async def preview_debtor_bytes(request: Request, fileName: str | None = "HR-PB.xlsx"):
+async def preview_debtor_bytes(request: Request, fileName: str | None = "HR-PB.xlsx", section: str | None = "debtors"):
     body = await request.body()
     if not body:
         raise HTTPException(status_code=400, detail="Empty debtor workbook upload")
@@ -4151,7 +4151,26 @@ async def preview_debtor_bytes(request: Request, fileName: str | None = "HR-PB.x
     try:
         from .voucher_parser import is_accounting_workbook, parse_accounting_workbook
         if is_accounting_workbook(tmp_path):
-            acct_data = parse_accounting_workbook(tmp_path)
+            acct_data = parse_accounting_workbook(tmp_path, filename=fileName)
+            book_src = acct_data["bookSource"]
+
+            # Section-based validation gates
+            if section == "debtors" and book_src in ("HDFC Bank Book", "Yes Bank Book"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"This section only accepts Sales Registers (sales.xlsx) or Dealer Targets (HR-PB.xlsx). You uploaded {book_src}. Please upload HDFC and Yes Bank statements in the Payment section."
+                )
+            if section == "payments" and book_src == "Sales Register":
+                raise HTTPException(
+                    status_code=400,
+                    detail="This section only accepts HDFC Bank or Yes Bank statement workbooks. You uploaded Sales Register. Please upload Sales Registers in the Debtor section."
+                )
+            if section == "payments" and book_src not in ("HDFC Bank Book", "Yes Bank Book"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="This section only accepts HDFC Bank or Yes Bank statement workbooks. Unrecognized bank statement."
+                )
+
             vouchers = acct_data["vouchers"]
             file_sha = hashlib.sha256(body).hexdigest()
             apply_digest = hashlib.sha256(f"{file_sha}:voucher_preview_digest".encode()).hexdigest()
@@ -4224,6 +4243,12 @@ async def preview_debtor_bytes(request: Request, fileName: str | None = "HR-PB.x
                 "databaseRowsWritten": False,
                 "disclaimer": f"Read-only preview of {acct_data['bookSource']}. Nothing was written."
             }
+
+        if section == "payments":
+            raise HTTPException(
+                status_code=400,
+                detail="This section only accepts HDFC Bank or Yes Bank statement workbooks. The uploaded file is not recognized as a bank statement."
+            )
 
         snap = extract_hr_pb_targets(tmp_path)
         file_sha = snap["file_sha256"]
@@ -4313,7 +4338,8 @@ async def apply_debtor_bytes(
     previewDigest: str | None = None,
     confirm: str | None = "true",
     fileName: str | None = "HR-PB.xlsx",
-    allowReplacement: str | None = "false"
+    allowReplacement: str | None = "false",
+    section: str | None = "debtors"
 ):
     body = await request.body()
     if not body:
@@ -4327,7 +4353,26 @@ async def apply_debtor_bytes(
     try:
         from .voucher_parser import is_accounting_workbook, parse_accounting_workbook
         if is_accounting_workbook(tmp_path):
-            acct_data = parse_accounting_workbook(tmp_path, file_sha256=file_sha)
+            acct_data = parse_accounting_workbook(tmp_path, file_sha256=file_sha, filename=fileName)
+            book_src = acct_data["bookSource"]
+
+            # Section-based validation gates
+            if section == "debtors" and book_src in ("HDFC Bank Book", "Yes Bank Book"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"This section only accepts Sales Registers (sales.xlsx) or Dealer Targets (HR-PB.xlsx). You uploaded {book_src}. Please upload HDFC and Yes Bank statements in the Payment section."
+                )
+            if section == "payments" and book_src == "Sales Register":
+                raise HTTPException(
+                    status_code=400,
+                    detail="This section only accepts HDFC Bank or Yes Bank statement workbooks. You uploaded Sales Register. Please upload Sales Registers in the Debtor section."
+                )
+            if section == "payments" and book_src not in ("HDFC Bank Book", "Yes Bank Book"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="This section only accepts HDFC Bank or Yes Bank statement workbooks. Unrecognized bank statement."
+                )
+
             vouchers = acct_data["vouchers"]
             batch_res = db.save_vouchers_batch(vouchers, file_sha=file_sha)
 
@@ -4414,6 +4459,50 @@ async def apply_debtor_bytes(
                 os.remove(tmp_path)
             except OSError:
                 pass
+
+@app.post("/api/v1/payments/imports/preview")
+async def preview_payment_bytes(request: Request, fileName: str | None = "hdfc.xlsx"):
+    return await preview_debtor_bytes(request, fileName=fileName, section="payments")
+
+@app.post("/api/v1/payments/imports/apply")
+async def apply_payment_bytes(
+    request: Request,
+    fileSha256: str | None = None,
+    previewDigest: str | None = None,
+    confirm: str | None = "true",
+    fileName: str | None = "hdfc.xlsx",
+    allowReplacement: str | None = "false"
+):
+    return await apply_debtor_bytes(
+        request,
+        fileSha256=fileSha256,
+        previewDigest=previewDigest,
+        confirm=confirm,
+        fileName=fileName,
+        allowReplacement=allowReplacement,
+        section="payments"
+    )
+
+@app.get("/api/v1/bank-transactions")
+def get_bank_transactions(
+    bank: str | None = None,
+    voucher_type: str | None = None,
+    q: str | None = None,
+    limit: int = 200,
+    offset: int = 0
+):
+    items = db.load_vouchers(
+        book_source=bank or "bank",
+        voucher_type=voucher_type,
+        q=q,
+        limit=limit,
+        offset=offset
+    )
+    summary = db.get_bank_summary(book_source=bank)
+    return {
+        "items": items,
+        "summary": summary
+    }
 
 @app.post("/api/v1/imports/excel/stock-import")
 async def apply_uploaded_stock_bytes(request: Request, fileName: str | None = "1-8-26.xlsx", confirm: str | None = "true"):

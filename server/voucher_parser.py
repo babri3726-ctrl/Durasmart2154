@@ -56,6 +56,19 @@ def detect_state_and_city(name: str) -> tuple[str, str]:
     return "Punjab", ""
 
 
+def normalize_date_str(val: Any) -> str:
+    """Normalizes dates of various Tally/Excel formats into standard YYYY-MM-DD."""
+    if isinstance(val, datetime):
+        return val.strftime("%Y-%m-%d")
+    s = str(val or "").strip()
+    for fmt in ("%Y-%m-%d", "%d-%b-%y", "%d-%b-%Y", "%d-%m-%Y", "%d/%m/%Y", "%d-%m-%y", "%d.%m.%Y", "%d.%m.%y"):
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except Exception:
+            pass
+    return s[:10]
+
+
 def is_accounting_workbook(filepath: str) -> bool:
     """Quickly tests if a workbook contains accounting register headers."""
     try:
@@ -70,7 +83,7 @@ def is_accounting_workbook(filepath: str) -> bool:
         return False
 
 
-def parse_accounting_workbook(filepath: str, file_sha256: str | None = None) -> dict[str, Any]:
+def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, filename: str | None = None) -> dict[str, Any]:
     """
     Parses Sales Register or Bank Book spreadsheets into a standardized transaction ledger.
     Handles variable column mappings, merged cells, and 'To'/'By' prefixes dynamically.
@@ -103,14 +116,15 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None) -> 
     if not header_row_idx or "date" not in col_map or "particulars" not in col_map:
         raise ValueError("Could not find standard accounting headers (Date, Particulars, etc.) in workbook")
 
-    # Detect book title and period from top rows
+    # Detect book title and period from top rows and filename
+    fn_lower = os.path.basename(filename or filepath).lower()
     top_text = f"{ws.cell(1, 1).value or ''} {ws.cell(2, 1).value or ''}".strip().lower()
-    if "sales" in top_text:
-        book_source = "Sales Register"
-    elif "hdfc" in top_text:
+    if "hdfc" in top_text or "hdfc" in fn_lower:
         book_source = "HDFC Bank Book"
-    elif "yes" in top_text:
+    elif "yes" in top_text or "yes" in fn_lower:
         book_source = "Yes Bank Book"
+    elif "sales" in top_text or "sales" in fn_lower:
+        book_source = "Sales Register"
     else:
         book_source = "Accounting Book"
 
@@ -165,10 +179,7 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None) -> 
             continue
 
         # Format date as YYYY-MM-DD
-        if isinstance(date_cell, datetime):
-            vch_date = date_cell.strftime("%Y-%m-%d")
-        else:
-            vch_date = str(date_cell)[:10]
+        vch_date = normalize_date_str(date_cell)
 
         # Deterministic unique hash ID for idempotency
         hash_src = f"{book_source}:{vch_date}:{vch_type}:{vch_no}:{party_name}:{debit_paise}:{credit_paise}"

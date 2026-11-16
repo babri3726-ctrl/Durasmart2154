@@ -1156,14 +1156,78 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
         "affectedPartiesCount": len(affected_party_ids),
     }
 
-def load_vouchers(party_id: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+def load_vouchers(
+    party_id: str | None = None,
+    book_source: str | None = None,
+    voucher_type: str | None = None,
+    q: str | None = None,
+    limit: int = 200,
+    offset: int = 0
+) -> list[dict[str, Any]]:
     with get_connection() as conn:
         cur = conn.cursor()
+        clauses = []
+        params: list[Any] = []
         if party_id:
-            cur.execute("SELECT * FROM vouchers WHERE party_id = ? ORDER BY voucher_date DESC, id DESC LIMIT ?", (party_id, limit))
-        else:
-            cur.execute("SELECT * FROM vouchers ORDER BY voucher_date DESC, id DESC LIMIT ?", (limit,))
+            clauses.append("party_id = ?")
+            params.append(party_id)
+        if book_source:
+            if book_source.lower() in ("bank", "all"):
+                clauses.append("book_source IN ('HDFC Bank Book', 'Yes Bank Book')")
+            elif "hdfc" in book_source.lower():
+                clauses.append("book_source = 'HDFC Bank Book'")
+            elif "yes" in book_source.lower():
+                clauses.append("book_source = 'Yes Bank Book'")
+            else:
+                clauses.append("book_source = ?")
+                params.append(book_source)
+        if voucher_type:
+            clauses.append("LOWER(voucher_type) = LOWER(?)")
+            params.append(voucher_type)
+        if q:
+            clauses.append("(party_name LIKE ? OR voucher_no LIKE ? OR narration LIKE ?)")
+            q_wild = f"%{q.strip()}%"
+            params.extend([q_wild, q_wild, q_wild])
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        sql = f"SELECT * FROM vouchers {where} ORDER BY voucher_date DESC, id DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        cur.execute(sql, tuple(params))
         return [dict(r) for r in cur.fetchall()]
+
+
+def get_bank_summary(book_source: str | None = None) -> dict[str, Any]:
+    """Calculates total receipts, total payments, and net movement for bank books."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        if book_source and book_source.lower() not in ("all", "bank", ""):
+            bank_filter = "HDFC Bank Book" if "hdfc" in book_source.lower() else "Yes Bank Book" if "yes" in book_source.lower() else book_source
+            cur.execute("""
+                SELECT 
+                    COUNT(*) as total_vouchers,
+                    COALESCE(SUM(credit_paise), 0) as total_receipts_paise,
+                    COALESCE(SUM(debit_paise), 0) as total_payments_paise
+                FROM vouchers 
+                WHERE book_source = ?
+            """, (bank_filter,))
+        else:
+            cur.execute("""
+                SELECT 
+                    COUNT(*) as total_vouchers,
+                    COALESCE(SUM(credit_paise), 0) as total_receipts_paise,
+                    COALESCE(SUM(debit_paise), 0) as total_payments_paise
+                FROM vouchers 
+                WHERE book_source IN ('HDFC Bank Book', 'Yes Bank Book')
+            """)
+        row = cur.fetchone()
+        receipts = row["total_receipts_paise"] if row else 0
+        payments = row["total_payments_paise"] if row else 0
+        return {
+            "totalVouchers": row["total_vouchers"] if row else 0,
+            "totalReceiptsPaise": receipts,
+            "totalPaymentsPaise": payments,
+            "netPaise": receipts - payments
+        }
 
 def update_voucher(voucher_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
     """Updates voucher fields (voucher_no, voucher_date, debit_paise, credit_paise, notes) and recomputes balance."""
