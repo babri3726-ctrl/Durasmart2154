@@ -79,7 +79,7 @@ export default function Payment() {
     netPaise: 0,
   });
   const [loadingBank, setLoadingBank] = useState(false);
-  const [bankFilter, setBankFilter] = useState<'all' | 'hdfc' | 'yes'>('all');
+  const [bankFilter, setBankFilter] = useState<'all' | 'hdfc' | 'yes' | 'cash' | 'khan'>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'receipt' | 'payment'>('all');
   const [bankSearch, setBankSearch] = useState('');
 
@@ -150,7 +150,7 @@ export default function Payment() {
       const errObj = err as { message?: string };
       setBankPhase({
         kind: 'failed',
-        message: errObj?.message || 'The uploaded file could not be read as an HDFC or Yes Bank statement.',
+        message: errObj?.message || 'The uploaded file could not be read as a valid Bank or Cash statement.',
       });
     }
   };
@@ -382,8 +382,8 @@ export default function Payment() {
   return (
     <div>
       <PageHeader
-        title="Payment & Bank Register"
-        subtitle={`Chronological bank books and receipt collection on ${serverHost()} — date-wise transactions with auto debtor reconciliation.`}
+        title="Payment & Register"
+        subtitle={`Chronological bank & cash books and collection register on ${serverHost()} — date-wise transactions with auto customer reconciliation.`}
         actions={
           <button
             type="button"
@@ -409,7 +409,7 @@ export default function Payment() {
               : 'border-transparent text-muted hover:text-ink'
           }`}
         >
-          <Building2 size={16} /> Bank Statement Ledger (HDFC &amp; Yes Bank)
+          <Building2 size={16} /> Bank &amp; Cash Statement Ledger (HDFC, Yes, Cash &amp; Khan)
         </button>
         <button
           type="button"
@@ -424,31 +424,31 @@ export default function Payment() {
         </button>
       </div>
 
-      {/* ── TAB 1: BANK STATEMENT LEDGER ────────────────────────────────────── */}
+      {/* ── TAB 1: BANK & CASH STATEMENT LEDGER ────────────────────────────────────── */}
       {activeTab === 'bank' && (
         <div className="space-y-4">
-          {/* Bank Summary KPI Cards */}
+          {/* Summary KPI Cards */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div className="rounded-xl border border-line bg-surface p-4 shadow-sm">
               <span className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-muted">
-                <ArrowDownLeft size={14} className="text-emerald-600" /> Total Bank Receipts
+                <ArrowDownLeft size={14} className="text-emerald-600" /> Total Receipts (Cr)
               </span>
               <p className="mt-1 font-mono text-lg font-black text-emerald-600">
                 {rupees(bankSummary.totalReceiptsPaise)}
               </p>
-              <span className="text-[10px] text-faint">Deposits &amp; incoming transfers</span>
+              <span className="text-[10px] text-faint">Deposits &amp; incoming collections</span>
             </div>
             <div className="rounded-xl border border-line bg-surface p-4 shadow-sm">
               <span className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-muted">
-                <ArrowUpRight size={14} className="text-rose-600" /> Total Bank Payments
+                <ArrowUpRight size={14} className="text-rose-600" /> Total Payments (Dr)
               </span>
               <p className="mt-1 font-mono text-lg font-black text-rose-600">
                 {rupees(bankSummary.totalPaymentsPaise)}
               </p>
-              <span className="text-[10px] text-faint">Withdrawals &amp; vendor payouts</span>
+              <span className="text-[10px] text-faint">Withdrawals, payouts &amp; expenses</span>
             </div>
             <div className="rounded-xl border border-line bg-surface p-4 shadow-sm">
-              <span className="text-[11px] font-extrabold uppercase tracking-wide text-muted">Net Bank Cash Flow</span>
+              <span className="text-[11px] font-extrabold uppercase tracking-wide text-muted">Net Cash &amp; Bank Flow</span>
               <p
                 className={`mt-1 font-mono text-lg font-black ${
                   bankSummary.netPaise >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-600'
@@ -460,7 +460,7 @@ export default function Payment() {
               <span className="text-[10px] text-faint">Receipts minus payments</span>
             </div>
             <div className="rounded-xl border border-line bg-surface p-4 shadow-sm">
-              <span className="text-[11px] font-extrabold uppercase tracking-wide text-muted">Bank Vouchers</span>
+              <span className="text-[11px] font-extrabold uppercase tracking-wide text-muted">Total Vouchers</span>
               <p className="mt-1 font-mono text-lg font-black text-ink">{bankSummary.totalVouchers}</p>
               <span className="text-[10px] text-faint">Chronological statement entries</span>
             </div>
@@ -480,13 +480,13 @@ export default function Payment() {
             </div>
           )}
 
-          {/* Bank Book Excel Upload Card */}
+          {/* Bank & Cash Book Excel Upload Card */}
           <Card className="border-2 border-brand-blue/20">
             <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
               <div>
-                <h2 className="text-[14px] font-black text-ink">Upload Bank Book (HDFC Bank &amp; Yes Bank)</h2>
+                <h2 className="text-[14px] font-black text-ink">Upload Bank &amp; Cash Books (HDFC, Yes, Cash &amp; Khan)</h2>
                 <p className="text-[11px] text-muted">
-                  Upload <strong>hdfc.xlsx</strong> or <strong>yes.xlsx</strong>. The backend verifies the bank title and auto-updates debtor ledgers.
+                  Upload <strong>hdfc.xlsx</strong>, <strong>yes.xlsx</strong>, <strong>cash.xlsx</strong>, or <strong>khan cash.xlsx</strong>. The backend verifies the book title and auto-updates customer ledgers.
                   <em> (Note: Sales registers and target sheets must be uploaded in the Debtor section).</em>
                 </p>
               </div>
@@ -505,7 +505,7 @@ export default function Payment() {
                 htmlFor="bank-workbook-input"
                 className="btn-primary !py-1.5 px-3 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-sm"
               >
-                <FileSearch size={15} /> Choose Bank Workbook
+                <FileSearch size={15} /> Choose Statement Workbook
               </label>
             </div>
 
@@ -523,15 +523,15 @@ export default function Payment() {
                 <div className="rounded-full bg-brand-blue/10 p-2.5 text-brand-blue mb-2 group-hover:scale-110 transition">
                   <Building2 size={24} />
                 </div>
-                <p className="text-xs font-bold text-ink">Drag &amp; Drop or Browse HDFC / Yes Bank Excel Statement</p>
+                <p className="text-xs font-bold text-ink">Drag &amp; Drop or Browse HDFC / Yes Bank / Cash / Khan Cash Excel Workbook</p>
                 <p className="mt-0.5 text-[11px] text-muted max-w-sm">
-                  Supports Tally HDFC Bank Book &amp; Yes Bank Book exports.
+                  Supports Tally HDFC Bank Book, Yes Bank Book, Cash Book &amp; Khan Cash Book exports.
                 </p>
               </label>
             )}
 
             {bankPhase.kind === 'reading' && (
-              <p className="p-4 text-center text-xs font-bold text-muted">Reading and validating bank workbook…</p>
+              <p className="p-4 text-center text-xs font-bold text-muted">Reading and validating workbook…</p>
             )}
 
             {bankPhase.kind === 'failed' && (
@@ -604,13 +604,13 @@ export default function Payment() {
             )}
           </Card>
 
-          {/* Date-Wise Bank Ledger Card */}
+          {/* Date-Wise Bank & Cash Ledger Card */}
           <Card>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h3 className="section-title">Date-Wise Bank Statement Transactions</h3>
+                <h3 className="section-title">Date-Wise Bank &amp; Cash Statement Transactions</h3>
                 <p className="text-[11px] text-muted">
-                  Real-time chronological view of all bank receipts and payments.
+                  Real-time chronological view of all bank &amp; cash receipts, payments and transfers.
                 </p>
               </div>
 
@@ -618,12 +618,14 @@ export default function Payment() {
               <div className="flex flex-wrap items-center gap-2">
                 <select
                   value={bankFilter}
-                  onChange={(e) => setBankFilter(e.target.value as 'all' | 'hdfc' | 'yes')}
-                  className="input !w-auto !py-1.5 text-xs"
+                  onChange={(e) => setBankFilter(e.target.value as 'all' | 'hdfc' | 'yes' | 'cash' | 'khan')}
+                  className="input !w-auto !py-1.5 text-xs font-semibold"
                 >
-                  <option value="all">🏦 All Banks (HDFC &amp; Yes Bank)</option>
-                  <option value="hdfc">HDFC Bank Book</option>
-                  <option value="yes">Yes Bank Book</option>
+                  <option value="all">🏦 All Accounts (Bank &amp; Cash)</option>
+                  <option value="hdfc">🏦 HDFC Bank Book</option>
+                  <option value="yes">🏦 Yes Bank Book</option>
+                  <option value="cash">💵 Cash Book</option>
+                  <option value="khan">💵 Khan Cash Book</option>
                 </select>
 
                 <select
@@ -648,7 +650,7 @@ export default function Payment() {
                   type="button"
                   onClick={reloadBankTransactions}
                   className="btn btn-secondary !py-1.5 px-2.5 text-xs"
-                  title="Refresh bank transactions"
+                  title="Refresh statement transactions"
                 >
                   <RefreshCw size={13} className={loadingBank ? 'animate-spin' : ''} />
                 </button>
@@ -656,10 +658,10 @@ export default function Payment() {
             </div>
 
             {loadingBank ? (
-              <p className="py-8 text-center text-xs text-muted">Loading bank statement ledger…</p>
+              <p className="py-8 text-center text-xs text-muted">Loading statement ledger…</p>
             ) : bankVouchers.length === 0 ? (
               <div className="py-8 text-center text-xs text-muted">
-                No bank transactions found. Upload <strong>hdfc.xlsx</strong> or <strong>yes.xlsx</strong> above to populate the date-wise bank register.
+                No transactions found. Upload <strong>hdfc.xlsx</strong>, <strong>yes.xlsx</strong>, <strong>cash.xlsx</strong>, or <strong>khan cash.xlsx</strong> above to populate the ledger.
               </div>
             ) : (
               <div className="overflow-x-auto rounded-xl border border-line">
@@ -667,7 +669,7 @@ export default function Payment() {
                   <thead className="border-b border-line bg-canvas/70 font-semibold text-muted">
                     <tr>
                       <th className="px-3 py-2">Date</th>
-                      <th className="px-3 py-2">Bank</th>
+                      <th className="px-3 py-2">Head / Account</th>
                       <th className="px-3 py-2">Vch Type</th>
                       <th className="px-3 py-2">Voucher #</th>
                       <th className="px-3 py-2">Particulars / Customer</th>
@@ -678,29 +680,32 @@ export default function Payment() {
                   </thead>
                   <tbody className="divide-y divide-line/60">
                     {bankVouchers.map((v) => {
-                      const isReceipt = v.voucher_type.toLowerCase() === 'receipt' || v.credit_paise > 0;
+                      const vType = (v.voucher_type || '').toLowerCase();
+                      const isReceipt = vType === 'receipt' || v.credit_paise > 0;
+                      const isContra = vType === 'contra';
+
+                      const bs = (v.book_source || '').toLowerCase();
+                      let headBadge = 'bg-zinc-500/10 text-zinc-700 dark:text-zinc-300';
+                      if (bs.includes('hdfc')) headBadge = 'bg-blue-500/10 text-blue-700 dark:text-blue-300';
+                      else if (bs.includes('yes')) headBadge = 'bg-purple-500/10 text-purple-700 dark:text-purple-300';
+                      else if (bs.includes('khan')) headBadge = 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300';
+                      else if (bs.includes('cash')) headBadge = 'bg-amber-500/10 text-amber-700 dark:text-amber-300';
+
+                      let typeBadge = isReceipt ? 'bg-emerald-500/10 text-emerald-700' : 'bg-rose-500/10 text-rose-700';
+                      if (isContra) typeBadge = 'bg-sky-500/10 text-sky-700 dark:text-sky-300';
+
                       return (
                         <tr key={v.id} className="hover:bg-canvas/40 transition">
                           <td className="px-3 py-2 font-mono text-[11px] whitespace-nowrap text-ink">
                             {v.voucher_date}
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap">
-                            <span
-                              className={`chip font-semibold text-[10px] ${
-                                (v.book_source || '').toLowerCase().includes('hdfc')
-                                  ? 'bg-blue-500/10 text-blue-700 dark:text-blue-300'
-                                  : 'bg-purple-500/10 text-purple-700 dark:text-purple-300'
-                              }`}
-                            >
-                              {v.book_source || 'Bank'}
+                            <span className={`chip font-semibold text-[10px] ${headBadge}`}>
+                              {v.book_source || 'Account'}
                             </span>
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap font-medium">
-                            <span
-                              className={`chip font-bold text-[10px] ${
-                                isReceipt ? 'bg-emerald-500/10 text-emerald-700' : 'bg-rose-500/10 text-rose-700'
-                              }`}
-                            >
+                            <span className={`chip font-bold text-[10px] ${typeBadge}`}>
                               {v.voucher_type}
                             </span>
                           </td>

@@ -119,7 +119,11 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
     # Detect book title and period from top rows and filename
     fn_lower = os.path.basename(filename or filepath).lower()
     top_text = f"{ws.cell(1, 1).value or ''} {ws.cell(2, 1).value or ''}".strip().lower()
-    if "hdfc" in top_text or "hdfc" in fn_lower:
+    if "khan" in top_text or "khan" in fn_lower:
+        book_source = "Khan Cash Book"
+    elif "cash" in top_text or "cash" in fn_lower:
+        book_source = "Cash Book"
+    elif "hdfc" in top_text or "hdfc" in fn_lower:
         book_source = "HDFC Bank Book"
     elif "yes" in top_text or "yes" in fn_lower:
         book_source = "Yes Bank Book"

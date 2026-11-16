@@ -4154,21 +4154,23 @@ async def preview_debtor_bytes(request: Request, fileName: str | None = "HR-PB.x
             acct_data = parse_accounting_workbook(tmp_path, filename=fileName)
             book_src = acct_data["bookSource"]
 
+            ALLOWED_PAYMENT_BOOKS = ("HDFC Bank Book", "Yes Bank Book", "Cash Book", "Khan Cash Book")
+
             # Section-based validation gates
-            if section == "debtors" and book_src in ("HDFC Bank Book", "Yes Bank Book"):
+            if section == "debtors" and book_src in ALLOWED_PAYMENT_BOOKS:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"This section only accepts Sales Registers (sales.xlsx) or Dealer Targets (HR-PB.xlsx). You uploaded {book_src}. Please upload HDFC and Yes Bank statements in the Payment section."
+                    detail=f"This section only accepts Sales Registers (sales.xlsx) or Dealer Targets (HR-PB.xlsx). You uploaded {book_src}. Please upload bank and cash statements in the Payment section."
                 )
             if section == "payments" and book_src == "Sales Register":
                 raise HTTPException(
                     status_code=400,
-                    detail="This section only accepts HDFC Bank or Yes Bank statement workbooks. You uploaded Sales Register. Please upload Sales Registers in the Debtor section."
+                    detail="This section only accepts Bank or Cash statement workbooks (HDFC, Yes Bank, Cash Book, Khan Cash). You uploaded Sales Register. Please upload Sales Registers in the Debtor section."
                 )
-            if section == "payments" and book_src not in ("HDFC Bank Book", "Yes Bank Book"):
+            if section == "payments" and book_src not in ALLOWED_PAYMENT_BOOKS:
                 raise HTTPException(
                     status_code=400,
-                    detail="This section only accepts HDFC Bank or Yes Bank statement workbooks. Unrecognized bank statement."
+                    detail="This section only accepts Bank or Cash statement workbooks (HDFC, Yes Bank, Cash Book, Khan Cash). Unrecognized statement."
                 )
 
             vouchers = acct_data["vouchers"]
@@ -4356,21 +4358,23 @@ async def apply_debtor_bytes(
             acct_data = parse_accounting_workbook(tmp_path, file_sha256=file_sha, filename=fileName)
             book_src = acct_data["bookSource"]
 
+            ALLOWED_PAYMENT_BOOKS = ("HDFC Bank Book", "Yes Bank Book", "Cash Book", "Khan Cash Book")
+
             # Section-based validation gates
-            if section == "debtors" and book_src in ("HDFC Bank Book", "Yes Bank Book"):
+            if section == "debtors" and book_src in ALLOWED_PAYMENT_BOOKS:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"This section only accepts Sales Registers (sales.xlsx) or Dealer Targets (HR-PB.xlsx). You uploaded {book_src}. Please upload HDFC and Yes Bank statements in the Payment section."
+                    detail=f"This section only accepts Sales Registers (sales.xlsx) or Dealer Targets (HR-PB.xlsx). You uploaded {book_src}. Please upload bank and cash statements in the Payment section."
                 )
             if section == "payments" and book_src == "Sales Register":
                 raise HTTPException(
                     status_code=400,
-                    detail="This section only accepts HDFC Bank or Yes Bank statement workbooks. You uploaded Sales Register. Please upload Sales Registers in the Debtor section."
+                    detail="This section only accepts Bank or Cash statement workbooks (HDFC, Yes Bank, Cash Book, Khan Cash). You uploaded Sales Register. Please upload Sales Registers in the Debtor section."
                 )
-            if section == "payments" and book_src not in ("HDFC Bank Book", "Yes Bank Book"):
+            if section == "payments" and book_src not in ALLOWED_PAYMENT_BOOKS:
                 raise HTTPException(
                     status_code=400,
-                    detail="This section only accepts HDFC Bank or Yes Bank statement workbooks. Unrecognized bank statement."
+                    detail="This section only accepts Bank or Cash statement workbooks (HDFC, Yes Bank, Cash Book, Khan Cash). Unrecognized statement."
                 )
 
             vouchers = acct_data["vouchers"]

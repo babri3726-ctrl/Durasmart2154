@@ -80,6 +80,57 @@ def test_upload_section_validation_accepts_bank_file_in_payment_section():
     assert "Bank Book" in resp.json()["sheetName"]
 
 
+def test_upload_section_validation_accepts_cash_and_khan_cash():
+    """cash.xlsx and khan cash.xlsx uploaded in Payment section should succeed."""
+    cash_path = os.path.join(os.path.dirname(__file__), "..", "data", "cash.xlsx")
+    if not os.path.exists(cash_path):
+        pytest.skip("data/cash.xlsx not found")
+
+    with open(cash_path, "rb") as f:
+        data = f.read()
+
+    resp = client.post(
+        "/api/v1/payments/imports/preview?fileName=cash.xlsx",
+        content=data,
+        headers={"Content-Type": "application/octet-stream"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["applyAvailable"] is True
+    assert resp.json()["sheetName"] == "Cash Book"
+
+    # Khan Cash
+    khan_path = os.path.join(os.path.dirname(__file__), "..", "data", "khan cash.xlsx")
+    with open(khan_path, "rb") as f:
+        data_khan = f.read()
+
+    resp_khan = client.post(
+        "/api/v1/payments/imports/preview?fileName=khan cash.xlsx",
+        content=data_khan,
+        headers={"Content-Type": "application/octet-stream"}
+    )
+    assert resp_khan.status_code == 200
+    assert resp_khan.json()["applyAvailable"] is True
+    assert resp_khan.json()["sheetName"] == "Khan Cash Book"
+
+
+def test_upload_section_validation_rejects_cash_file_in_debtor_section():
+    """cash.xlsx uploaded in Debtor section should be rejected with 400."""
+    cash_path = os.path.join(os.path.dirname(__file__), "..", "data", "cash.xlsx")
+    if not os.path.exists(cash_path):
+        pytest.skip("data/cash.xlsx not found")
+
+    with open(cash_path, "rb") as f:
+        data = f.read()
+
+    resp = client.post(
+        "/api/v1/debtors/imports/preview?fileName=cash.xlsx&section=debtors",
+        content=data,
+        headers={"Content-Type": "application/octet-stream"}
+    )
+    assert resp.status_code == 400
+    assert "Payment section" in resp.json()["detail"]
+
+
 def test_bank_transactions_endpoint():
     """GET /api/v1/bank-transactions returns date-wise vouchers and summary."""
     resp = client.get("/api/v1/bank-transactions")
