@@ -34,7 +34,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, FileSearch, ShieldAlert, Plus, Pencil, Trash2, RefreshCw } from 'lucide-react';
+import { CheckCircle2, FileSearch, ShieldAlert, Plus, Pencil, Trash2, RefreshCw, FileText, X } from 'lucide-react';
 import { Card, EmptyState, PageHeader, Spinner } from '../components/ui/Card';
 import { LiveSyncBar } from '../components/ui/LiveSync';
 import { Pager } from '../components/ui/Pager';
@@ -50,6 +50,8 @@ import {
   updateDebtor,
   deleteDebtor,
   syncHrPbTargets,
+  syncAccountingBooks,
+  listVouchers,
   listEmployees,
   serverHost,
   ServerError,
@@ -58,6 +60,7 @@ import {
   type ServerDebtorPreview,
   type ServerDebtorPreviewFinding,
   type ServerDebtorPreviewRow,
+  type ServerVoucher,
 } from '../lib/serverApi';
 import {
   debtorApplyFailureDetail,
@@ -74,11 +77,148 @@ function money(paise: number | null): string {
   return paise === null ? '—' : rupees(paise);
 }
 
+function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose: () => void }) {
+  const [vouchers, setVouchers] = useState<ServerVoucher[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    const debtorId = debtor.id || debtor.customerId;
+    listVouchers(debtorId)
+      .then((items) => {
+        if (alive) {
+          setVouchers(items);
+          setLoading(false);
+        }
+      })
+      .catch(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [debtor]);
+
+  const totalSalesDebit = vouchers
+    .filter((v) => v.voucher_type.toLowerCase() === 'sales')
+    .reduce((sum, v) => sum + v.debit_paise, 0);
+
+  const totalReceipts = vouchers
+    .filter((v) => v.voucher_type.toLowerCase() === 'receipt')
+    .reduce((sum, v) => sum + v.debit_paise, 0);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4 backdrop-blur-sm">
+      <div className="flex max-h-[85vh] w-full max-w-4xl flex-col rounded-xl border border-line bg-surface shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-line px-5 py-4">
+          <div>
+            <h3 className="text-base font-bold text-ink">{debtor.name || debtor.customerName}</h3>
+            <p className="text-xs text-muted">
+              Ledger Statement · ID: <span className="font-mono text-faint">{debtor.id || debtor.customerId}</span> · {debtor.city || debtor.state || 'Punjab'}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-muted hover:bg-line hover:text-ink">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Balance Tiles */}
+        <div className="grid grid-cols-3 gap-3 border-b border-line bg-canvas/60 px-5 py-3">
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Total Billed Sales</span>
+            <p className="font-mono text-sm font-bold text-brand-blue">{rupees(totalSalesDebit)}</p>
+          </div>
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Total Bank Receipts</span>
+            <p className="font-mono text-sm font-bold text-brand-green">{rupees(totalReceipts)}</p>
+          </div>
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Current Outstanding</span>
+            <p className="font-mono text-sm font-bold text-ink">
+              {debtor.balance !== undefined
+                ? `₹${parseFloat(String(debtor.balance)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                : money(debtor.debitPaise || 0)}
+            </p>
+          </div>
+        </div>
+
+        {/* Voucher Table */}
+        <div className="flex-1 overflow-y-auto px-5 py-4">
+          {loading ? (
+            <div className="flex h-32 items-center justify-center">
+              <Spinner />
+            </div>
+          ) : vouchers.length === 0 ? (
+            <div className="py-10 text-center text-xs text-muted">
+              No individual vouchers recorded for this party yet. Import Sales or Bank Books to populate ledger entries.
+            </div>
+          ) : (
+            <table className="w-full text-left text-xs">
+              <thead className="border-b border-line text-[11px] font-bold text-muted">
+                <tr>
+                  <th className="pb-2">Date</th>
+                  <th className="pb-2">Type</th>
+                  <th className="pb-2">Vch No</th>
+                  <th className="pb-2">Source</th>
+                  <th className="pb-2 text-right">Debit (+)</th>
+                  <th className="pb-2 text-right">Credit (-)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line/40 font-mono">
+                {vouchers.map((v) => {
+                  const isSales = v.voucher_type.toLowerCase() === 'sales';
+                  const isReceipt = v.voucher_type.toLowerCase() === 'receipt';
+                  return (
+                    <tr key={v.id} className="hover:bg-canvas/40">
+                      <td className="py-2 text-muted">{v.voucher_date}</td>
+                      <td className="py-2">
+                        <span
+                          className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                            isSales
+                              ? 'bg-brand-blue/10 text-brand-blue'
+                              : isReceipt
+                              ? 'bg-brand-green/10 text-brand-green'
+                              : 'bg-canvas text-muted'
+                          }`}
+                        >
+                          {v.voucher_type}
+                        </span>
+                      </td>
+                      <td className="py-2 text-muted">{v.voucher_no || '—'}</td>
+                      <td className="py-2 text-muted text-[11px] font-sans">{v.book_source || 'Tally Book'}</td>
+                      <td className="py-2 text-right font-semibold text-ink">
+                        {v.debit_paise > 0 ? rupees(v.debit_paise) : '—'}
+                      </td>
+                      <td className="py-2 text-right text-muted">
+                        {v.credit_paise > 0 ? rupees(v.credit_paise) : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="flex justify-end border-t border-line px-5 py-3">
+          <button type="button" onClick={onClose} className="btn-secondary !py-1 text-xs font-bold">
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DebtorListCard() {
   const [term, setTerm] = useState('');
   const [page, setPage] = useState(1);
   const [syncingHrPb, setSyncingHrPb] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [selectedDebtorLedger, setSelectedDebtorLedger] = useState<ServerDebtor | null>(null);
+  const [syncingBooks, setSyncingBooks] = useState(false);
+  const [booksMessage, setBooksMessage] = useState<string | null>(null);
 
   // Salespeople for dropdown selection
   const [salespeople, setSalespeople] = useState<string[]>([]);
@@ -168,6 +308,21 @@ function DebtorListCard() {
     }
   };
 
+  const handleSyncBooks = async () => {
+    setSyncingBooks(true);
+    setBooksMessage(null);
+    try {
+      const res = await syncAccountingBooks();
+      setBooksMessage(res.message || 'Sales and bank books synced successfully!');
+      invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
+    } catch (err: unknown) {
+      const errObj = err as { message?: string };
+      setBooksMessage(errObj?.message || 'Failed to sync accounting books');
+    } finally {
+      setSyncingBooks(false);
+    }
+  };
+
   const handleCreateDebtor = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!addName.trim()) return;
@@ -248,15 +403,28 @@ function DebtorListCard() {
       {/* 1-Click Sync Banner */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-brand-blue/30 bg-brand-blue/5 p-3">
         <div>
-          <p className="text-[12px] font-bold text-ink">OneDrive 1-Click Sync: HR-PB.xlsx</p>
+          <p className="text-[12px] font-bold text-ink">Auto-Sync Accounting & Target Books</p>
           <p className="text-[11px] text-muted">
-            Pull all 137+ Punjab & Haryana dealer names from HR-PB into Debtors Master with initial ₹0 balance.
+            Sync sales.xlsx, hdfc.xlsx, and yes.xlsx directly to recalculate debtor balances, or pull targets from HR-PB.xlsx.
           </p>
           {syncMessage && (
             <p className="mt-1 text-[11px] font-bold text-brand-green">{syncMessage}</p>
           )}
+          {booksMessage && (
+            <p className="mt-1 text-[11px] font-bold text-brand-blue">{booksMessage}</p>
+          )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSyncBooks}
+            disabled={syncingBooks}
+            className="btn-primary !py-1.5 text-xs font-bold"
+            title="Sync sales.xlsx, hdfc.xlsx, and yes.xlsx from local folder"
+          >
+            <RefreshCw size={13} className={syncingBooks ? 'animate-spin' : ''} />
+            {syncingBooks ? 'Syncing Books...' : '⚡ 1-Click Sync Sales & Bank'}
+          </button>
           <button
             type="button"
             onClick={handle1ClickSync}
@@ -274,7 +442,7 @@ function DebtorListCard() {
               }
               setShowAddModal(true);
             }}
-            className="btn-primary !py-1.5 text-xs font-bold"
+            className="btn-secondary !py-1.5 text-xs font-bold"
           >
             <Plus size={13} /> Add Debtor
           </button>
@@ -351,6 +519,14 @@ function DebtorListCard() {
                       </td>
                       <td className="px-3 py-2 text-center align-middle">
                         <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDebtorLedger(row)}
+                            className="rounded p-1 text-muted hover:bg-brand-blue/10 hover:text-brand-blue"
+                            title="View Statement / Vouchers"
+                          >
+                            <FileText size={13} />
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleOpenEdit(row)}
@@ -572,6 +748,14 @@ function DebtorListCard() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Ledger Statement Modal */}
+      {selectedDebtorLedger && (
+        <DebtorLedgerModal
+          debtor={selectedDebtorLedger}
+          onClose={() => setSelectedDebtorLedger(null)}
+        />
       )}
     </Card>
   );
@@ -1086,11 +1270,10 @@ function DebtorWorkbookPreview() {
     <Card className="mt-4">
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <h2 className="text-[15px] font-black text-ink">Debtor workbook preview</h2>
+          <h2 className="text-[15px] font-black text-ink">Debtor Workbook Import & Preview</h2>
           <p className="text-[11px] text-muted">
-            Owner only. Reads one uploaded workbook and reports what an import would need; the reading
-            itself never writes. An apply is the separate, confirmed action below, offered only when the
-            backend marks the whole file eligible.
+            Owner only. Upload Sales Register, HDFC / Yes Bank Book, or HR-PB Target workbooks. Reading reports
+            vouchers and party matches without writing; apply is the confirmed step below.
           </p>
         </div>
         <input
@@ -1126,7 +1309,7 @@ function DebtorWorkbookPreview() {
       {phase.kind === 'idle' && (
         <EmptyState
           title="No debtor workbook read yet"
-          hint="Choose an .xlsx. The backend looks for stable ledger identifiers and an explicitly stated balance date, resolves each reference against the saved customer mapping, and reports unresolved rows. Reading imports nothing and changes nothing — an apply is a separate confirmed step, and only appears if the backend marks the whole file eligible."
+          hint="Choose an .xlsx workbook. Supports Tally Sales Registers, HDFC & Yes Bank Books, or HR-PB Dealer Targets to auto-calculate and update customer ledger balances."
         />
       )}
       {phase.kind === 'reading' && <Spinner label="Reading the file in this browser…" />}

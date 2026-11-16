@@ -119,6 +119,21 @@ def init_db(seed_state: dict[str, Any] | None = None):
             created_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS vouchers (
+            id TEXT PRIMARY KEY,
+            voucher_no TEXT NOT NULL,
+            voucher_type TEXT NOT NULL,
+            voucher_date TEXT NOT NULL,
+            party_name TEXT NOT NULL,
+            party_id TEXT,
+            debit_paise INTEGER DEFAULT 0,
+            credit_paise INTEGER DEFAULT 0,
+            book_source TEXT DEFAULT '',
+            file_sha256 TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            UNIQUE(voucher_no, voucher_type, voucher_date, party_name, debit_paise, credit_paise)
+        );
+
         CREATE TABLE IF NOT EXISTS stock_movements (
             id TEXT PRIMARY KEY,
             product_id TEXT NOT NULL,
@@ -533,6 +548,16 @@ def save_payment(payment: dict[str, Any]) -> dict[str, Any]:
                 now,
             ),
         )
+
+        if customer_id and amount_paise > 0:
+            conn.execute(
+                """
+                UPDATE parties 
+                SET balance_paise = MAX(0, balance_paise - ?), updated_at = ?
+                WHERE id = ?
+                """,
+                (amount_paise, now, customer_id),
+            )
 
         conn.commit()
 
@@ -970,6 +995,164 @@ def load_opening_balances() -> dict[str, list[dict[str, Any]]]:
                 "createdAt": r["created_at"]
             })
         return result
+
+# ----------------- Vouchers & Transaction Ledger -----------------
+
+def find_or_create_party_by_name(conn, party_name: str) -> tuple[str, bool]:
+    """Finds an existing party or creates a new one in SQLite. Returns (party_id, is_new)."""
+    import re
+    norm_name = " ".join(party_name.strip().split())
+    cur = conn.cursor()
+    
+    # 1. Exact or case-insensitive match
+    cur.execute("SELECT id FROM parties WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1", (norm_name,))
+    row = cur.fetchone()
+    if row:
+        return row[0], False
+
+    # 2. Simplified match (ignoring punctuation and spaces)
+    simplified = re.sub(r"[^a-zA-Z0-9]", "", norm_name.lower())
+    cur.execute("SELECT id, name FROM parties")
+    for pid, pname in cur.fetchall():
+        if re.sub(r"[^a-zA-Z0-9]", "", (pname or "").lower()) == simplified:
+            return pid, False
+
+    # 3. Create new party
+    from .voucher_parser import detect_state_and_city
+    state, city = detect_state_and_city(norm_name)
+    slug = re.sub(r"[^A-Z0-9]", "", norm_name.upper())[:8] or "CUST"
+    unique_suffix = hashlib.md5(norm_name.encode("utf-8")).hexdigest()[:4].upper()
+    new_id = f"DEBTOR-TALLY-{slug}-{unique_suffix}"
+    now = datetime.now().isoformat()
+
+    conn.execute(
+        """
+        INSERT INTO parties (id, name, state, city, district, salesperson, balance_paise, credit_days, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'Unassigned', 0, 30, 'active', ?, ?)
+        """,
+        (new_id, norm_name, state, city, city, now, now)
+    )
+    return new_id, True
+
+def recompute_party_balance(party_id: str, conn = None):
+    """Recomputes party balance directly from Opening Balance + Sales - Receipts - Payments."""
+    def _run(c):
+        cur = c.cursor()
+        # Opening balance
+        cur.execute("SELECT amount_paise FROM opening_balances WHERE customer_id = ? ORDER BY id DESC LIMIT 1", (party_id,))
+        ob_row = cur.fetchone()
+        ob_paise = ob_row[0] if ob_row else 0
+
+        # Sales debits minus credits
+        cur.execute(
+            """
+            SELECT COALESCE(SUM(debit_paise - credit_paise), 0)
+            FROM vouchers
+            WHERE party_id = ? AND LOWER(voucher_type) = 'sales'
+            """,
+            (party_id,)
+        )
+        sales_paise = cur.fetchone()[0]
+
+        # Receipts (money in from customer reduces debtor balance)
+        cur.execute(
+            """
+            SELECT COALESCE(SUM(debit_paise), 0)
+            FROM vouchers
+            WHERE party_id = ? AND LOWER(voucher_type) = 'receipt'
+            """,
+            (party_id,)
+        )
+        receipt_paise = cur.fetchone()[0]
+
+        # Direct customer payments
+        cur.execute(
+            """
+            SELECT COALESCE(SUM(amount_paise), 0)
+            FROM payments
+            WHERE customer_id = ? AND voided_at IS NULL
+            """,
+            (party_id,)
+        )
+        direct_payment_paise = cur.fetchone()[0]
+
+        new_balance_paise = max(0, ob_paise + sales_paise - receipt_paise - direct_payment_paise)
+        c.execute(
+            "UPDATE parties SET balance_paise = ?, updated_at = ? WHERE id = ?",
+            (new_balance_paise, datetime.now().isoformat(), party_id)
+        )
+
+    if conn is not None:
+        _run(conn)
+    else:
+        with get_connection() as c:
+            _run(c)
+            c.commit()
+
+def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> dict[str, Any]:
+    """Saves a batch of vouchers with idempotent deduplication and updates party balances."""
+    now = datetime.now().isoformat()
+    inserted = 0
+    skipped = 0
+    new_parties_count = 0
+    affected_party_ids = set()
+
+    with get_connection() as conn:
+        for v in vouchers:
+            v_id = v["id"]
+            party_name = v["partyName"]
+            party_id, is_new = find_or_create_party_by_name(conn, party_name)
+            if is_new:
+                new_parties_count += 1
+            v["partyId"] = party_id
+            affected_party_ids.add(party_id)
+
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT OR IGNORE INTO vouchers 
+                (id, voucher_no, voucher_type, voucher_date, party_name, party_id, debit_paise, credit_paise, book_source, file_sha256, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    v_id,
+                    v.get("voucherNo", ""),
+                    v.get("voucherType", "Sales"),
+                    v.get("voucherDate", now[:10]),
+                    party_name,
+                    party_id,
+                    v.get("debitPaise", 0),
+                    v.get("creditPaise", 0),
+                    v.get("bookSource", ""),
+                    file_sha,
+                    now,
+                ),
+            )
+            if cur.rowcount > 0:
+                inserted += 1
+            else:
+                skipped += 1
+
+        for pid in affected_party_ids:
+            recompute_party_balance(pid, conn)
+
+        conn.commit()
+
+    return {
+        "insertedCount": inserted,
+        "skippedCount": skipped,
+        "newPartiesCount": new_parties_count,
+        "affectedPartiesCount": len(affected_party_ids),
+    }
+
+def load_vouchers(party_id: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        if party_id:
+            cur.execute("SELECT * FROM vouchers WHERE party_id = ? ORDER BY voucher_date DESC, id DESC LIMIT ?", (party_id, limit))
+        else:
+            cur.execute("SELECT * FROM vouchers ORDER BY voucher_date DESC, id DESC LIMIT ?", (limit,))
+        return [dict(r) for r in cur.fetchall()]
 
 # ----------------- Invitations & User Management -----------------
 

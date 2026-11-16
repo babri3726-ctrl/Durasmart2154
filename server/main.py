@@ -1697,6 +1697,10 @@ def delete_debtor(debtor_id: str):
         print(f"Warning: Failed to delete party from DB: {e}")
     return {"deleted": True, "id": debtor_id, "name": deleted["name"]}
 
+@app.get("/api/v1/vouchers")
+def get_vouchers(partyId: str | None = None, limit: int = 200):
+    return db.load_vouchers(party_id=partyId, limit=limit)
+
 # ----------------- 1-Click HR-PB Sales Targets & Dealers Sync -----------------
 @app.post("/api/v1/imports/excel/hr-pb/sync")
 def sync_hr_pb_excel():
@@ -1777,6 +1781,46 @@ def sync_hr_pb_excel():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/imports/excel/accounting-books/sync")
+def sync_accounting_books_excel():
+    """1-Click sync for local sales.xlsx, hdfc.xlsx, and yes.xlsx."""
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidates = ["sales.xlsx", "hdfc.xlsx", "yes.xlsx"]
+    found = [os.path.join(base_dir, f) for f in candidates if os.path.exists(os.path.join(base_dir, f))]
+    if not found:
+        raise HTTPException(status_code=404, detail="No accounting books (sales.xlsx, hdfc.xlsx, yes.xlsx) found in workspace root.")
+    
+    from .voucher_parser import parse_accounting_workbook
+    total_inserted = 0
+    total_skipped = 0
+    total_new_parties = 0
+    sources = []
+
+    for path in found:
+        with open(path, "rb") as f:
+            f_bytes = f.read()
+        f_sha = hashlib.sha256(f_bytes).hexdigest()
+        parsed = parse_accounting_workbook(path, file_sha256=f_sha)
+        res = db.save_vouchers_batch(parsed["vouchers"], file_sha=f_sha)
+        total_inserted += res["insertedCount"]
+        total_skipped += res["skippedCount"]
+        total_new_parties += res["newPartiesCount"]
+        sources.append(parsed["bookSource"])
+
+    persisted = db.load_all_persisted_state()
+    for k in ["debtors", "customers"]:
+        if k in persisted:
+            STATE[k] = persisted[k]
+
+    return {
+        "status": "success",
+        "message": f"Synced {len(found)} books ({', '.join(sources)}): {total_inserted} vouchers recorded ({total_skipped} skipped), {total_new_parties} new parties created.",
+        "booksSynced": sources,
+        "insertedCount": total_inserted,
+        "skippedCount": total_skipped,
+        "newPartiesCount": total_new_parties
+    }
 
 @app.get("/api/v1/sales/targets")
 def get_sales_targets(
@@ -2386,8 +2430,13 @@ def patch_order(order_id: str, body: dict[str, Any]):
 @app.delete("/api/v1/orders/{order_id}")
 def delete_order_endpoint(
     order_id: str,
+    authorization: str | None = Header(None),
     x_user_role: str | None = Header(None, alias="X-User-Role")
 ):
+    caller = resolve_caller(authorization, x_user_role)
+    if not caller["isOwner"]:
+        raise HTTPException(status_code=403, detail="Only owner has authority to delete orders.")
+
     order_idx = next((i for i, o in enumerate(STATE["orders"]) if o["id"] == order_id), None)
     if order_idx is None:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -3482,7 +3531,14 @@ def update_tour(tour_id: str, body: TourPlanUpdate):
     return saved
 
 @app.delete("/api/v1/tours/{tour_id}")
-def delete_tour(tour_id: str):
+def delete_tour(
+    tour_id: str,
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
+):
+    caller = resolve_caller(authorization, x_user_role)
+    if not caller["isOwner"]:
+        raise HTTPException(status_code=403, detail="Only owner can delete tour plans.")
     existing = db.get_tour_plan_by_id(tour_id)
     if not existing:
         raise HTTPException(status_code=404, detail=f"Tour plan {tour_id} not found")
@@ -3523,7 +3579,14 @@ def get_vacant_areas():
     }
 
 @app.post("/api/v1/territories/assign")
-def assign_territory(body: TerritoryAssignRequest):
+def assign_territory(
+    body: TerritoryAssignRequest,
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
+):
+    caller = resolve_caller(authorization, x_user_role)
+    if not caller["isOwner"]:
+        raise HTTPException(status_code=403, detail="Only owner can assign territories.")
     district_clean = body.district.strip().upper()
     sp_name = body.salesperson.strip()
     sp_id = body.salespersonId or "EMP-SP-01"
@@ -3956,6 +4019,66 @@ async def preview_debtor_bytes(request: Request, fileName: str | None = "HR-PB.x
         f.write(body)
 
     try:
+        from .voucher_parser import is_accounting_workbook, parse_accounting_workbook
+        if is_accounting_workbook(tmp_path):
+            acct_data = parse_accounting_workbook(tmp_path)
+            vouchers = acct_data["vouchers"]
+            file_sha = hashlib.sha256(body).hexdigest()
+            apply_digest = hashlib.sha256(f"{file_sha}:voucher_preview_digest".encode()).hexdigest()
+
+            rows = []
+            for i, v in enumerate(vouchers):
+                rows.append({
+                    "rowNumber": i + 1,
+                    "rawPartyName": v["partyName"],
+                    "resolvedCustomerId": v.get("partyId") or "",
+                    "resolvedCustomerName": v["partyName"],
+                    "ledgerId": v["bookSource"],
+                    "debit": f"{v['debitAmount']:.2f}",
+                    "credit": f"{v['creditAmount']:.2f}",
+                    "resolution": "matched",
+                    "issues": []
+                })
+
+            return {
+                "filename": fileName or "accounting.xlsx",
+                "fileSha256": file_sha,
+                "sizeBytes": len(body),
+                "sheetName": acct_data["bookSource"],
+                "sheetNames": [acct_data["bookSource"]],
+                "source": "tally-vouchers",
+                "refSource": acct_data["bookSource"],
+                "headerRowNumber": acct_data["headerRow"],
+                "partyColumnLabel": "Particulars",
+                "ledgerIdColumnLabel": "Vch Type",
+                "debitColumnLabel": "Debit",
+                "creditColumnLabel": "Credit",
+                "asOf": datetime.now().strftime("%Y-%m-%d"),
+                "asOfVerified": True,
+                "asOfSource": f"{acct_data['bookSource']} ({acct_data['periodText']})",
+                "periodText": acct_data["periodText"],
+                "dataRowCount": len(vouchers),
+                "blankRowCount": 0,
+                "totalRowCount": len(vouchers),
+                "zeroBalanceRowCount": 0,
+                "resolvedRowCount": len(vouchers),
+                "missingRowCount": 0,
+                "ambiguousRowCount": 0,
+                "invalidRowCount": 0,
+                "unresolvedRowCount": 0,
+                "rowsListed": len(vouchers),
+                "rowsTruncated": False,
+                "rows": rows,
+                "warnings": [],
+                "blockers": [],
+                "applyAvailable": True,
+                "applyPreviewDigest": apply_digest,
+                "applyBlockedReason": "",
+                "businessRecordsCreated": False,
+                "databaseRowsWritten": False,
+                "disclaimer": f"Read-only preview of {acct_data['bookSource']}. Nothing was written."
+            }
+
         snap = extract_hr_pb_targets(tmp_path)
         file_sha = snap["file_sha256"]
         file_size = len(body)
@@ -4035,60 +4158,101 @@ async def apply_debtor_bytes(
     if not body:
         raise HTTPException(status_code=400, detail="Empty debtor workbook upload")
 
-    target_path = os.path.join(db.DATA_DIR, "HR-PB.xlsx")
-    with open(target_path, "wb") as f:
+    file_sha = hashlib.sha256(body).hexdigest()
+    tmp_path = os.path.join(tempfile.gettempdir(), f"debtor_apply_{int(datetime.now().timestamp())}.xlsx")
+    with open(tmp_path, "wb") as f:
         f.write(body)
 
-    snap = extract_hr_pb_targets(target_path)
-    STATE["hrpb_snapshot"] = snap
-    STATE["targets"] = snap["all_targets"]
+    try:
+        from .voucher_parser import is_accounting_workbook, parse_accounting_workbook
+        if is_accounting_workbook(tmp_path):
+            acct_data = parse_accounting_workbook(tmp_path, file_sha256=file_sha)
+            vouchers = acct_data["vouchers"]
+            batch_res = db.save_vouchers_batch(vouchers, file_sha=file_sha)
 
-    existing_debtors_by_name = {d["name"].lower(): d for d in STATE["debtors"]}
-    existing_customers_by_name = {c["name"].lower(): c for c in STATE["customers"]}
-    dealers = snap.get("dealers_master", [])
-    updated = 0
-    added = 0
+            # Rehydrate in-memory state so UI updates instantly
+            persisted = db.load_all_persisted_state()
+            for k in ["debtors", "customers"]:
+                if k in persisted:
+                    STATE[k] = persisted[k]
 
-    for dealer in dealers:
-        d_name = dealer["name"].lower()
-        bal_paise = round(float(dealer.get("balance", 0.0)) * 100)
-        if d_name in existing_debtors_by_name:
-            target_d = existing_debtors_by_name[d_name]
-            target_d["balance"] = dealer["balance"]
-            target_d["balance_formatted"] = dealer.get("balance_formatted", f"{dealer['balance']:.2f}")
-            target_d["city"] = dealer.get("city", target_d.get("city", ""))
-            target_d["state"] = dealer.get("state", target_d.get("state", ""))
-            target_d["salesperson"] = dealer.get("salesperson", target_d.get("salesperson", "Unassigned"))
-            target_d["outstandingPaise"] = bal_paise
-            target_d["overduePaise"] = bal_paise
-            target_d["isOverdue"] = bal_paise > 0
-            updated += 1
-        else:
-            dealer["outstandingPaise"] = bal_paise
-            dealer["overduePaise"] = bal_paise
-            dealer["isOverdue"] = bal_paise > 0
-            dealer.setdefault("mobile", f"98140{20000 + len(STATE['debtors'])}")
-            dealer.setdefault("creditDays", 30)
-            dealer.setdefault("status", "active")
-            STATE["debtors"].append(dealer)
-            existing_debtors_by_name[d_name] = dealer
-            added += 1
+            return {
+                "filename": fileName or "accounting.xlsx",
+                "fileSha256": file_sha,
+                "sheetName": acct_data["bookSource"],
+                "asOf": datetime.now().strftime("%Y-%m-%d"),
+                "source": "tally-vouchers",
+                "snapshotRowCount": len(vouchers),
+                "createdRowCount": batch_res["insertedCount"],
+                "unchangedRowCount": batch_res["skippedCount"],
+                "replacedRowCount": batch_res["newPartiesCount"],
+                "replayed": batch_res["insertedCount"] == 0,
+                "databaseRowsWritten": True,
+                "businessRecordsCreated": True,
+                "disclaimer": f"Applied {batch_res['insertedCount']} vouchers from {acct_data['bookSource']}. {batch_res['newPartiesCount']} new parties created, {batch_res['affectedPartiesCount']} debtor balances updated in SQLite."
+            }
 
-    return {
-        "filename": fileName or "HR-PB.xlsx",
-        "fileSha256": snap["file_sha256"],
-        "sheetName": "HR-PB",
-        "asOf": datetime.now().strftime("%Y-%m-%d"),
-        "source": "hr-pb",
-        "snapshotRowCount": len(dealers),
-        "createdRowCount": added,
-        "unchangedRowCount": 0,
-        "replacedRowCount": updated,
-        "replayed": False,
-        "databaseRowsWritten": True,
-        "businessRecordsCreated": False,
-        "disclaimer": "Debtor balances applied."
-    }
+        target_path = os.path.join(db.DATA_DIR, "HR-PB.xlsx")
+        with open(target_path, "wb") as f:
+            f.write(body)
+
+        snap = extract_hr_pb_targets(target_path)
+        STATE["hrpb_snapshot"] = snap
+        STATE["targets"] = snap["all_targets"]
+
+        existing_debtors_by_name = {d["name"].lower(): d for d in STATE["debtors"]}
+        dealers = snap.get("dealers_master", [])
+        updated = 0
+        added = 0
+
+        for dealer in dealers:
+            d_name = dealer["name"].lower()
+            bal_paise = round(float(dealer.get("balance", 0.0)) * 100)
+            if d_name in existing_debtors_by_name:
+                target_d = existing_debtors_by_name[d_name]
+                target_d["balance"] = dealer["balance"]
+                target_d["balance_formatted"] = dealer.get("balance_formatted", f"{dealer['balance']:.2f}")
+                target_d["city"] = dealer.get("city", target_d.get("city", ""))
+                target_d["state"] = dealer.get("state", target_d.get("state", ""))
+                target_d["salesperson"] = dealer.get("salesperson", target_d.get("salesperson", "Unassigned"))
+                target_d["outstandingPaise"] = bal_paise
+                target_d["overduePaise"] = bal_paise
+                target_d["isOverdue"] = bal_paise > 0
+                db.save_party(target_d)
+                updated += 1
+            else:
+                dealer["outstandingPaise"] = bal_paise
+                dealer["overduePaise"] = bal_paise
+                dealer["isOverdue"] = bal_paise > 0
+                dealer.setdefault("mobile", f"98140{20000 + len(STATE['debtors'])}")
+                dealer.setdefault("creditDays", 30)
+                dealer.setdefault("status", "active")
+                db.save_party(dealer)
+                STATE["debtors"].append(dealer)
+                existing_debtors_by_name[d_name] = dealer
+                added += 1
+
+        return {
+            "filename": fileName or "HR-PB.xlsx",
+            "fileSha256": snap["file_sha256"],
+            "sheetName": "HR-PB",
+            "asOf": datetime.now().strftime("%Y-%m-%d"),
+            "source": "hr-pb",
+            "snapshotRowCount": len(dealers),
+            "createdRowCount": added,
+            "unchangedRowCount": 0,
+            "replacedRowCount": updated,
+            "replayed": False,
+            "databaseRowsWritten": True,
+            "businessRecordsCreated": False,
+            "disclaimer": "Debtor balances applied."
+        }
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 @app.post("/api/v1/imports/excel/stock-import")
 async def apply_uploaded_stock_bytes(request: Request, fileName: str | None = "1-8-26.xlsx", confirm: str | None = "true"):
@@ -4804,14 +4968,10 @@ def get_stock_movements(page: int = 1, pageSize: int = 20):
         "nextCursor": None
     }
 
-# ----------------- Tasks & Tours -----------------
+# ----------------- Tasks -----------------
 @app.get("/api/v1/tasks")
 def get_tasks():
     return {"items": STATE["tasks"]}
-
-@app.get("/api/v1/tours")
-def get_tours():
-    return {"items": STATE["tours"]}
 
 # ----------------- Single Page Application (SPA) Frontend Mount -----------------
 WEB_DIST_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web", "dist")

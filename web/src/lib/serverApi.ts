@@ -358,9 +358,10 @@ async function send<T>(path: string, options: SendOptions = {}): Promise<T> {
   }
 
   if (!response.ok) {
-    const envelope = parsed as { error?: { code?: string; message?: string; fields?: Record<string, string> } } | undefined;
+    const envelope = parsed as { error?: { code?: string; message?: string; fields?: Record<string, string> }; detail?: string } | undefined;
     const detail = envelope?.error;
-    throw new ServerError(detail?.message ?? `The backend answered ${response.status}.`, {
+    const detailStr = typeof envelope?.detail === 'string' ? envelope.detail : undefined;
+    throw new ServerError(detail?.message ?? detailStr ?? `The backend answered ${response.status}.`, {
       code: detail?.code ?? 'server_error',
       status: response.status,
       fields: detail?.fields,
@@ -2044,6 +2045,37 @@ export function deleteDebtor(id: string): Promise<{ deleted: boolean; id: string
 
 export function syncHrPbTargets(): Promise<{ status: string; message: string; rows_processed?: number }> {
   return send<{ status: string; message: string; rows_processed?: number }>('/imports/excel/hr-pb/sync', {
+    method: 'POST',
+  });
+}
+
+export interface ServerVoucher {
+  id: string;
+  voucher_no: string;
+  voucher_type: string;
+  voucher_date: string;
+  party_name: string;
+  party_id: string;
+  debit_paise: number;
+  credit_paise: number;
+  book_source: string;
+  created_at: string;
+}
+
+export function listVouchers(partyId?: string): Promise<ServerVoucher[]> {
+  const query = partyId ? `?partyId=${encodeURIComponent(partyId)}` : '';
+  return send<ServerVoucher[]>(`/vouchers${query}`);
+}
+
+export function syncAccountingBooks(): Promise<{
+  status: string;
+  message: string;
+  booksSynced: string[];
+  insertedCount: number;
+  skippedCount: number;
+  newPartiesCount: number;
+}> {
+  return send('/imports/excel/accounting-books/sync', {
     method: 'POST',
   });
 }
