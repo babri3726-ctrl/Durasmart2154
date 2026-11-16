@@ -1174,17 +1174,19 @@ def load_vouchers(
         if book_source:
             bs_lower = book_source.lower().strip()
             if bs_lower in ("all", "liquid"):
-                clauses.append("book_source IN ('HDFC Bank Book', 'Yes Bank Book', 'Cash Book', 'Khan Cash Book')")
+                clauses.append("book_source IN ('HDFC Bank Book', 'Yes Bank Book', 'Cash Book', 'Khan Cash Book', 'Cash GBD Book')")
             elif bs_lower in ("bank",):
                 clauses.append("book_source IN ('HDFC Bank Book', 'Yes Bank Book')")
             elif bs_lower in ("cash",):
-                clauses.append("book_source IN ('Cash Book', 'Khan Cash Book')")
+                clauses.append("book_source IN ('Cash Book', 'Khan Cash Book', 'Cash GBD Book')")
             elif "hdfc" in bs_lower:
                 clauses.append("book_source = 'HDFC Bank Book'")
             elif "yes" in bs_lower:
                 clauses.append("book_source = 'Yes Bank Book'")
             elif "khan" in bs_lower:
                 clauses.append("book_source = 'Khan Cash Book'")
+            elif "gbd" in bs_lower:
+                clauses.append("book_source = 'Cash GBD Book'")
             elif "cash" in bs_lower:
                 clauses.append("book_source = 'Cash Book'")
             else:
@@ -1227,7 +1229,7 @@ def get_bank_summary(book_source: str | None = None) -> dict[str, Any]:
                         COALESCE(SUM(credit_paise), 0) as total_receipts_paise,
                         COALESCE(SUM(debit_paise), 0) as total_payments_paise
                     FROM vouchers 
-                    WHERE book_source IN ('Cash Book', 'Khan Cash Book')
+                    WHERE book_source IN ('Cash Book', 'Khan Cash Book', 'Cash GBD Book')
                 """)
             elif "khan" in bs_lower:
                 cur.execute("""
@@ -1237,6 +1239,15 @@ def get_bank_summary(book_source: str | None = None) -> dict[str, Any]:
                         COALESCE(SUM(debit_paise), 0) as total_payments_paise
                     FROM vouchers 
                     WHERE book_source = 'Khan Cash Book'
+                """)
+            elif "gbd" in bs_lower:
+                cur.execute("""
+                    SELECT 
+                        COUNT(*) as total_vouchers,
+                        COALESCE(SUM(credit_paise), 0) as total_receipts_paise,
+                        COALESCE(SUM(debit_paise), 0) as total_payments_paise
+                    FROM vouchers 
+                    WHERE book_source = 'Cash GBD Book'
                 """)
             elif "cash" in bs_lower:
                 cur.execute("""
@@ -1281,7 +1292,7 @@ def get_bank_summary(book_source: str | None = None) -> dict[str, Any]:
                     COALESCE(SUM(credit_paise), 0) as total_receipts_paise,
                     COALESCE(SUM(debit_paise), 0) as total_payments_paise
                 FROM vouchers 
-                WHERE book_source IN ('HDFC Bank Book', 'Yes Bank Book', 'Cash Book', 'Khan Cash Book')
+                WHERE book_source IN ('HDFC Bank Book', 'Yes Bank Book', 'Cash Book', 'Khan Cash Book', 'Cash GBD Book')
             """)
         row = cur.fetchone()
         receipts = row["total_receipts_paise"] if row else 0

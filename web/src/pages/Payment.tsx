@@ -79,7 +79,7 @@ export default function Payment() {
     netPaise: 0,
   });
   const [loadingBank, setLoadingBank] = useState(false);
-  const [bankFilter, setBankFilter] = useState<'all' | 'hdfc' | 'yes' | 'cash' | 'khan'>('all');
+  const [bankFilter, setBankFilter] = useState<'all' | 'hdfc' | 'yes' | 'cash' | 'khan' | 'gbd'>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'receipt' | 'payment'>('all');
   const [bankSearch, setBankSearch] = useState('');
 
@@ -409,7 +409,7 @@ export default function Payment() {
               : 'border-transparent text-muted hover:text-ink'
           }`}
         >
-          <Building2 size={16} /> Bank &amp; Cash Statement Ledger (HDFC, Yes, Cash &amp; Khan)
+          <Building2 size={16} /> Bank &amp; Cash Statement Ledger (HDFC, Yes, Cash, Khan &amp; GBD)
         </button>
         <button
           type="button"
@@ -484,9 +484,9 @@ export default function Payment() {
           <Card className="border-2 border-brand-blue/20">
             <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
               <div>
-                <h2 className="text-[14px] font-black text-ink">Upload Bank &amp; Cash Books (HDFC, Yes, Cash &amp; Khan)</h2>
+                <h2 className="text-[14px] font-black text-ink">Upload Bank &amp; Cash Books (HDFC, Yes, Cash, Khan Cash &amp; Cash GBD)</h2>
                 <p className="text-[11px] text-muted">
-                  Upload <strong>hdfc.xlsx</strong>, <strong>yes.xlsx</strong>, <strong>cash.xlsx</strong>, or <strong>khan cash.xlsx</strong>. The backend verifies the book title and auto-updates customer ledgers.
+                  Upload <strong>hdfc.xlsx</strong>, <strong>yes.xlsx</strong>, <strong>cash.xlsx</strong>, <strong>khan cash.xlsx</strong>, or <strong>cash gbd.xlsx</strong>. The backend verifies the book title and auto-updates customer ledgers.
                   <em> (Note: Sales registers and target sheets must be uploaded in the Debtor section).</em>
                 </p>
               </div>
@@ -523,9 +523,9 @@ export default function Payment() {
                 <div className="rounded-full bg-brand-blue/10 p-2.5 text-brand-blue mb-2 group-hover:scale-110 transition">
                   <Building2 size={24} />
                 </div>
-                <p className="text-xs font-bold text-ink">Drag &amp; Drop or Browse HDFC / Yes Bank / Cash / Khan Cash Excel Workbook</p>
+                <p className="text-xs font-bold text-ink">Drag &amp; Drop or Browse HDFC / Yes Bank / Cash / Khan / GBD Excel Workbook</p>
                 <p className="mt-0.5 text-[11px] text-muted max-w-sm">
-                  Supports Tally HDFC Bank Book, Yes Bank Book, Cash Book &amp; Khan Cash Book exports.
+                  Supports Tally HDFC Bank Book, Yes Bank Book, Cash Book, Khan Cash Book &amp; Cash GBD Book exports.
                 </p>
               </label>
             )}
@@ -618,7 +618,7 @@ export default function Payment() {
               <div className="flex flex-wrap items-center gap-2">
                 <select
                   value={bankFilter}
-                  onChange={(e) => setBankFilter(e.target.value as 'all' | 'hdfc' | 'yes' | 'cash' | 'khan')}
+                  onChange={(e) => setBankFilter(e.target.value as 'all' | 'hdfc' | 'yes' | 'cash' | 'khan' | 'gbd')}
                   className="input !w-auto !py-1.5 text-xs font-semibold"
                 >
                   <option value="all">🏦 All Accounts (Bank &amp; Cash)</option>
@@ -626,6 +626,7 @@ export default function Payment() {
                   <option value="yes">🏦 Yes Bank Book</option>
                   <option value="cash">💵 Cash Book</option>
                   <option value="khan">💵 Khan Cash Book</option>
+                  <option value="gbd">💵 Cash GBD Book</option>
                 </select>
 
                 <select
@@ -661,7 +662,7 @@ export default function Payment() {
               <p className="py-8 text-center text-xs text-muted">Loading statement ledger…</p>
             ) : bankVouchers.length === 0 ? (
               <div className="py-8 text-center text-xs text-muted">
-                No transactions found. Upload <strong>hdfc.xlsx</strong>, <strong>yes.xlsx</strong>, <strong>cash.xlsx</strong>, or <strong>khan cash.xlsx</strong> above to populate the ledger.
+                No transactions found. Upload <strong>hdfc.xlsx</strong>, <strong>yes.xlsx</strong>, <strong>cash.xlsx</strong>, <strong>khan cash.xlsx</strong>, or <strong>cash gbd.xlsx</strong> above to populate the ledger.
               </div>
             ) : (
               <div className="overflow-x-auto rounded-xl border border-line">
@@ -689,6 +690,7 @@ export default function Payment() {
                       if (bs.includes('hdfc')) headBadge = 'bg-blue-500/10 text-blue-700 dark:text-blue-300';
                       else if (bs.includes('yes')) headBadge = 'bg-purple-500/10 text-purple-700 dark:text-purple-300';
                       else if (bs.includes('khan')) headBadge = 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300';
+                      else if (bs.includes('gbd')) headBadge = 'bg-teal-500/10 text-teal-700 dark:text-teal-300';
                       else if (bs.includes('cash')) headBadge = 'bg-amber-500/10 text-amber-700 dark:text-amber-300';
 
                       let typeBadge = isReceipt ? 'bg-emerald-500/10 text-emerald-700' : 'bg-rose-500/10 text-rose-700';

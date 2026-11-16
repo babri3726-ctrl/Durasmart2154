@@ -112,9 +112,23 @@ def test_upload_section_validation_accepts_cash_and_khan_cash():
     assert resp_khan.json()["applyAvailable"] is True
     assert resp_khan.json()["sheetName"] == "Khan Cash Book"
 
+    # Cash GBD
+    gbd_path = os.path.join(os.path.dirname(__file__), "..", "data", "cash gbd.xlsx")
+    with open(gbd_path, "rb") as f:
+        data_gbd = f.read()
+
+    resp_gbd = client.post(
+        "/api/v1/payments/imports/preview?fileName=cash gbd.xlsx",
+        content=data_gbd,
+        headers={"Content-Type": "application/octet-stream"}
+    )
+    assert resp_gbd.status_code == 200
+    assert resp_gbd.json()["applyAvailable"] is True
+    assert resp_gbd.json()["sheetName"] == "Cash GBD Book"
+
 
 def test_upload_section_validation_rejects_cash_file_in_debtor_section():
-    """cash.xlsx uploaded in Debtor section should be rejected with 400."""
+    """cash.xlsx and cash gbd.xlsx uploaded in Debtor section should be rejected with 400."""
     cash_path = os.path.join(os.path.dirname(__file__), "..", "data", "cash.xlsx")
     if not os.path.exists(cash_path):
         pytest.skip("data/cash.xlsx not found")
@@ -129,6 +143,19 @@ def test_upload_section_validation_rejects_cash_file_in_debtor_section():
     )
     assert resp.status_code == 400
     assert "Payment section" in resp.json()["detail"]
+
+    # Cash GBD in debtor section
+    gbd_path = os.path.join(os.path.dirname(__file__), "..", "data", "cash gbd.xlsx")
+    with open(gbd_path, "rb") as f:
+        data_gbd = f.read()
+
+    resp_gbd = client.post(
+        "/api/v1/debtors/imports/preview?fileName=cash gbd.xlsx&section=debtors",
+        content=data_gbd,
+        headers={"Content-Type": "application/octet-stream"}
+    )
+    assert resp_gbd.status_code == 400
+    assert "Payment section" in resp_gbd.json()["detail"]
 
 
 def test_bank_transactions_endpoint():

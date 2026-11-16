@@ -121,6 +121,8 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
     top_text = f"{ws.cell(1, 1).value or ''} {ws.cell(2, 1).value or ''}".strip().lower()
     if "khan" in top_text or "khan" in fn_lower:
         book_source = "Khan Cash Book"
+    elif "gbd" in top_text or "gbd" in fn_lower:
+        book_source = "Cash GBD Book"
     elif "cash" in top_text or "cash" in fn_lower:
         book_source = "Cash Book"
     elif "hdfc" in top_text or "hdfc" in fn_lower:
