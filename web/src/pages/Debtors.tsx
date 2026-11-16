@@ -33,7 +33,7 @@
  *  reach the verified apply, and nothing on this page imports the workbook as a verified ledger.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, Component, type ErrorInfo, type ReactNode } from 'react';
 import {
   CheckCircle2,
   FileSearch,
@@ -94,8 +94,9 @@ import {
 
 const PAGE_SIZE = 20;
 
-function money(paise: number | null): string {
-  return paise === null ? '—' : rupees(paise);
+function money(paise: number | null | undefined): string {
+  if (paise === null || paise === undefined || isNaN(paise)) return '—';
+  return rupees(paise);
 }
 
 function parseVoucherDate(str: string): Date {
@@ -1559,7 +1560,60 @@ type ApplyState =
   | { kind: 'applied'; outcome: ServerDebtorApply }
   | { kind: 'failed'; code: string; message: string; details: string[] };
 
-const shortDigest = (value: string): string => (value.length <= 16 ? value : `${value.slice(0, 16)}…`);
+interface ErrorBoundaryProps {
+  children: ReactNode;
+  fallbackTitle?: string;
+  onReset?: () => void;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class SectionErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('SectionErrorBoundary caught:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="rounded-xl border border-brand-red/30 bg-white p-4 my-3 shadow-sm">
+          <p className="flex items-center gap-2 text-sm font-black text-brand-red">
+            <ShieldAlert size={18} /> {this.props.fallbackTitle || 'Display error in debtor preview'}
+          </p>
+          <p className="mt-1 text-xs text-ink font-mono bg-canvas p-2 rounded">
+            {this.state.error?.message || 'Unknown render error'}
+          </p>
+          <button
+            type="button"
+            className="btn-outline btn-sm mt-3"
+            onClick={() => {
+              this.setState({ hasError: false, error: null });
+              this.props.onReset?.();
+            }}
+          >
+            Reset view
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const shortDigest = (value?: string | null): string =>
+  !value ? '—' : value.length <= 16 ? value : `${value.slice(0, 16)}…`;
 
 const VERDICT_TONE: Record<string, string> = {
   resolved: 'bg-brand-green/12 text-brand-green',
@@ -1568,8 +1622,9 @@ const VERDICT_TONE: Record<string, string> = {
   invalid: 'bg-brand-red/10 text-brand-red',
 };
 
-function Verdict({ value }: { value: string }) {
-  return <span className={`chip ${VERDICT_TONE[value] ?? 'bg-line text-muted'}`}>{value}</span>;
+function Verdict({ value }: { value?: string }) {
+  const val = value || 'resolved';
+  return <span className={`chip ${VERDICT_TONE[val] ?? 'bg-line text-muted'}`}>{val}</span>;
 }
 
 function FindingList({
@@ -1578,19 +1633,20 @@ function FindingList({
   empty,
 }: {
   title: string;
-  findings: ServerDebtorPreviewFinding[];
+  findings?: ServerDebtorPreviewFinding[];
   empty: string;
 }) {
+  const list = Array.isArray(findings) ? findings : [];
   return (
     <div className="mt-3">
       <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted">
-        {title} ({findings.length})
+        {title} ({list.length})
       </p>
-      {findings.length === 0 ? (
+      {list.length === 0 ? (
         <p className="mt-1 text-[11px] text-faint">{empty}</p>
       ) : (
         <ul className="mt-1 divide-y divide-line/50 rounded-field border border-line bg-white">
-          {findings.map((finding, index) => (
+          {list.map((finding, index) => (
             <li key={`${finding.code}-${index}`} className="flex flex-wrap items-baseline gap-2 px-3 py-1.5 text-[11px]">
               <span className="chip bg-brand-orange/15 text-[#C96B15]">{finding.code}</span>
               <span className="text-ink">{finding.message}</span>
@@ -1603,20 +1659,20 @@ function FindingList({
   );
 }
 
-function CountTile({ label, value, tone = 'text-ink' }: { label: string; value: number; tone?: string }) {
+function CountTile({ label, value, tone = 'text-ink' }: { label: string; value?: number; tone?: string }) {
   return (
     <div className="rounded-field border border-line bg-white px-3 py-2">
       <p className="text-[10px] font-extrabold uppercase tracking-wide text-muted">{label}</p>
-      <p className={`mt-0.5 text-[18px] font-black tabular-nums ${tone}`}>{value}</p>
+      <p className={`mt-0.5 text-[18px] font-black tabular-nums ${tone}`}>{typeof value === 'number' ? value : 0}</p>
     </div>
   );
 }
 
-function ColumnLine({ label, value }: { label: string; value: string | null }) {
+function ColumnLine({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <span>
       <span className="text-muted">{label} </span>
-      <span className={value === null ? 'font-bold text-brand-red' : 'font-bold text-ink'}>
+      <span className={!value ? 'font-bold text-brand-red' : 'font-bold text-ink'}>
         {value ?? 'not found'}
       </span>
     </span>
@@ -1624,29 +1680,37 @@ function ColumnLine({ label, value }: { label: string; value: string | null }) {
 }
 
 function PreviewRowLine({ row }: { row: ServerDebtorPreviewRow }) {
+  const candidateIds = Array.isArray(row.candidateIds) ? row.candidateIds : [];
+  const issues = Array.isArray(row.issues) ? row.issues : [];
+  const debitPaise = typeof row.debitPaise === 'number' ? row.debitPaise : 0;
+  const creditPaise = typeof row.creditPaise === 'number' ? row.creditPaise : 0;
+  const partyName = row.partyName || (row as unknown as { rawPartyName?: string }).rawPartyName || '';
+  const verdict = row.verdict || (row as unknown as { resolution?: string }).resolution || 'resolved';
+  const customerName = row.customerName || (row as unknown as { resolvedCustomerName?: string }).resolvedCustomerName || null;
+
   return (
     <tr className="border-b border-line/60 last:border-b-0">
       <td className="px-3 py-2 align-top text-[10px] tabular-nums text-faint">{row.rowNumber}</td>
       <td className="px-3 py-2 align-top">
-        <span className="font-bold text-ink">{row.partyName || <span className="italic text-faint">no party name</span>}</span>
+        <span className="font-bold text-ink">{partyName || <span className="italic text-faint">no party name</span>}</span>
         <span className="ml-2 font-mono text-[10px] text-faint">{row.sourceRef ?? 'no stable reference'}</span>
       </td>
-      <td className="px-3 py-2 text-right align-top font-semibold tabular-nums">{money(row.debitPaise)}</td>
-      <td className="px-3 py-2 text-right align-top font-semibold tabular-nums">{money(row.creditPaise)}</td>
+      <td className="px-3 py-2 text-right align-top font-semibold tabular-nums">{money(debitPaise)}</td>
+      <td className="px-3 py-2 text-right align-top font-semibold tabular-nums">{money(creditPaise)}</td>
       <td className="px-3 py-2 align-top">
-        <Verdict value={row.verdict} />
-        {row.reason !== null && <span className="ml-1.5 text-[10px] text-muted">{row.reason}</span>}
-        {row.customerName !== null && (
-          <span className="mt-0.5 block text-[10px] text-muted">matched {row.customerName}</span>
+        <Verdict value={verdict} />
+        {row.reason && <span className="ml-1.5 text-[10px] text-muted">{row.reason}</span>}
+        {customerName && (
+          <span className="mt-0.5 block text-[10px] text-muted">matched {customerName}</span>
         )}
-        {row.candidateIds.length > 0 && (
+        {candidateIds.length > 0 && (
           <span className="mt-0.5 block text-[10px] text-brand-purple">
-            candidates: {row.candidateIds.join(', ')}
+            candidates: {candidateIds.join(', ')}
           </span>
         )}
-        {row.issues.length > 0 && (
+        {issues.length > 0 && (
           <span className="mt-0.5 flex flex-wrap gap-1">
-            {row.issues.map((issue) => (
+            {issues.map((issue) => (
               <span key={issue} className="chip bg-brand-red/10 text-brand-red">
                 {issue}
               </span>
@@ -1659,7 +1723,9 @@ function PreviewRowLine({ row }: { row: ServerDebtorPreviewRow }) {
 }
 
 function PreviewReceipt({ preview }: { preview: ServerDebtorPreview }) {
-  const unresolved = preview.rows.filter((row) => row.verdict !== 'resolved');
+  const rows = Array.isArray(preview.rows) ? preview.rows : [];
+  const sheetNames = Array.isArray(preview.sheetNames) ? preview.sheetNames : [preview.sheetName || 'Sheet1'];
+  const unresolved = rows.filter((row) => (row.verdict || (row as unknown as { resolution?: string }).resolution) !== 'resolved');
   const eligibility = debtorEligibility(preview);
   return (
     <div>
@@ -1670,14 +1736,14 @@ function PreviewReceipt({ preview }: { preview: ServerDebtorPreview }) {
         </p>
         <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted">
           <span>
-            SHA-256 <span className="break-all font-mono text-ink">{preview.fileSha256}</span>
+            SHA-256 <span className="break-all font-mono text-ink">{shortDigest(preview.fileSha256)}</span>
           </span>
-          <span>{preview.sizeBytes} bytes</span>
+          <span>{preview.sizeBytes ?? 0} bytes</span>
           <span>
-            sheet <span className="font-bold text-ink">{preview.sheetName}</span> of{' '}
-            {preview.sheetNames.length}
+            sheet <span className="font-bold text-ink">{preview.sheetName ?? 'Sheet1'}</span> of{' '}
+            {sheetNames.length}
           </span>
-          <span>source {preview.source}</span>
+          <span>source {preview.source ?? 'workbook'}</span>
           <span title="Which namespace's mapping resolved the references: tally, durasmart (a mint), or none — no single answer.">
             reference issuer {preview.refSource ?? 'no single namespace'}
           </span>
@@ -1695,15 +1761,15 @@ function PreviewReceipt({ preview }: { preview: ServerDebtorPreview }) {
         </p>
         <p className="mt-2 flex flex-wrap items-center gap-2 text-[10px]">
           <span className="font-extrabold uppercase tracking-wide text-muted">Balance as on</span>
-          <span className={`font-black ${preview.asOf === null ? 'text-brand-red' : 'text-ink'}`}>
+          <span className={`font-black ${!preview.asOf ? 'text-brand-red' : 'text-ink'}`}>
             {preview.asOf ?? 'not stated'}
           </span>
           <span className={`chip ${preview.asOfVerified ? 'bg-brand-green/12 text-brand-green' : 'bg-brand-red/10 text-brand-red'}`}>
             {preview.asOfVerified ? 'explicitly verified' : 'not verified'}
           </span>
-          {preview.asOfSource !== null && <span className="text-faint">{preview.asOfSource}</span>}
+          {preview.asOfSource && <span className="text-faint">{preview.asOfSource}</span>}
         </p>
-        {preview.periodText !== null && (
+        {preview.periodText && (
           <p className="mt-1 text-[10px] text-muted">
             Reporting period on the sheet: “{preview.periodText}”. A period end is not a balance date,
             and this reading never treats it as one.
@@ -1727,14 +1793,14 @@ function PreviewReceipt({ preview }: { preview: ServerDebtorPreview }) {
       </div>
 
       <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <CountTile label="Data rows" value={preview.dataRowCount} />
-        <CountTile label="Resolved" value={preview.resolvedRowCount} tone="text-brand-green" />
-        <CountTile label="Missing" value={preview.missingRowCount} tone="text-[#C96B15]" />
-        <CountTile label="Ambiguous" value={preview.ambiguousRowCount} tone="text-brand-purple" />
-        <CountTile label="Invalid" value={preview.invalidRowCount} tone="text-brand-red" />
-        <CountTile label="Unresolved" value={preview.unresolvedRowCount} tone="text-brand-red" />
-        <CountTile label="Zero-balance rows" value={preview.zeroBalanceRowCount} />
-        <CountTile label="Totals excluded" value={preview.totalRowCount} />
+        <CountTile label="Data rows" value={preview.dataRowCount ?? rows.length} />
+        <CountTile label="Resolved" value={preview.resolvedRowCount ?? rows.length} tone="text-brand-green" />
+        <CountTile label="Missing" value={preview.missingRowCount ?? 0} tone="text-[#C96B15]" />
+        <CountTile label="Ambiguous" value={preview.ambiguousRowCount ?? 0} tone="text-brand-purple" />
+        <CountTile label="Invalid" value={preview.invalidRowCount ?? 0} tone="text-brand-red" />
+        <CountTile label="Unresolved" value={preview.unresolvedRowCount ?? unresolved.length} tone="text-brand-red" />
+        <CountTile label="Zero-balance rows" value={preview.zeroBalanceRowCount ?? 0} />
+        <CountTile label="Totals excluded" value={preview.totalRowCount ?? rows.length} />
       </div>
 
       <FindingList title="Blockers" findings={preview.blockers} empty="No blockers were reported." />
@@ -1755,20 +1821,20 @@ function PreviewReceipt({ preview }: { preview: ServerDebtorPreview }) {
             {unresolved.map((row) => (
               <li key={row.rowNumber} className="flex flex-wrap items-center gap-2 text-[11px]">
                 <span className="text-faint">row {row.rowNumber}</span>
-                <span className="font-bold text-ink">{row.partyName || 'no party name'}</span>
+                <span className="font-bold text-ink">{row.partyName || (row as unknown as { rawPartyName?: string }).rawPartyName || 'no party name'}</span>
                 <span className="font-mono text-[10px] text-faint">{row.sourceRef ?? 'no reference'}</span>
-                <Verdict value={row.verdict} />
-                {row.reason !== null && <span className="text-muted">{row.reason}</span>}
+                <Verdict value={row.verdict || (row as unknown as { resolution?: string }).resolution} />
+                {row.reason && <span className="text-muted">{row.reason}</span>}
               </li>
             ))}
           </ul>
         )}
       </div>
 
-      {preview.rows.length > 0 && (
+      {rows.length > 0 && (
         <div className="mt-4">
           <p className="mb-1 text-[10px] font-extrabold uppercase tracking-wide text-muted">
-            Rows read ({preview.rowsListed} listed
+            Rows read ({preview.rowsListed ?? rows.length} listed
             {preview.rowsTruncated ? ` of ${preview.dataRowCount} — the list is capped, the counts are not` : ''})
           </p>
           <div className="overflow-x-auto rounded-field border border-line bg-white">
@@ -1783,16 +1849,19 @@ function PreviewReceipt({ preview }: { preview: ServerDebtorPreview }) {
                 </tr>
               </thead>
               <tbody>
-                {preview.rows.map((row) => (
+                {rows.slice(0, 100).map((row) => (
                   <PreviewRowLine key={row.rowNumber} row={row} />
                 ))}
               </tbody>
             </table>
           </div>
+          {rows.length > 100 && (
+            <p className="mt-1 text-[10px] text-muted italic">Showing first 100 rows of {rows.length} total rows.</p>
+          )}
           <p className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-muted">
             <span>
-              blank rows {preview.blankRowCount} · total rows excluded {preview.totalRowCount} · rows
-              listed {preview.rowsListed}
+              blank rows {preview.blankRowCount ?? 0} · total rows excluded {preview.totalRowCount ?? 0} · rows
+              listed {preview.rowsListed ?? rows.length}
             </span>
             <span className="font-bold text-brand-blue">
               {eligibility.eligible
@@ -2143,7 +2212,10 @@ function DebtorWorkbookPreview() {
         </div>
       )}
       {phase.kind === 'done' && (
-        <>
+        <SectionErrorBoundary
+          fallbackTitle="Workbook Preview Display Issue"
+          onReset={() => setPhase({ kind: 'idle' })}
+        >
           <PreviewReceipt preview={phase.preview} />
           <DebtorApplyBlock
             preview={phase.preview}
@@ -2154,7 +2226,7 @@ function DebtorWorkbookPreview() {
             onReplacementApproved={setReplacementApproved}
             onApply={(withReplacement) => void apply(withReplacement)}
           />
-        </>
+        </SectionErrorBoundary>
       )}
     </Card>
   );
@@ -2169,7 +2241,11 @@ export default function Debtors() {
         subtitle={`Imported closing balances on ${serverHost()} — dated snapshots, debit and credit separate`}
       />
 
-      {user?.role === 'owner' && <DebtorWorkbookPreview />}
+      {user?.role === 'owner' && (
+        <SectionErrorBoundary fallbackTitle="Debtor Workbook Preview Unavailable">
+          <DebtorWorkbookPreview />
+        </SectionErrorBoundary>
+      )}
       <DebtorListCard />
     </div>
   );

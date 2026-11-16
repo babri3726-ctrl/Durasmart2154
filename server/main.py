@@ -4158,16 +4158,32 @@ async def preview_debtor_bytes(request: Request, fileName: str | None = "HR-PB.x
 
             rows = []
             for i, v in enumerate(vouchers):
+                debit_amt = float(v.get("debitAmount", 0.0))
+                credit_amt = float(v.get("creditAmount", 0.0))
+                debit_paise = round(debit_amt * 100)
+                credit_paise = round(credit_amt * 100)
+                direction = "debit" if debit_paise >= credit_paise else "credit"
                 rows.append({
                     "rowNumber": i + 1,
+                    "partyName": v["partyName"],
+                    "sourceRef": v.get("partyId") or f"VCH-{i+1}",
+                    "refSource": "tally",
+                    "debitPaise": debit_paise,
+                    "creditPaise": credit_paise,
+                    "direction": direction,
+                    "verdict": "resolved",
+                    "reason": None,
+                    "customerId": v.get("partyId") or "",
+                    "customerName": v["partyName"],
+                    "candidateIds": [],
+                    "issues": [],
                     "rawPartyName": v["partyName"],
                     "resolvedCustomerId": v.get("partyId") or "",
                     "resolvedCustomerName": v["partyName"],
-                    "ledgerId": v["bookSource"],
-                    "debit": f"{v['debitAmount']:.2f}",
-                    "credit": f"{v['creditAmount']:.2f}",
-                    "resolution": "matched",
-                    "issues": []
+                    "ledgerId": v.get("bookSource", "tally"),
+                    "debit": f"{debit_amt:.2f}",
+                    "credit": f"{credit_amt:.2f}",
+                    "resolution": "matched"
                 })
 
             return {
@@ -4217,17 +4233,32 @@ async def preview_debtor_bytes(request: Request, fileName: str | None = "HR-PB.x
         dealers = snap.get("dealers_master", [])
         rows = []
         for i, d in enumerate(dealers):
-            bal_str = f"{float(d.get('balance', 0.0)):.2f}"
+            bal_float = float(d.get("balance", 0.0))
+            bal_paise = round(bal_float * 100)
+            debit_p = bal_paise if bal_paise >= 0 else 0
+            credit_p = abs(bal_paise) if bal_paise < 0 else 0
+            direction = "debit" if bal_paise >= 0 else "credit"
             rows.append({
                 "rowNumber": i + 2,
+                "partyName": d["name"],
+                "sourceRef": d.get("id") or f"CUST-{d['name'][:6].strip()}",
+                "refSource": "hr-pb",
+                "debitPaise": debit_p,
+                "creditPaise": credit_p,
+                "direction": direction,
+                "verdict": "resolved",
+                "reason": None,
+                "customerId": d.get("id") or f"CUST-{d['name'][:6].strip()}",
+                "customerName": d["name"],
+                "candidateIds": [],
+                "issues": [],
                 "rawPartyName": d["name"],
                 "resolvedCustomerId": d.get("id") or f"CUST-{d['name'][:6].strip()}",
                 "resolvedCustomerName": d["name"],
                 "ledgerId": d.get("city") or d.get("station") or "General",
-                "debit": bal_str,
-                "credit": "0.00",
-                "resolution": "matched",
-                "issues": []
+                "debit": f"{bal_float:.2f}" if bal_float >= 0 else "0.00",
+                "credit": f"{abs(bal_float):.2f}" if bal_float < 0 else "0.00",
+                "resolution": "matched"
             })
 
         return {
@@ -4318,7 +4349,7 @@ async def apply_debtor_bytes(
                 "replacedRowCount": batch_res["newPartiesCount"],
                 "replayed": batch_res["insertedCount"] == 0,
                 "databaseRowsWritten": True,
-                "businessRecordsCreated": True,
+                "businessRecordsCreated": False,
                 "disclaimer": f"Applied {batch_res['insertedCount']} vouchers from {acct_data['bookSource']}. {batch_res['newPartiesCount']} new parties created, {batch_res['affectedPartiesCount']} debtor balances updated in SQLite."
             }
 
