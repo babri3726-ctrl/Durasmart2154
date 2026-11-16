@@ -6,6 +6,7 @@ export default {
       colors: {
         navy: '#172554',
         ink: '#182033',
+        surface: '#FFFFFF',
         muted: '#738099',
         faint: '#9AA4B7',
         canvas: '#F5F6FC',

@@ -375,7 +375,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-md">
       <style>{`
         @media print {
           body * { visibility: hidden; }
@@ -395,13 +395,13 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
           .no-print { display: none !important; }
         }
       `}</style>
-      <div id="printable-debtor-ledger" className="flex max-h-[88vh] w-full max-w-5xl flex-col rounded-xl border border-line bg-surface shadow-2xl">
+      <div id="printable-debtor-ledger" className="flex max-h-[90vh] w-full max-w-5xl flex-col rounded-2xl border border-slate-300 bg-white shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-line px-5 py-4">
+        <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
           <div>
-            <h3 className="text-base font-bold text-ink">{debtor.name || debtor.customerName}</h3>
-            <p className="text-xs text-muted">
-              Ledger Statement · ID: <span className="font-mono text-faint">{debtor.id || debtor.customerId}</span> · {debtor.city || debtor.state || 'Punjab'}
+            <h3 className="text-lg font-black text-slate-900">{debtor.name || debtor.customerName}</h3>
+            <p className="text-xs text-slate-500 font-medium">
+              Ledger Statement · ID: <span className="font-mono text-slate-700 font-semibold">{debtor.id || debtor.customerId}</span> · {debtor.city || debtor.state || 'Punjab'}
               {debtor.mobile ? ` · Mobile: ${debtor.mobile}` : ''}
             </p>
           </div>
@@ -414,38 +414,38 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
             >
               <Plus size={14} /> Add JV / Note
             </button>
-            <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-muted hover:bg-line hover:text-ink">
+            <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-200 hover:text-slate-900 transition">
               <X size={18} />
             </button>
           </div>
         </div>
 
         {/* Balance Tiles */}
-        <div className="grid grid-cols-3 gap-3 border-b border-line bg-canvas/60 px-5 py-3">
+        <div className="grid grid-cols-3 gap-4 border-b border-slate-200 bg-white px-6 py-4">
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Total Billed Sales</span>
-            <p className="font-mono text-sm font-bold text-brand-blue">{rupees(totalSalesDebit)}</p>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Total Billed Sales</span>
+            <p className="font-mono text-base font-extrabold text-blue-700">{rupees(totalSalesDebit)}</p>
           </div>
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Total Bank Receipts</span>
-            <p className="font-mono text-sm font-bold text-brand-green">{rupees(totalReceipts)}</p>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Total Bank Receipts</span>
+            <p className="font-mono text-base font-extrabold text-emerald-700">{rupees(totalReceipts)}</p>
           </div>
           <div>
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Current Outstanding</span>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Current Outstanding</span>
               <button
                 type="button"
                 onClick={() => {
                   setOpeningAmount(String(debtor.balance || 0));
                   setEditingOpening(true);
                 }}
-                className="text-[10px] text-brand-blue hover:underline no-print font-medium"
+                className="text-[10px] text-blue-600 hover:underline no-print font-bold"
                 title="Edit Opening Balance"
               >
                 ✏️ Edit Opening
               </button>
             </div>
-            <p className="font-mono text-sm font-bold text-ink">
+            <p className="font-mono text-base font-extrabold text-slate-900">
               {debtor.balance !== undefined
                 ? `₹${parseFloat(String(debtor.balance)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
                 : money(debtor.debitPaise || 0)}
@@ -454,31 +454,31 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
         </div>
 
         {/* Aging Breakdown (FIFO) */}
-        <div className="border-b border-line bg-canvas/30 px-5 py-2.5">
+        <div className="border-b border-slate-200 bg-slate-50/70 px-6 py-3">
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Bill Aging Analysis (FIFO)</span>
-            <span className="text-[10px] text-faint">Allocated against bank receipts</span>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-700">Bill Aging Analysis (FIFO)</span>
+            <span className="text-[10px] font-medium text-slate-500">Allocated against bank receipts</span>
           </div>
           <div className="grid grid-cols-4 gap-2">
-            <div className="rounded-lg border border-line/60 bg-surface/60 p-2 text-center">
-              <span className="block text-[10px] font-semibold text-muted">0 - 30 Days</span>
-              <span className="font-mono text-xs font-bold text-ink">{rupees(aging.bucket0_30)}</span>
+            <div className="rounded-xl border border-slate-200 bg-white p-2.5 text-center shadow-xs">
+              <span className="block text-[10px] font-bold uppercase text-slate-500">0 - 30 Days</span>
+              <span className="font-mono text-xs font-black text-slate-900">{rupees(aging.bucket0_30)}</span>
             </div>
-            <div className="rounded-lg border border-line/60 bg-surface/60 p-2 text-center">
-              <span className="block text-[10px] font-semibold text-muted">31 - 60 Days</span>
-              <span className={`font-mono text-xs font-bold ${aging.bucket31_60 > 0 ? 'text-amber-600' : 'text-ink'}`}>
+            <div className="rounded-xl border border-slate-200 bg-white p-2.5 text-center shadow-xs">
+              <span className="block text-[10px] font-bold uppercase text-slate-500">31 - 60 Days</span>
+              <span className={`font-mono text-xs font-black ${aging.bucket31_60 > 0 ? 'text-amber-700' : 'text-slate-900'}`}>
                 {rupees(aging.bucket31_60)}
               </span>
             </div>
-            <div className="rounded-lg border border-line/60 bg-surface/60 p-2 text-center">
-              <span className="block text-[10px] font-semibold text-muted">61 - 90 Days</span>
-              <span className={`font-mono text-xs font-bold ${aging.bucket61_90 > 0 ? 'text-orange-600' : 'text-ink'}`}>
+            <div className="rounded-xl border border-slate-200 bg-white p-2.5 text-center shadow-xs">
+              <span className="block text-[10px] font-bold uppercase text-slate-500">61 - 90 Days</span>
+              <span className={`font-mono text-xs font-black ${aging.bucket61_90 > 0 ? 'text-orange-700' : 'text-slate-900'}`}>
                 {rupees(aging.bucket61_90)}
               </span>
             </div>
-            <div className="rounded-lg border border-line/60 bg-surface/60 p-2 text-center">
-              <span className="block text-[10px] font-semibold text-muted">90+ Days</span>
-              <span className={`font-mono text-xs font-bold ${aging.bucket90Plus > 0 ? 'text-rose-600' : 'text-ink'}`}>
+            <div className="rounded-xl border border-slate-200 bg-white p-2.5 text-center shadow-xs">
+              <span className="block text-[10px] font-bold uppercase text-slate-500">90+ Days</span>
+              <span className={`font-mono text-xs font-black ${aging.bucket90Plus > 0 ? 'text-rose-700' : 'text-slate-900'}`}>
                 {rupees(aging.bucket90Plus)}
               </span>
             </div>
@@ -486,82 +486,82 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
         </div>
 
         {/* Filter Bar */}
-        <div className="flex items-center justify-between border-b border-line/60 px-5 py-2 text-xs no-print">
-          <div className="flex items-center gap-1">
-            <span className="text-[11px] font-semibold text-muted mr-2">Filter:</span>
+        <div className="flex items-center justify-between border-b border-slate-200 bg-slate-100/60 px-6 py-2.5 text-xs no-print">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-bold text-slate-700 mr-2">Filter:</span>
             {(['ALL', 'SALES', 'RECEIPT'] as const).map((t) => (
               <button
                 key={t}
                 type="button"
                 onClick={() => setFilterType(t)}
-                className={`rounded px-2.5 py-0.5 text-[11px] font-bold transition ${
-                  filterType === t ? 'bg-line text-ink' : 'text-muted hover:text-ink hover:bg-line/40'
+                className={`rounded-md px-3 py-1 text-[11px] font-bold transition ${
+                  filterType === t ? 'bg-slate-900 text-white shadow-xs' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
                 }`}
               >
                 {t === 'ALL' ? 'All Vouchers' : t === 'SALES' ? 'Sales Bills' : 'Bank Receipts'}
               </button>
             ))}
           </div>
-          <span className="text-[11px] text-faint">
+          <span className="text-[11px] font-medium text-slate-500">
             {filteredVouchers.length} {filteredVouchers.length === 1 ? 'record' : 'records'}
           </span>
         </div>
 
         {/* Voucher Table */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="flex-1 overflow-y-auto px-6 py-4 bg-white">
           {loading ? (
             <div className="flex h-32 items-center justify-center">
               <Spinner />
             </div>
           ) : filteredVouchers.length === 0 ? (
-            <div className="py-10 text-center text-xs text-muted">
+            <div className="py-10 text-center text-xs font-medium text-slate-500">
               No matching vouchers found for this filter.
             </div>
           ) : (
             <table className="w-full text-left text-xs">
-              <thead className="border-b border-line text-[11px] font-bold text-muted">
+              <thead className="border-b-2 border-slate-200 bg-slate-50 text-[11px] font-black uppercase text-slate-700">
                 <tr>
-                  <th className="pb-2">Date</th>
-                  <th className="pb-2">Type</th>
-                  <th className="pb-2">Vch No</th>
-                  <th className="pb-2">Source</th>
-                  <th className="pb-2 text-right">Debit (+)</th>
-                  <th className="pb-2 text-right">Credit (-)</th>
-                  <th className="pb-2 text-center no-print">Actions</th>
+                  <th className="py-2.5 px-3">Date</th>
+                  <th className="py-2.5 px-3">Type</th>
+                  <th className="py-2.5 px-3">Vch No</th>
+                  <th className="py-2.5 px-3">Source / Ledger</th>
+                  <th className="py-2.5 px-3 text-right">Debit (+)</th>
+                  <th className="py-2.5 px-3 text-right">Credit (-)</th>
+                  <th className="py-2.5 px-3 text-center no-print">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-line/40 font-mono">
+              <tbody className="divide-y divide-slate-100 font-mono">
                 {filteredVouchers.map((v) => {
                   const isSales = v.voucher_type.toLowerCase() === 'sales';
                   const isReceipt = v.voucher_type.toLowerCase() === 'receipt';
                   const isJv = v.voucher_type.toLowerCase() === 'journal';
                   return (
-                    <tr key={v.id} className="hover:bg-canvas/40">
-                      <td className="py-2 text-muted">{v.voucher_date}</td>
-                      <td className="py-2">
+                    <tr key={v.id} className="hover:bg-blue-50/40 transition">
+                      <td className="py-2.5 px-3 text-slate-700 font-semibold">{v.voucher_date}</td>
+                      <td className="py-2.5 px-3">
                         <span
-                          className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                          className={`inline-block rounded px-2 py-0.5 text-[10px] font-black uppercase tracking-wide border ${
                             isSales
-                              ? 'bg-brand-blue/10 text-brand-blue'
+                              ? 'bg-blue-100 border-blue-200 text-blue-800'
                               : isReceipt
-                              ? 'bg-brand-green/10 text-brand-green'
+                              ? 'bg-emerald-100 border-emerald-200 text-emerald-800'
                               : isJv
-                              ? 'bg-indigo-500/10 text-indigo-600'
-                              : 'bg-canvas text-muted'
+                              ? 'bg-purple-100 border-purple-200 text-purple-800'
+                              : 'bg-slate-100 border-slate-200 text-slate-700'
                           }`}
                         >
                           {v.voucher_type}
                         </span>
                       </td>
-                      <td className="py-2 text-muted">{v.voucher_no || '—'}</td>
-                      <td className="py-2 text-muted text-[11px] font-sans">{v.book_source || 'Tally Book'}</td>
-                      <td className="py-2 text-right font-semibold text-ink">
+                      <td className="py-2.5 px-3 text-slate-800 font-medium">{v.voucher_no || '—'}</td>
+                      <td className="py-2.5 px-3 text-slate-700 text-[11px] font-sans font-medium">{v.narration || v.book_source || 'Tally Book'}</td>
+                      <td className="py-2.5 px-3 text-right font-bold text-slate-900">
                         {v.debit_paise > 0 ? rupees(v.debit_paise) : '—'}
                       </td>
-                      <td className="py-2 text-right text-muted">
+                      <td className="py-2.5 px-3 text-right font-bold text-emerald-700">
                         {v.credit_paise > 0 ? rupees(v.credit_paise) : '—'}
                       </td>
-                      <td className="py-2 text-center no-print whitespace-nowrap">
+                      <td className="py-2.5 px-3 text-center no-print whitespace-nowrap">
                         <div className="inline-flex items-center gap-1">
                           <button
                             type="button"
@@ -571,10 +571,10 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
                               setEditAmount(String((v.debit_paise || v.credit_paise) / 100));
                               setEditDate(v.voucher_date || '');
                             }}
-                            className="rounded p-1 text-muted hover:bg-line hover:text-ink"
+                            className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition"
                             title="Edit voucher amount or number"
                           >
-                            <Edit2 size={12} />
+                            <Edit2 size={13} />
                           </button>
                           <button
                             type="button"
@@ -584,18 +584,18 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
                                 listDebtors({ pageSize: 500 }).then((res) => setDebtorDirectory(res.items));
                               }
                             }}
-                            className="rounded p-1 text-muted hover:bg-line hover:text-brand-blue"
+                            className="rounded p-1 text-slate-500 hover:bg-blue-50 hover:text-blue-700 transition"
                             title="Transfer / Shift this entry to another party ledger"
                           >
-                            <ArrowRightLeft size={12} />
+                            <ArrowRightLeft size={13} />
                           </button>
                           <button
                             type="button"
                             onClick={() => handleDeleteVoucher(v)}
-                            className="rounded p-1 text-muted hover:bg-rose-50 hover:text-rose-600"
+                            className="rounded p-1 text-slate-500 hover:bg-rose-50 hover:text-rose-600 transition"
                             title="Delete voucher"
                           >
-                            <Trash2 size={12} />
+                            <Trash2 size={13} />
                           </button>
                         </div>
                       </td>
@@ -608,12 +608,12 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
         </div>
 
         {/* Footer Actions */}
-        <div className="flex items-center justify-between border-t border-line px-5 py-3 no-print">
+        <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-6 py-3.5 no-print">
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={handleShareWhatsApp}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-700 transition"
               title="Share Statement on WhatsApp"
             >
               <MessageCircle size={14} />
@@ -622,14 +622,14 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
             <button
               type="button"
               onClick={handlePrint}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-canvas px-3 py-1.5 text-xs font-semibold text-ink shadow-sm hover:bg-line/60 transition"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-800 shadow-sm hover:bg-slate-100 transition"
               title="Print or Save PDF"
             >
               <Printer size={14} />
               Print / PDF
             </button>
           </div>
-          <button type="button" onClick={onClose} className="btn-secondary !py-1 text-xs font-bold">
+          <button type="button" onClick={onClose} className="rounded-lg bg-slate-200 hover:bg-slate-300 px-4 py-2 text-xs font-bold text-slate-800 transition">
             Close
           </button>
         </div>
@@ -637,23 +637,23 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
 
       {/* Journal Entry Modal */}
       {showJvModal && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-ink/50 p-4">
-          <div className="w-full max-w-md rounded-xl border border-line bg-surface p-5 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-line pb-3 mb-4">
-              <h4 className="text-sm font-bold text-ink">Add Journal Entry (JV)</h4>
-              <button type="button" onClick={() => setShowJvModal(false)} className="text-muted hover:text-ink">
-                <X size={16} />
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-md">
+          <div className="w-full max-w-md rounded-2xl border border-slate-300 bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3 mb-4">
+              <h4 className="text-base font-black text-slate-900">Add Journal Entry (JV)</h4>
+              <button type="button" onClick={() => setShowJvModal(false)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition">
+                <X size={18} />
               </button>
             </div>
-            <form onSubmit={handleAddJv} className="space-y-3 text-xs">
+            <form onSubmit={handleAddJv} className="space-y-4 text-xs">
               <div>
-                <label className="block text-muted mb-1 font-semibold">Entry Type</label>
+                <label className="block text-slate-700 mb-1 font-bold">Entry Type</label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setJvType('CREDIT')}
-                    className={`rounded p-2 text-center font-bold border transition ${
-                      jvType === 'CREDIT' ? 'border-brand-green bg-brand-green/10 text-brand-green' : 'border-line text-muted'
+                    className={`rounded-lg p-2.5 text-center font-bold border transition ${
+                      jvType === 'CREDIT' ? 'border-emerald-600 bg-emerald-50 text-emerald-800' : 'border-slate-300 text-slate-600 hover:bg-slate-50'
                     }`}
                   >
                     Credit Note / Discount (-)
@@ -661,8 +661,8 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
                   <button
                     type="button"
                     onClick={() => setJvType('DEBIT')}
-                    className={`rounded p-2 text-center font-bold border transition ${
-                      jvType === 'DEBIT' ? 'border-brand-blue bg-brand-blue/10 text-brand-blue' : 'border-line text-muted'
+                    className={`rounded-lg p-2.5 text-center font-bold border transition ${
+                      jvType === 'DEBIT' ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-slate-300 text-slate-600 hover:bg-slate-50'
                     }`}
                   >
                     Debit Note / Charge (+)
@@ -670,7 +670,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
                 </div>
               </div>
               <div>
-                <label className="block text-muted mb-1 font-semibold">Amount (₹)</label>
+                <label className="block text-slate-700 mb-1 font-bold">Amount (₹)</label>
                 <input
                   type="number"
                   step="0.01"
@@ -678,34 +678,34 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
                   placeholder="e.g. 5000"
                   value={jvAmount}
                   onChange={(e) => setJvAmount(e.target.value)}
-                  className="input w-full"
+                  className="input w-full font-mono font-bold text-slate-900 border-slate-300 bg-white"
                 />
               </div>
               <div>
-                <label className="block text-muted mb-1 font-semibold">Reference / Voucher No</label>
+                <label className="block text-slate-700 mb-1 font-bold">Reference / Voucher No</label>
                 <input
                   type="text"
                   placeholder="e.g. JV-101 / Cash Discount"
                   value={jvRef}
                   onChange={(e) => setJvRef(e.target.value)}
-                  className="input w-full"
+                  className="input w-full text-slate-900 border-slate-300 bg-white"
                 />
               </div>
               <div>
-                <label className="block text-muted mb-1 font-semibold">Particulars / Notes</label>
+                <label className="block text-slate-700 mb-1 font-bold">Particulars / Notes</label>
                 <input
                   type="text"
                   placeholder="Reason for adjustment..."
                   value={jvNotes}
                   onChange={(e) => setJvNotes(e.target.value)}
-                  className="input w-full"
+                  className="input w-full text-slate-900 border-slate-300 bg-white"
                 />
               </div>
-              <div className="flex justify-end gap-2 pt-2 border-t border-line">
-                <button type="button" onClick={() => setShowJvModal(false)} className="btn-secondary !py-1 text-xs">
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
+                <button type="button" onClick={() => setShowJvModal(false)} className="rounded-lg bg-slate-200 hover:bg-slate-300 px-4 py-2 text-xs font-bold text-slate-800 transition">
                   Cancel
                 </button>
-                <button type="submit" disabled={jvBusy} className="btn-primary !py-1 text-xs font-bold">
+                <button type="submit" disabled={jvBusy} className="btn-primary !py-2 text-xs font-bold">
                   {jvBusy ? 'Saving...' : 'Post Journal Entry'}
                 </button>
               </div>
@@ -716,49 +716,49 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
 
       {/* Edit Voucher Modal */}
       {curEdit && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-ink/50 p-4">
-          <div className="w-full max-w-md rounded-xl border border-line bg-surface p-5 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-line pb-3 mb-4">
-              <h4 className="text-sm font-bold text-ink">Edit {curEdit.voucher_type} Voucher</h4>
-              <button type="button" onClick={() => setEditingVoucher(null)} className="text-muted hover:text-ink">
-                <X size={16} />
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-md">
+          <div className="w-full max-w-md rounded-2xl border border-slate-300 bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3 mb-4">
+              <h4 className="text-base font-black text-slate-900">Edit {curEdit.voucher_type} Voucher</h4>
+              <button type="button" onClick={() => setEditingVoucher(null)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition">
+                <X size={18} />
               </button>
             </div>
-            <form onSubmit={handleSaveVoucherEdit} className="space-y-3 text-xs">
+            <form onSubmit={handleSaveVoucherEdit} className="space-y-4 text-xs">
               <div>
-                <label className="block text-muted mb-1 font-semibold">Voucher / Bill No</label>
+                <label className="block text-slate-700 mb-1 font-bold">Voucher / Bill No</label>
                 <input
                   type="text"
                   value={editVoucherNo}
                   onChange={(e) => setEditVoucherNo(e.target.value)}
-                  className="input w-full"
+                  className="input w-full font-mono text-slate-900 border-slate-300 bg-white"
                 />
               </div>
               <div>
-                <label className="block text-muted mb-1 font-semibold">Date</label>
+                <label className="block text-slate-700 mb-1 font-bold">Date</label>
                 <input
                   type="date"
                   value={editDate}
                   onChange={(e) => setEditDate(e.target.value)}
-                  className="input w-full"
+                  className="input w-full text-slate-900 border-slate-300 bg-white"
                 />
               </div>
               <div>
-                <label className="block text-muted mb-1 font-semibold">Amount (₹)</label>
+                <label className="block text-slate-700 mb-1 font-bold">Amount (₹)</label>
                 <input
                   type="number"
                   step="0.01"
                   required
                   value={editAmount}
                   onChange={(e) => setEditAmount(e.target.value)}
-                  className="input w-full font-mono font-bold"
+                  className="input w-full font-mono font-black text-slate-900 border-slate-300 bg-white"
                 />
               </div>
-              <div className="flex justify-end gap-2 pt-2 border-t border-line">
-                <button type="button" onClick={() => setEditingVoucher(null)} className="btn-secondary !py-1 text-xs">
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
+                <button type="button" onClick={() => setEditingVoucher(null)} className="rounded-lg bg-slate-200 hover:bg-slate-300 px-4 py-2 text-xs font-bold text-slate-800 transition">
                   Cancel
                 </button>
-                <button type="submit" disabled={editBusy} className="btn-primary !py-1 text-xs font-bold">
+                <button type="submit" disabled={editBusy} className="btn-primary !py-2 text-xs font-bold">
                   {editBusy ? 'Updating...' : 'Save Changes'}
                 </button>
               </div>
@@ -769,25 +769,25 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
 
       {/* Transfer Voucher Modal */}
       {transferringVoucher && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-ink/50 p-4">
-          <div className="w-full max-w-md rounded-xl border border-line bg-surface p-5 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-line pb-3 mb-4">
-              <h4 className="text-sm font-bold text-ink">Shift Entry to Another Ledger</h4>
-              <button type="button" onClick={() => setTransferringVoucher(null)} className="text-muted hover:text-ink">
-                <X size={16} />
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-md">
+          <div className="w-full max-w-md rounded-2xl border border-slate-300 bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3 mb-4">
+              <h4 className="text-base font-black text-slate-900">Shift Entry to Another Ledger</h4>
+              <button type="button" onClick={() => setTransferringVoucher(null)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition">
+                <X size={18} />
               </button>
             </div>
-            <form onSubmit={handleTransferVoucher} className="space-y-3 text-xs">
-              <p className="text-muted">
-                Shift <span className="font-bold text-ink">{transferringVoucher.voucher_type} #{transferringVoucher.voucher_no || transferringVoucher.id}</span> ({rupees(transferringVoucher.debit_paise || transferringVoucher.credit_paise)}) from {debtor.name} to another customer ledger.
+            <form onSubmit={handleTransferVoucher} className="space-y-4 text-xs">
+              <p className="text-slate-600 font-medium">
+                Shift <span className="font-extrabold text-slate-900">{transferringVoucher.voucher_type} #{transferringVoucher.voucher_no || transferringVoucher.id}</span> ({rupees(transferringVoucher.debit_paise || transferringVoucher.credit_paise)}) from {debtor.name} to another customer ledger.
               </p>
               <div>
-                <label className="block text-muted mb-1 font-semibold">Select Destination Customer</label>
+                <label className="block text-slate-700 mb-1 font-bold">Select Destination Customer</label>
                 <select
                   required
                   value={targetPartyId}
                   onChange={(e) => setTargetPartyId(e.target.value)}
-                  className="input w-full"
+                  className="input w-full text-slate-900 border-slate-300 bg-white font-medium"
                 >
                   <option value="">-- Choose Party --</option>
                   {debtorDirectory
@@ -800,20 +800,20 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
                 </select>
               </div>
               <div>
-                <label className="block text-muted mb-1 font-semibold">Transfer Reason / Note</label>
+                <label className="block text-slate-700 mb-1 font-bold">Transfer Reason / Note</label>
                 <input
                   type="text"
                   placeholder="e.g. Invoiced to wrong account by mistake"
                   value={transferNotes}
                   onChange={(e) => setTransferNotes(e.target.value)}
-                  className="input w-full"
+                  className="input w-full text-slate-900 border-slate-300 bg-white"
                 />
               </div>
-              <div className="flex justify-end gap-2 pt-2 border-t border-line">
-                <button type="button" onClick={() => setTransferringVoucher(null)} className="btn-secondary !py-1 text-xs">
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
+                <button type="button" onClick={() => setTransferringVoucher(null)} className="rounded-lg bg-slate-200 hover:bg-slate-300 px-4 py-2 text-xs font-bold text-slate-800 transition">
                   Cancel
                 </button>
-                <button type="submit" disabled={transferBusy} className="btn-primary !py-1 text-xs font-bold">
+                <button type="submit" disabled={transferBusy} className="btn-primary !py-2 text-xs font-bold">
                   {transferBusy ? 'Shifting...' : 'Confirm Transfer'}
                 </button>
               </div>
@@ -824,34 +824,34 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
 
       {/* Edit Opening Balance Modal */}
       {editingOpening && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-ink/50 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-line bg-surface p-5 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-line pb-3 mb-4">
-              <h4 className="text-sm font-bold text-ink">Edit Opening Balance</h4>
-              <button type="button" onClick={() => setEditingOpening(false)} className="text-muted hover:text-ink">
-                <X size={16} />
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-md">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-300 bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3 mb-4">
+              <h4 className="text-base font-black text-slate-900">Edit Opening Balance</h4>
+              <button type="button" onClick={() => setEditingOpening(false)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900 transition">
+                <X size={18} />
               </button>
             </div>
-            <form onSubmit={handleUpdateOpening} className="space-y-3 text-xs">
-              <p className="text-muted">
-                Set opening balance for <span className="font-bold text-ink">{debtor.name}</span>. Net outstanding will be recalculated immediately.
+            <form onSubmit={handleUpdateOpening} className="space-y-4 text-xs">
+              <p className="text-slate-600 font-medium">
+                Set opening balance for <span className="font-extrabold text-slate-900">{debtor.name}</span>. Net outstanding will be recalculated immediately.
               </p>
               <div>
-                <label className="block text-muted mb-1 font-semibold">Opening Amount (₹)</label>
+                <label className="block text-slate-700 mb-1 font-bold">Opening Amount (₹)</label>
                 <input
                   type="number"
                   step="0.01"
                   required
                   value={openingAmount}
                   onChange={(e) => setOpeningAmount(e.target.value)}
-                  className="input w-full font-mono font-bold"
+                  className="input w-full font-mono font-black text-slate-900 border-slate-300 bg-white"
                 />
               </div>
-              <div className="flex justify-end gap-2 pt-2 border-t border-line">
-                <button type="button" onClick={() => setEditingOpening(false)} className="btn-secondary !py-1 text-xs">
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
+                <button type="button" onClick={() => setEditingOpening(false)} className="rounded-lg bg-slate-200 hover:bg-slate-300 px-4 py-2 text-xs font-bold text-slate-800 transition">
                   Cancel
                 </button>
-                <button type="submit" disabled={openingBusy} className="btn-primary !py-1 text-xs font-bold">
+                <button type="submit" disabled={openingBusy} className="btn-primary !py-2 text-xs font-bold">
                   {openingBusy ? 'Saving...' : 'Update Opening'}
                 </button>
               </div>
