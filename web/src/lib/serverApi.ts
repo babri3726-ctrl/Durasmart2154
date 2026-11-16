@@ -1994,6 +1994,10 @@ export interface ServerDebtor {
   city?: string;
   district?: string;
   salesperson?: string;
+  mobile?: string;
+  credit_days?: number;
+  creditDays?: number;
+  isOverdue?: boolean;
   balance?: number;
   balance_formatted?: string;
   status?: string;

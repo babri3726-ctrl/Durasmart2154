@@ -34,7 +34,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, FileSearch, ShieldAlert, Plus, Pencil, Trash2, RefreshCw, FileText, X } from 'lucide-react';
+import { CheckCircle2, FileSearch, ShieldAlert, Plus, Pencil, Trash2, RefreshCw, FileText, X, Printer, MessageCircle } from 'lucide-react';
 import { Card, EmptyState, PageHeader, Spinner } from '../components/ui/Card';
 import { LiveSyncBar } from '../components/ui/LiveSync';
 import { Pager } from '../components/ui/Pager';
@@ -77,9 +77,29 @@ function money(paise: number | null): string {
   return paise === null ? '—' : rupees(paise);
 }
 
+function parseVoucherDate(str: string): Date {
+  if (!str) return new Date();
+  const parts = str.split('-');
+  if (parts.length === 3) {
+    const months: Record<string, number> = {
+      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+    };
+    const day = parseInt(parts[0], 10);
+    const m = parts[1].toLowerCase();
+    const month = months[m] !== undefined ? months[m] : (parseInt(parts[1], 10) - 1 || 0);
+    let year = parseInt(parts[2], 10);
+    if (year < 100) year += 2000;
+    return new Date(year, month, day);
+  }
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? new Date() : d;
+}
+
 function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose: () => void }) {
   const [vouchers, setVouchers] = useState<ServerVoucher[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filterType, setFilterType] = useState<'ALL' | 'SALES' | 'RECEIPT'>('ALL');
 
   useEffect(() => {
     let alive = true;
@@ -107,18 +127,146 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
     .filter((v) => v.voucher_type.toLowerCase() === 'receipt')
     .reduce((sum, v) => sum + v.debit_paise, 0);
 
+  // FIFO Aging Calculation
+  const aging = useMemo(() => {
+    const salesVouchers = vouchers
+      .filter((v) => v.voucher_type.toLowerCase() === 'sales')
+      .slice()
+      .sort((a, b) => parseVoucherDate(a.voucher_date).getTime() - parseVoucherDate(b.voucher_date).getTime());
+
+    let remainingReceipts = vouchers
+      .filter((v) => v.voucher_type.toLowerCase() === 'receipt')
+      .reduce((sum, v) => sum + v.debit_paise, 0);
+
+    const buckets = {
+      bucket0_30: 0,
+      bucket31_60: 0,
+      bucket61_90: 0,
+      bucket90Plus: 0,
+    };
+
+    if (salesVouchers.length === 0) {
+      const balPaise = Math.round(
+        (debtor.balance !== undefined ? parseFloat(String(debtor.balance)) : (debtor.debitPaise || 0) / 100) * 100
+      );
+      if (balPaise > 0) {
+        if (debtor.isOverdue) {
+          buckets.bucket31_60 = balPaise;
+        } else {
+          buckets.bucket0_30 = balPaise;
+        }
+      }
+      return buckets;
+    }
+
+    const now = Date.now();
+    for (const v of salesVouchers) {
+      const billAmount = v.debit_paise;
+      let unpaid = 0;
+      if (remainingReceipts >= billAmount) {
+        remainingReceipts -= billAmount;
+      } else {
+        unpaid = billAmount - remainingReceipts;
+        remainingReceipts = 0;
+      }
+
+      if (unpaid > 0) {
+        const vDate = parseVoucherDate(v.voucher_date);
+        const days = Math.max(0, Math.floor((now - vDate.getTime()) / (1000 * 60 * 60 * 24)));
+        if (days <= 30) {
+          buckets.bucket0_30 += unpaid;
+        } else if (days <= 60) {
+          buckets.bucket31_60 += unpaid;
+        } else if (days <= 90) {
+          buckets.bucket61_90 += unpaid;
+        } else {
+          buckets.bucket90Plus += unpaid;
+        }
+      }
+    }
+
+    return buckets;
+  }, [vouchers, debtor]);
+
+  const filteredVouchers = vouchers.filter((v) => {
+    if (filterType === 'SALES') return v.voucher_type.toLowerCase() === 'sales';
+    if (filterType === 'RECEIPT') return v.voucher_type.toLowerCase() === 'receipt';
+    return true;
+  });
+
+  const handleShareWhatsApp = () => {
+    const partyName = debtor.name || debtor.customerName || 'Customer';
+    const currentBal = debtor.balance !== undefined
+      ? `₹${parseFloat(String(debtor.balance)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+      : money(debtor.debitPaise || 0);
+
+    const phone = (debtor.mobile || '').replace(/[^0-9]/g, '');
+    const cleanPhone = phone.length === 10 ? `91${phone}` : phone;
+
+    const lines = [
+      `*DURASMART - Statement of Account*`,
+      `--------------------------------`,
+      `*Party:* ${partyName}`,
+      `*City:* ${debtor.city || debtor.state || 'Punjab'}`,
+      `*Current Outstanding:* ${currentBal}`,
+      `*Total Billed Sales:* ${rupees(totalSalesDebit)}`,
+      `*Total Bank Receipts:* ${rupees(totalReceipts)}`,
+      ``,
+      `*Aging Breakdown:*`,
+      `• 0-30 Days: ${rupees(aging.bucket0_30)}`,
+      `• 31-60 Days: ${rupees(aging.bucket31_60)}`,
+      `• 61-90 Days: ${rupees(aging.bucket61_90)}`,
+      `• 90+ Days: ${rupees(aging.bucket90Plus)}`,
+      ``,
+      `*Recent Vouchers:*`,
+      ...vouchers.slice(0, 5).map((v) => `• ${v.voucher_date} | ${v.voucher_type} (${v.voucher_no || '—'}): ${v.debit_paise > 0 ? '+' + rupees(v.debit_paise) : '-' + rupees(v.credit_paise)}`),
+      ``,
+      `Please clear any overdue balance at your earliest convenience.`,
+      `Thank you,`,
+      `*Dura Smart Doors & Windows*`
+    ];
+
+    const text = encodeURIComponent(lines.join('\n'));
+    const url = cleanPhone ? `https://wa.me/${cleanPhone}?text=${text}` : `https://api.whatsapp.com/send?text=${text}`;
+    window.open(url, '_blank');
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4 backdrop-blur-sm">
-      <div className="flex max-h-[85vh] w-full max-w-4xl flex-col rounded-xl border border-line bg-surface shadow-2xl">
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          #printable-debtor-ledger, #printable-debtor-ledger * { visibility: visible; }
+          #printable-debtor-ledger {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: auto;
+            max-height: none;
+            border: none;
+            box-shadow: none;
+            background: white !important;
+            color: black !important;
+          }
+          .no-print { display: none !important; }
+        }
+      `}</style>
+      <div id="printable-debtor-ledger" className="flex max-h-[85vh] w-full max-w-4xl flex-col rounded-xl border border-line bg-surface shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
           <div>
             <h3 className="text-base font-bold text-ink">{debtor.name || debtor.customerName}</h3>
             <p className="text-xs text-muted">
               Ledger Statement · ID: <span className="font-mono text-faint">{debtor.id || debtor.customerId}</span> · {debtor.city || debtor.state || 'Punjab'}
+              {debtor.mobile ? ` · Mobile: ${debtor.mobile}` : ''}
             </p>
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-muted hover:bg-line hover:text-ink">
+          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-muted hover:bg-line hover:text-ink no-print">
             <X size={18} />
           </button>
         </div>
@@ -143,15 +291,69 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
           </div>
         </div>
 
+        {/* Aging Breakdown (FIFO) */}
+        <div className="border-b border-line bg-canvas/30 px-5 py-2.5">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Bill Aging Analysis (FIFO)</span>
+            <span className="text-[10px] text-faint">Allocated against bank receipts</span>
+          </div>
+          <div className="grid grid-cols-4 gap-2">
+            <div className="rounded-lg border border-line/60 bg-surface/60 p-2 text-center">
+              <span className="block text-[10px] font-semibold text-muted">0 - 30 Days</span>
+              <span className="font-mono text-xs font-bold text-ink">{rupees(aging.bucket0_30)}</span>
+            </div>
+            <div className="rounded-lg border border-line/60 bg-surface/60 p-2 text-center">
+              <span className="block text-[10px] font-semibold text-muted">31 - 60 Days</span>
+              <span className={`font-mono text-xs font-bold ${aging.bucket31_60 > 0 ? 'text-amber-600' : 'text-ink'}`}>
+                {rupees(aging.bucket31_60)}
+              </span>
+            </div>
+            <div className="rounded-lg border border-line/60 bg-surface/60 p-2 text-center">
+              <span className="block text-[10px] font-semibold text-muted">61 - 90 Days</span>
+              <span className={`font-mono text-xs font-bold ${aging.bucket61_90 > 0 ? 'text-orange-600' : 'text-ink'}`}>
+                {rupees(aging.bucket61_90)}
+              </span>
+            </div>
+            <div className="rounded-lg border border-line/60 bg-surface/60 p-2 text-center">
+              <span className="block text-[10px] font-semibold text-muted">90+ Days</span>
+              <span className={`font-mono text-xs font-bold ${aging.bucket90Plus > 0 ? 'text-rose-600' : 'text-ink'}`}>
+                {rupees(aging.bucket90Plus)}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Filter Bar */}
+        <div className="flex items-center justify-between border-b border-line/60 px-5 py-2 text-xs no-print">
+          <div className="flex items-center gap-1">
+            <span className="text-[11px] font-semibold text-muted mr-2">Filter:</span>
+            {(['ALL', 'SALES', 'RECEIPT'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setFilterType(t)}
+                className={`rounded px-2.5 py-0.5 text-[11px] font-bold transition ${
+                  filterType === t ? 'bg-line text-ink' : 'text-muted hover:text-ink hover:bg-line/40'
+                }`}
+              >
+                {t === 'ALL' ? 'All Vouchers' : t === 'SALES' ? 'Sales Bills' : 'Bank Receipts'}
+              </button>
+            ))}
+          </div>
+          <span className="text-[11px] text-faint">
+            {filteredVouchers.length} {filteredVouchers.length === 1 ? 'record' : 'records'}
+          </span>
+        </div>
+
         {/* Voucher Table */}
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {loading ? (
             <div className="flex h-32 items-center justify-center">
               <Spinner />
             </div>
-          ) : vouchers.length === 0 ? (
+          ) : filteredVouchers.length === 0 ? (
             <div className="py-10 text-center text-xs text-muted">
-              No individual vouchers recorded for this party yet. Import Sales or Bank Books to populate ledger entries.
+              No matching vouchers found for this filter.
             </div>
           ) : (
             <table className="w-full text-left text-xs">
@@ -166,7 +368,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
                 </tr>
               </thead>
               <tbody className="divide-y divide-line/40 font-mono">
-                {vouchers.map((v) => {
+                {filteredVouchers.map((v) => {
                   const isSales = v.voucher_type.toLowerCase() === 'sales';
                   const isReceipt = v.voucher_type.toLowerCase() === 'receipt';
                   return (
@@ -201,7 +403,28 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
           )}
         </div>
 
-        <div className="flex justify-end border-t border-line px-5 py-3">
+        {/* Footer Actions */}
+        <div className="flex items-center justify-between border-t border-line px-5 py-3 no-print">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleShareWhatsApp}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition"
+              title="Share Statement on WhatsApp"
+            >
+              <MessageCircle size={14} />
+              Share on WhatsApp
+            </button>
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-canvas px-3 py-1.5 text-xs font-semibold text-ink shadow-sm hover:bg-line/60 transition"
+              title="Print or Save PDF"
+            >
+              <Printer size={14} />
+              Print / PDF
+            </button>
+          </div>
           <button type="button" onClick={onClose} className="btn-secondary !py-1 text-xs font-bold">
             Close
           </button>
