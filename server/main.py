@@ -51,6 +51,94 @@ def ensure_latest_stock_snapshot(force: bool = False) -> dict | None:
             raise e
     return cur_snap
 
+def seed_all_accounting_books() -> dict[str, Any]:
+    """Finds and indexes all local accounting and cash books, as well as saved customer ledgers."""
+    from .voucher_parser import parse_accounting_workbook
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidates = [
+        "sales.xlsx", "hdfc.xlsx", "yes.xlsx",
+        "cash.xlsx", "khan cash.xlsx", "cash gbd.xlsx",
+        "S S Kalra Zira.xlsx"
+    ]
+    imports_dir = os.path.join(base_dir, "data", "imports")
+    os.makedirs(imports_dir, exist_ok=True)
+    if os.path.exists(imports_dir):
+        for fname in os.listdir(imports_dir):
+            if fname.lower().endswith(".xlsx") and fname not in candidates:
+                candidates.append(os.path.join(imports_dir, fname))
+
+    found = []
+    for f in candidates:
+        if os.path.isabs(f) and os.path.exists(f):
+            if f not in found:
+                found.append(f)
+            continue
+        for p in [
+            os.path.join(base_dir, f),
+            os.path.join(base_dir, "data", f),
+            os.path.join(os.getcwd(), f),
+            os.path.join(os.getcwd(), "data", f),
+            os.path.join(imports_dir, f)
+        ]:
+            if os.path.exists(p) and p not in found:
+                found.append(p)
+                break
+
+    total_inserted = 0
+    total_skipped = 0
+    total_new_parties = 0
+    sources = []
+
+    for path in found:
+        try:
+            with open(path, "rb") as f:
+                f_bytes = f.read()
+            f_sha = hashlib.sha256(f_bytes).hexdigest()
+            parsed = parse_accounting_workbook(path, file_sha256=f_sha)
+            res = db.save_vouchers_batch(parsed["vouchers"], file_sha=f_sha)
+            total_inserted += res["insertedCount"]
+            total_skipped += res["skippedCount"]
+            total_new_parties += res["newPartiesCount"]
+            sources.append(parsed["bookSource"])
+
+            if parsed.get("isCustomerLedger") and parsed.get("customerName"):
+                cust_name = parsed["customerName"]
+                ob_paise = parsed.get("openingBalancePaise", 0)
+                tot_dr = sum(v["debitPaise"] for v in parsed["vouchers"])
+                tot_cr = sum(v["creditPaise"] for v in parsed["vouchers"])
+                closing_paise = max(0, ob_paise + tot_dr - tot_cr)
+                with db.get_connection() as conn:
+                    party_id, _ = db.find_or_create_party_by_name(conn, cust_name)
+                    if ob_paise != 0:
+                        conn.execute(
+                            """
+                            INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                            """,
+                            (party_id, datetime.now().strftime("%Y-%m-%d"), abs(ob_paise), "debit" if ob_paise >= 0 else "credit", "customer_ledger", datetime.now().isoformat())
+                        )
+                    conn.execute(
+                        "UPDATE parties SET balance_paise = ?, updated_at = ? WHERE id = ?",
+                        (closing_paise, datetime.now().isoformat(), party_id)
+                    )
+                    conn.commit()
+        except Exception as e:
+            print(f"Warning: Failed to seed accounting book {path}: {e}")
+
+    persisted = db.load_all_persisted_state()
+    for k in ["debtors", "customers", "opening_balances"]:
+        if k in persisted:
+            STATE[k] = persisted[k]
+
+    return {
+        "status": "success",
+        "message": f"Synced {len(found)} books ({', '.join(sources)}): {total_inserted} vouchers recorded ({total_skipped} skipped), {total_new_parties} new parties created.",
+        "booksSynced": sources,
+        "insertedCount": total_inserted,
+        "skippedCount": total_skipped,
+        "newPartiesCount": total_new_parties
+    }
+
 # Enable CORS for Web panel & Mobile
 app.add_middleware(
     CORSMiddleware,
@@ -264,6 +352,14 @@ try:
                         _match["overduePaise"] = min(bal_p, _match.get("overduePaise", bal_p))
     # Set STATE["customers"] to STATE["debtors"] for unified single source of truth
     STATE["customers"] = STATE["debtors"]
+
+    # Auto-seed accounting books if vouchers table is empty
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM vouchers")
+        v_count = cur.fetchone()[0]
+    if v_count == 0:
+        seed_all_accounting_books()
 except Exception as e:
     print(f"Warning: Failed to initialize/load SQLite DB: {e}")
 
@@ -1905,54 +2001,11 @@ def sync_hr_pb_excel():
 
 @app.post("/api/v1/imports/excel/accounting-books/sync")
 def sync_accounting_books_excel():
-    """1-Click sync for local sales.xlsx, hdfc.xlsx, and yes.xlsx."""
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    candidates = ["sales.xlsx", "hdfc.xlsx", "yes.xlsx"]
-    found = []
-    for f in candidates:
-        for p in [
-            os.path.join(base_dir, f),
-            os.path.join(base_dir, "data", f),
-            os.path.join(os.getcwd(), f),
-            os.path.join(os.getcwd(), "data", f)
-        ]:
-            if os.path.exists(p) and p not in found:
-                found.append(p)
-                break
-
-    if not found:
-        raise HTTPException(status_code=404, detail=f"No accounting books found in workspace root or data folder.")
-    
-    from .voucher_parser import parse_accounting_workbook
-    total_inserted = 0
-    total_skipped = 0
-    total_new_parties = 0
-    sources = []
-
-    for path in found:
-        with open(path, "rb") as f:
-            f_bytes = f.read()
-        f_sha = hashlib.sha256(f_bytes).hexdigest()
-        parsed = parse_accounting_workbook(path, file_sha256=f_sha)
-        res = db.save_vouchers_batch(parsed["vouchers"], file_sha=f_sha)
-        total_inserted += res["insertedCount"]
-        total_skipped += res["skippedCount"]
-        total_new_parties += res["newPartiesCount"]
-        sources.append(parsed["bookSource"])
-
-    persisted = db.load_all_persisted_state()
-    for k in ["debtors", "customers"]:
-        if k in persisted:
-            STATE[k] = persisted[k]
-
-    return {
-        "status": "success",
-        "message": f"Synced {len(found)} books ({', '.join(sources)}): {total_inserted} vouchers recorded ({total_skipped} skipped), {total_new_parties} new parties created.",
-        "booksSynced": sources,
-        "insertedCount": total_inserted,
-        "skippedCount": total_skipped,
-        "newPartiesCount": total_new_parties
-    }
+    """1-Click sync for local sales registers, bank statements, cash books, and customer ledgers."""
+    res = seed_all_accounting_books()
+    if res["insertedCount"] == 0 and res["skippedCount"] == 0 and not res["booksSynced"]:
+        raise HTTPException(status_code=404, detail="No accounting books found in workspace root or data/imports folder.")
+    return res
 
 @app.get("/api/v1/sales/targets")
 def get_sales_targets(
@@ -4356,6 +4409,16 @@ async def apply_debtor_bytes(
         raise HTTPException(status_code=400, detail="Empty debtor workbook upload")
 
     file_sha = hashlib.sha256(body).hexdigest()
+    imports_dir = os.path.join(db.DATA_DIR, "imports")
+    os.makedirs(imports_dir, exist_ok=True)
+    clean_filename = os.path.basename(fileName or f"upload_{file_sha[:8]}.xlsx")
+    perm_path = os.path.join(imports_dir, clean_filename)
+    try:
+        with open(perm_path, "wb") as f_perm:
+            f_perm.write(body)
+    except Exception as e:
+        print(f"Warning: Failed to save uploaded workbook to data/imports: {e}")
+
     tmp_path = os.path.join(tempfile.gettempdir(), f"debtor_apply_{int(datetime.now().timestamp())}.xlsx")
     with open(tmp_path, "wb") as f:
         f.write(body)
@@ -4418,7 +4481,7 @@ async def apply_debtor_bytes(
 
             # Rehydrate in-memory state so UI updates instantly
             persisted = db.load_all_persisted_state()
-            for k in ["debtors", "customers"]:
+            for k in ["debtors", "customers", "opening_balances"]:
                 if k in persisted:
                     STATE[k] = persisted[k]
 
@@ -4531,14 +4594,15 @@ def get_bank_transactions(
     limit: int = 200,
     offset: int = 0
 ):
+    source = bank if bank and bank.lower() != "all" else "all"
     items = db.load_vouchers(
-        book_source=bank or "bank",
+        book_source=source,
         voucher_type=voucher_type,
         q=q,
         limit=limit,
         offset=offset
     )
-    summary = db.get_bank_summary(book_source=bank)
+    summary = db.get_bank_summary(book_source=bank if bank and bank.lower() != "all" else None)
     return {
         "items": items,
         "summary": summary
