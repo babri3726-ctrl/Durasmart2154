@@ -1816,16 +1816,19 @@ def import_opening_balances(filepath: str, as_of: str = "") -> dict[str, Any]:
             v_row = cur.fetchone()
             vch_net = v_row[0] if v_row else 0
 
-            # If party has vouchers during the period, Closing C = Opening + vch_net => Opening = max(0, C - vch_net)
-            if e["direction"] == "debit":
-                if vch_net != 0:
-                    ob_paise = max(0, e["amountPaise"] - vch_net)
+            # If party has vouchers during the period, Closing C = Opening + vch_net => Opening = C - vch_net
+            target_paise = e["amountPaise"] if e["direction"] == "debit" else -e["amountPaise"]
+            if vch_net != 0:
+                diff = target_paise - vch_net
+                if diff >= 0:
+                    ob_paise = diff
+                    direction = "debit"
                 else:
-                    ob_paise = e["amountPaise"]
-                direction = "debit"
+                    ob_paise = abs(diff)
+                    direction = "credit"
             else:
-                ob_paise = e["amountPaise"]
-                direction = "credit"
+                ob_paise = abs(target_paise)
+                direction = e["direction"]
 
             cur.execute(
                 "DELETE FROM opening_balances WHERE customer_id = ? AND source LIKE 'Import: %'",
