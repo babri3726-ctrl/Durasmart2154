@@ -1650,10 +1650,22 @@ def get_debtors(
     q: str | None = None,
     state: str | None = None,
     salesperson: str | None = None,
+    activeOnly: bool = False,
     page: int = 1,
     pageSize: int = 50
 ):
-    items = STATE.get("debtors", [])
+    try:
+        persisted = db.load_all_persisted_state()
+        if persisted.get("debtors"):
+            STATE["debtors"] = persisted["debtors"]
+            STATE["customers"] = persisted["debtors"]
+    except Exception:
+        pass
+
+    items = [
+        d for d in STATE.get("debtors", [])
+        if d.get("name", "").strip().lower() not in ("(as per details)", "discount", "")
+    ]
     if q:
         query = q.lower().strip()
         items = [d for d in items if query in d["name"].lower() or query in d.get("city", "").lower()]
@@ -1661,6 +1673,17 @@ def get_debtors(
         items = [d for d in items if d.get("state", "").lower() == state.lower()]
     if salesperson:
         items = [d for d in items if d.get("salesperson", "").lower() == salesperson.lower()]
+    if activeOnly:
+        items = [d for d in items if float(d.get("balance", 0.0) or 0.0) > 0 or int(d.get("outstandingPaise", 0) or 0) > 0]
+
+    # Sort so that debtors with outstanding balances appear first (highest balance to lowest), followed by name
+    items.sort(
+        key=lambda d: (
+            float(d.get("balance", 0.0) or 0.0) > 0,
+            float(d.get("balance", 0.0) or 0.0),
+        ),
+        reverse=True,
+    )
 
     total = len(items)
     start = (page - 1) * pageSize
@@ -1673,10 +1696,15 @@ def get_debtors(
         row["customerId"] = d["id"]
         row["customerName"] = d["name"]
         row["asOf"] = "2026-10-23"
-        row["debitPaise"] = int(float(d.get("balance", 0.0)) * 100)
+        bal_flt = float(d.get("balance", 0.0) or 0.0)
+        bal_paise = int(round(bal_flt * 100))
+        row["debitPaise"] = bal_paise
         row["creditPaise"] = 0
-        row["openingPaise"] = int(d.get("openingPaise", 0))
-        row["openingBalance"] = float(d.get("openingBalance", round(int(d.get("openingPaise", 0)) / 100.0, 2)))
+        row["outstandingPaise"] = bal_paise
+        row["openingPaise"] = int(d.get("openingPaise", 0) or 0)
+        row["openingBalance"] = float(d.get("openingBalance", round(int(d.get("openingPaise", 0) or 0) / 100.0, 2)))
+        row["balance"] = bal_flt
+        row["balance_formatted"] = f"{bal_flt:.2f}"
         row["importedAt"] = STATE.get("hrpb_snapshot", {}).get("synced_at", "2026-10-23T20:00:00+05:30")
         enriched.append(row)
 

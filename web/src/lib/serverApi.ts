@@ -2014,6 +2014,7 @@ export interface ListDebtorsParams {
   asOf?: string;
   state?: string;
   salesperson?: string;
+  activeOnly?: boolean;
   page?: number;
   pageSize?: number;
 }
@@ -2024,6 +2025,7 @@ export function listDebtors(params: ListDebtorsParams = {}): Promise<ServerPage<
   if (params.asOf) query.set('asOf', params.asOf);
   if (params.state) query.set('state', params.state);
   if (params.salesperson) query.set('salesperson', params.salesperson);
+  if (params.activeOnly) query.set('activeOnly', 'true');
   if (params.page) query.set('page', String(params.page));
   query.set('pageSize', String(params.pageSize ?? 50));
   return send<ServerPage<ServerDebtor>>(`/debtors?${query.toString()}`);

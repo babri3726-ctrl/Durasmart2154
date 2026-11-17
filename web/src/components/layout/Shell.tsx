@@ -4,7 +4,7 @@ import {
   BookOpen,
   LayoutDashboard, TrendingUp, Wallet, Truck, Boxes,
   Map, Route, AlarmClock, Users, ShoppingCart, FilePlus2, IdCard, BarChart3, Settings, ReceiptIndianRupee,
-  Megaphone, Landmark,
+  Megaphone,
   ChevronLeft, ChevronRight, LogOut, Menu, User,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -25,7 +25,6 @@ const NAV: { label: string; to: string; icon: LucideIcon; end?: boolean; hidden?
   { label: 'Dispatch', to: '/dispatch', icon: Truck },
   { label: 'Stock', to: '/stock', icon: Boxes },
   { label: 'Day Book', to: '/daybook', icon: BookOpen },
-  { label: 'Account', to: '/account', icon: Landmark },
   { label: 'Vaccant Area', to: '/vaccant-area', icon: Map },
   { label: 'Tour Plan', to: '/tour-plan', icon: Route },
   { label: 'Task Alarm', to: '/task-alarm', icon: AlarmClock },

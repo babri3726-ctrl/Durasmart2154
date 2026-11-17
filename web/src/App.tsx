@@ -105,7 +105,7 @@ export default function App() {
           <Route path="/profile" element={<Profile />} />
           <Route element={<RequireOwner />}>
             <Route path="/sales" element={<Sales />} />
-            <Route path="/account" element={<Daybook />} />
+            <Route path="/account" element={<Navigate to="/daybook" replace />} />
             <Route path="/daybook" element={<Daybook />} />
             <Route path="/employees" element={<Employees />} />
             <Route path="/employees/:id" element={<EmployeeDetail />} />

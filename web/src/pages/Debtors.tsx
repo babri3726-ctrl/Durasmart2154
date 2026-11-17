@@ -929,6 +929,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
 function DebtorListCard() {
   const [term, setTerm] = useState('');
   const [page, setPage] = useState(1);
+  const [activeOnly, setActiveOnly] = useState(false);
   const [syncingHrPb, setSyncingHrPb] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [selectedDebtorLedger, setSelectedDebtorLedger] = useState<ServerDebtor | null>(null);
@@ -996,10 +997,11 @@ function DebtorListCard() {
     (folded: string, p: number) =>
       listDebtors({
         q: folded || undefined,
+        activeOnly: activeOnly ? true : undefined,
         page: p,
         pageSize: PAGE_SIZE,
       }),
-    [],
+    [activeOnly],
   );
 
   const refreshToken = useSyncToken(syncKeys.debtors);
@@ -1225,15 +1227,39 @@ function DebtorListCard() {
             Dealers and parties with balance, station, salesperson, and live Edit / Delete controls.
           </p>
         </div>
-        <input
-          className="input !w-auto !py-2"
-          value={term}
-          onChange={(event) => {
-            setTerm(event.target.value);
-            setPage(1);
-          }}
-          placeholder="Search by party or station…"
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center rounded-lg border border-line bg-canvas/40 p-0.5">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveOnly(false);
+                setPage(1);
+              }}
+              className={`rounded px-2.5 py-1 text-[11px] font-bold transition ${!activeOnly ? 'bg-brand-blue text-white shadow-sm' : 'text-muted hover:text-ink'}`}
+            >
+              All Debtors
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveOnly(true);
+                setPage(1);
+              }}
+              className={`rounded px-2.5 py-1 text-[11px] font-bold transition ${activeOnly ? 'bg-brand-blue text-white shadow-sm' : 'text-muted hover:text-ink'}`}
+            >
+              With Balance Only
+            </button>
+          </div>
+          <input
+            className="input !w-auto !py-2"
+            value={term}
+            onChange={(event) => {
+              setTerm(event.target.value);
+              setPage(1);
+            }}
+            placeholder="Search by party or station…"
+          />
+        </div>
       </div>
       <div className="mb-3">
         <LiveSyncBar sync={sync} busy={state === 'loading'} />
@@ -1272,7 +1298,8 @@ function DebtorListCard() {
                   const partyTitle = row.name || row.customerName || '—';
                   const cityStation = row.city || row.district || row.state || '—';
                   const sp = row.salesperson || 'Unassigned';
-                  const bal = row.balance !== undefined ? `₹${parseFloat(String(row.balance)).toFixed(2)}` : money(row.debitPaise);
+                  const balPaise = Math.round((row.balance !== undefined ? parseFloat(String(row.balance)) : (row.debitPaise || 0) / 100) * 100);
+                  const isPos = balPaise > 0;
                   return (
                     <tr key={row.id || row.customerId} className="border-b border-line/60 last:border-b-0 hover:bg-canvas/50">
                       <td className="px-3 py-2 align-middle">
@@ -1282,8 +1309,12 @@ function DebtorListCard() {
                       <td className="px-3 py-2 align-middle text-muted">{cityStation}</td>
                       <td className="px-3 py-2 align-middle font-medium text-ink">{sp}</td>
                       <td className="px-3 py-2 text-right align-middle font-semibold tabular-nums text-ink">
-                        <span className="rounded bg-canvas px-2 py-0.5 border border-line font-mono text-[11px]">
-                          {bal}
+                        <span className={`rounded px-2 py-0.5 border font-mono text-[11px] font-bold ${
+                          isPos
+                            ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                            : 'bg-canvas border-line text-slate-400'
+                        }`}>
+                          {rupees(balPaise)}
                         </span>
                       </td>
                       <td className="px-3 py-2 text-center align-middle">
