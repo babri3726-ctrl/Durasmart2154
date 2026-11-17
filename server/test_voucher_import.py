@@ -464,5 +464,26 @@ def test_opening_balance_parsing_and_import():
         assert row[0] == 55556200
 
 
+def test_roundoff_ledger_parsing_and_reconciliation():
+    roundoff_path = os.path.join(BASE_DIR, "rounoff.xlsx")
+    if not os.path.exists(roundoff_path):
+        pytest.skip("rounoff.xlsx not present in workspace")
+
+    parsed = parse_accounting_workbook(roundoff_path)
+    assert parsed["isRoundoffLedger"] is True
+    assert parsed["bookSource"] == "Round Off Ledger"
+    assert parsed["voucherCount"] >= 50
+
+    # Verify New Jindal row exists
+    jindal_v = next((v for v in parsed["vouchers"] if "New Jindal" in v["partyName"]), None)
+    assert jindal_v is not None
+    assert jindal_v["voucherDate"] == "2026-04-01"
+    assert jindal_v["creditPaise"] == 10000000
+
+    res = db.reconcile_roundoff_vouchers(parsed["vouchers"], file_sha="test_roundoff_sha")
+    assert res["status"] == "success"
+    assert res["affectedPartiesCount"] >= 30
+
+
 
 

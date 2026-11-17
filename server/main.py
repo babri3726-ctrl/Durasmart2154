@@ -61,6 +61,8 @@ def seed_all_accounting_books() -> dict[str, Any]:
         "sales.xlsx", "hdfc.xlsx", "yes.xlsx",
         "cash.xlsx", "khan cash.xlsx", "cash gbd.xlsx",
         "discount.xlsx",
+        "rounoff.xlsx",
+        "roundoff.xlsx",
         "S S Kalra Zira.xlsx"
     ]
     imports_dir = os.path.join(base_dir, "data", "imports")
@@ -108,6 +110,10 @@ def seed_all_accounting_books() -> dict[str, Any]:
             parsed = parse_accounting_workbook(path, file_sha256=f_sha)
             if parsed.get("isDiscountLedger"):
                 res = db.reconcile_discount_vouchers(parsed["vouchers"], file_sha=f_sha)
+                total_inserted += res.get("reconciledCount", 0) + res.get("insertedCount", 0)
+                total_skipped += res.get("skippedCount", 0)
+            elif parsed.get("isRoundoffLedger"):
+                res = db.reconcile_roundoff_vouchers(parsed["vouchers"], file_sha=f_sha)
                 total_inserted += res.get("reconciledCount", 0) + res.get("insertedCount", 0)
                 total_skipped += res.get("skippedCount", 0)
             else:

@@ -141,12 +141,16 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
 
     is_customer_ledger = False
     is_discount_ledger = False
+    is_roundoff_ledger = False
     customer_name = ""
     opening_balance_paise = 0
 
     if "discount" in top_text or "discount" in fn_lower:
         is_discount_ledger = True
         book_source = "Discount Ledger"
+    elif "round off" in top_text or "roundoff" in fn_lower or "rounoff" in fn_lower or "round off" in row2_val.lower():
+        is_roundoff_ledger = True
+        book_source = "Round Off Ledger"
     elif "ledger account" in top_text or "ledger" in row3_val.lower() or "ledger" in row2_val.lower():
         is_customer_ledger = True
         if "ledger" in row2_val.lower():
@@ -218,6 +222,9 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
         elif is_discount_ledger:
             party_name = part_detail
             narration = "Discount"
+        elif is_roundoff_ledger:
+            party_name = part_detail
+            narration = "Round Off"
         elif is_liquid:
             party_name = part_detail
             liquid_name = book_source.replace(" Book", "").strip()
@@ -241,8 +248,9 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
         else:
             vch_no = ""
 
-        if is_discount_ledger and vch_no:
-            narration = f"Discount ({vch_no})"
+        if (is_discount_ledger or is_roundoff_ledger) and vch_no:
+            prefix_label = "Discount" if is_discount_ledger else "Round Off"
+            narration = f"{prefix_label} ({vch_no})"
 
         # Debit and Credit amounts / unit quantities
         raw_debit, d_qty = parse_cell_amount(ws.cell(r, col_map.get("debit", 5)).value)
@@ -263,6 +271,17 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
         elif is_discount_ledger:
             debit = 0.0
             credit = raw_debit
+            if not vch_type:
+                vch_type = "Journal"
+        elif is_roundoff_ledger:
+            # If Round Off sheet has "To <Party>" (Debit) -> Party ledger is CREDITED
+            # If Round Off sheet has "By <Party>" (Credit) -> Party ledger is DEBITED
+            if raw_debit > 0:
+                debit = 0.0
+                credit = raw_debit
+            else:
+                debit = raw_credit
+                credit = 0.0
             if not vch_type:
                 vch_type = "Journal"
         else:
@@ -310,6 +329,7 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
         "bookSource": book_source,
         "isCustomerLedger": is_customer_ledger,
         "isDiscountLedger": is_discount_ledger,
+        "isRoundoffLedger": is_roundoff_ledger,
         "customerName": customer_name,
         "openingBalancePaise": opening_balance_paise,
         "periodText": period_text,

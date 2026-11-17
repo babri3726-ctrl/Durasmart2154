@@ -1223,10 +1223,15 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
         "affectedPartiesCount": len(affected_party_ids),
     }
 
-def reconcile_discount_vouchers(vouchers: list[dict[str, Any]], file_sha: str = "") -> dict[str, Any]:
+def reconcile_adjustment_vouchers(
+    vouchers: list[dict[str, Any]],
+    target_generic_party: str = "discount",
+    book_source: str = "Discount Ledger",
+    file_sha: str = ""
+) -> dict[str, Any]:
     """
-    Reconciles a Discount Ledger batch against generic 'Discount' Day Book vouchers.
-    Reassigns matching Day Book vouchers to their true customer debtor accounts as Credit.
+    Reconciles an Adjustment (Discount or Round Off) Ledger batch against generic Day Book vouchers.
+    Reassigns matching Day Book vouchers to their true customer debtor accounts.
     """
     now = datetime.now().isoformat()
     reconciled = 0
@@ -1244,20 +1249,23 @@ def reconcile_discount_vouchers(vouchers: list[dict[str, Any]], file_sha: str = 
             affected_party_ids.add(party_id)
 
             vdate = v.get("voucherDate", "")
-            amt_paise = v.get("creditPaise", 0) or v.get("debitPaise", 0)
+            deb_p = v.get("debitPaise", 0)
+            cred_p = v.get("creditPaise", 0)
+            amt_paise = cred_p if cred_p > 0 else deb_p
             vno = (v.get("voucherNo") or "").strip()
-            narration = v.get("narration") or (f"Discount ({vno})" if vno else "Discount")
+            short_label = book_source.replace(" Ledger", "")
+            narration = v.get("narration") or (f"{short_label} ({vno})" if vno else short_label)
 
-            # Match generic Discount voucher from Day Book on same date and amount
+            # Match generic voucher from Day Book on same date and amount
             cur.execute(
                 """
                 SELECT id, voucher_no FROM vouchers
-                WHERE LOWER(party_name) = 'discount'
+                WHERE LOWER(party_name) = ?
                   AND voucher_date = ?
                   AND (debit_paise = ? OR credit_paise = ?)
                 LIMIT 1
                 """,
-                (vdate, amt_paise, amt_paise)
+                (target_generic_party.lower(), vdate, amt_paise, amt_paise)
             )
             match = cur.fetchone()
 
@@ -1280,20 +1288,21 @@ def reconcile_discount_vouchers(vouchers: list[dict[str, Any]], file_sha: str = 
                 cur.execute(
                     """
                     UPDATE vouchers
-                    SET party_id = ?, party_name = ?, credit_paise = ?, debit_paise = 0, voucher_no = ?, narration = ?, book_source = 'Day Book (Discount)'
+                    SET party_id = ?, party_name = ?, debit_paise = ?, credit_paise = ?, voucher_no = ?, narration = ?, book_source = ?
                     WHERE id = ?
                     """,
-                    (party_id, party_name, amt_paise, effective_vno, narration, match[0])
+                    (party_id, party_name, deb_p, cred_p, effective_vno, narration, f"Day Book ({short_label})", match[0])
                 )
                 reconciled += 1
             elif not already_exists:
-                v_id = v.get("id") or f"VCH-DISC-{now}-{inserted}"
+                prefix = "DISC" if "discount" in target_generic_party.lower() else "ROFF"
+                v_id = v.get("id") or f"VCH-{prefix}-{now}-{inserted}"
                 cur.execute(
                     """
                     INSERT OR IGNORE INTO vouchers (id, voucher_no, voucher_type, voucher_date, party_name, party_id, debit_paise, credit_paise, narration, book_source, file_sha256, created_at)
-                    VALUES (?, ?, 'Journal', ?, ?, ?, 0, ?, ?, 'Discount Ledger', ?, ?)
+                    VALUES (?, ?, 'Journal', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (v_id, vno, vdate, party_name, party_id, amt_paise, narration, file_sha, now)
+                    (v_id, vno, vdate, party_name, party_id, deb_p, cred_p, narration, book_source, file_sha, now)
                 )
                 if cur.rowcount > 0:
                     inserted += 1
@@ -1303,11 +1312,11 @@ def reconcile_discount_vouchers(vouchers: list[dict[str, Any]], file_sha: str = 
         for pid in affected_party_ids:
             recompute_party_balance(pid, conn)
 
-        # Clear fake 'Discount' party balance
-        cur.execute("SELECT id FROM parties WHERE LOWER(name) = 'discount'")
-        disc_row = cur.fetchone()
-        if disc_row:
-            recompute_party_balance(disc_row[0], conn)
+        # Clear fake generic party balance
+        cur.execute("SELECT id FROM parties WHERE LOWER(name) = ?", (target_generic_party.lower(),))
+        target_row = cur.fetchone()
+        if target_row:
+            recompute_party_balance(target_row[0], conn)
 
         conn.commit()
 
@@ -1318,6 +1327,12 @@ def reconcile_discount_vouchers(vouchers: list[dict[str, Any]], file_sha: str = 
         "skippedCount": skipped,
         "affectedPartiesCount": len(affected_party_ids),
     }
+
+def reconcile_discount_vouchers(vouchers: list[dict[str, Any]], file_sha: str = "") -> dict[str, Any]:
+    return reconcile_adjustment_vouchers(vouchers, target_generic_party="discount", book_source="Discount Ledger", file_sha=file_sha)
+
+def reconcile_roundoff_vouchers(vouchers: list[dict[str, Any]], file_sha: str = "") -> dict[str, Any]:
+    return reconcile_adjustment_vouchers(vouchers, target_generic_party="round off", book_source="Round Off Ledger", file_sha=file_sha)
 
 def load_vouchers(
     party_id: str | None = None,
