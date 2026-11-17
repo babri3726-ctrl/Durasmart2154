@@ -1823,8 +1823,22 @@ class OpeningBalanceUpdateRequest(BaseModel):
     asOf: str | None = None
 
 @app.get("/api/v1/vouchers")
-def get_vouchers(partyId: str | None = None, limit: int = 200):
-    return db.load_vouchers(party_id=partyId, limit=limit)
+def get_vouchers(
+    partyId: str | None = None,
+    bookSource: str | None = None,
+    voucherType: str | None = None,
+    q: str | None = None,
+    limit: int = 500,
+    offset: int = 0
+):
+    return db.load_vouchers(
+        party_id=partyId,
+        book_source=bookSource,
+        voucher_type=voucherType,
+        q=q,
+        limit=limit,
+        offset=offset
+    )
 
 @app.put("/api/v1/vouchers/{voucher_id}")
 def update_voucher_endpoint(voucher_id: str, body: VoucherUpdateRequest):
@@ -4221,17 +4235,17 @@ async def preview_debtor_bytes(request: Request, fileName: str | None = "HR-PB.x
             if section == "debtors" and book_src in ALLOWED_PAYMENT_BOOKS:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"This section only accepts Sales Registers (sales.xlsx) or Dealer Targets (HR-PB.xlsx). You uploaded {book_src}. Please upload bank and cash statements in the Payment section."
+                    detail=f"This section accepts Sales Registers, Day Books, Customer Ledgers or Dealer Targets. You uploaded {book_src}. Please upload bank and cash statements in the Payment section."
                 )
             if section == "payments" and book_src == "Sales Register":
                 raise HTTPException(
                     status_code=400,
-                    detail="This section only accepts Bank or Cash statement workbooks (HDFC, Yes Bank, Cash Book, Khan Cash, Cash GBD). You uploaded Sales Register. Please upload Sales Registers in the Debtor section."
+                    detail="This section accepts Bank or Cash statement workbooks (HDFC, Yes Bank, Cash Book, Khan Cash, Cash GBD) or Day Books. You uploaded Sales Register."
                 )
-            if section == "payments" and book_src not in ALLOWED_PAYMENT_BOOKS:
+            if section == "payments" and book_src not in ALLOWED_PAYMENT_BOOKS and book_src != "Day Book":
                 raise HTTPException(
                     status_code=400,
-                    detail="This section only accepts Bank or Cash statement workbooks (HDFC, Yes Bank, Cash Book, Khan Cash, Cash GBD). Unrecognized statement."
+                    detail="This section accepts Bank or Cash statement workbooks (HDFC, Yes Bank, Cash Book, Khan Cash, Cash GBD) or Day Books. Unrecognized statement."
                 )
 
             vouchers = acct_data["vouchers"]
@@ -4441,17 +4455,17 @@ async def apply_debtor_bytes(
             if section == "debtors" and book_src in ALLOWED_PAYMENT_BOOKS:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"This section only accepts Sales Registers (sales.xlsx) or Dealer Targets (HR-PB.xlsx). You uploaded {book_src}. Please upload bank and cash statements in the Payment section."
+                    detail=f"This section accepts Sales Registers, Day Books, Customer Ledgers or Dealer Targets. You uploaded {book_src}. Please upload bank and cash statements in the Payment section."
                 )
             if section == "payments" and book_src == "Sales Register":
                 raise HTTPException(
                     status_code=400,
-                    detail="This section only accepts Bank or Cash statement workbooks (HDFC, Yes Bank, Cash Book, Khan Cash, Cash GBD). You uploaded Sales Register. Please upload Sales Registers in the Debtor section."
+                    detail="This section accepts Bank or Cash statement workbooks (HDFC, Yes Bank, Cash Book, Khan Cash, Cash GBD) or Day Books. You uploaded Sales Register."
                 )
-            if section == "payments" and book_src not in ALLOWED_PAYMENT_BOOKS:
+            if section == "payments" and book_src not in ALLOWED_PAYMENT_BOOKS and book_src != "Day Book":
                 raise HTTPException(
                     status_code=400,
-                    detail="This section only accepts Bank or Cash statement workbooks (HDFC, Yes Bank, Cash Book, Khan Cash, Cash GBD). Unrecognized statement."
+                    detail="This section accepts Bank or Cash statement workbooks (HDFC, Yes Bank, Cash Book, Khan Cash, Cash GBD) or Day Books. Unrecognized statement."
                 )
 
             vouchers = acct_data["vouchers"]

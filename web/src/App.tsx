@@ -18,7 +18,7 @@ import Dispatch from './pages/Dispatch';
 import DispatchHistory from './pages/DispatchHistory';
 import DispatchNew from './pages/DispatchNew';
 import Stock from './pages/Stock';
-import Account from './pages/Account';
+import Daybook from './pages/Daybook';
 import VaccantArea from './pages/VaccantArea';
 import TourPlan from './pages/TourPlan';
 import TaskAlarm from './pages/TaskAlarm';
@@ -105,7 +105,8 @@ export default function App() {
           <Route path="/profile" element={<Profile />} />
           <Route element={<RequireOwner />}>
             <Route path="/sales" element={<Sales />} />
-            <Route path="/account" element={<Account />} />
+            <Route path="/account" element={<Daybook />} />
+            <Route path="/daybook" element={<Daybook />} />
             <Route path="/employees" element={<Employees />} />
             <Route path="/employees/:id" element={<EmployeeDetail />} />
             <Route path="/reports" element={<Reports />} />

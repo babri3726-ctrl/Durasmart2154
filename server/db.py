@@ -128,6 +128,7 @@ def init_db(seed_state: dict[str, Any] | None = None):
             party_id TEXT,
             debit_paise INTEGER DEFAULT 0,
             credit_paise INTEGER DEFAULT 0,
+            narration TEXT DEFAULT '',
             book_source TEXT DEFAULT '',
             file_sha256 TEXT DEFAULT '',
             created_at TEXT NOT NULL,
@@ -275,6 +276,7 @@ def init_db(seed_state: dict[str, Any] | None = None):
             "ALTER TABLE dispatch_lines ADD COLUMN product_id TEXT DEFAULT ''",
             "ALTER TABLE dispatch_lines ADD COLUMN batch_no TEXT DEFAULT ''",
             "ALTER TABLE dispatch_lines ADD COLUMN warehouse TEXT DEFAULT ''",
+            "ALTER TABLE vouchers ADD COLUMN narration TEXT DEFAULT ''",
         ]:
             try:
                 conn.execute(query)
@@ -1122,8 +1124,8 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
             cur.execute(
                 """
                 INSERT OR IGNORE INTO vouchers 
-                (id, voucher_no, voucher_type, voucher_date, party_name, party_id, debit_paise, credit_paise, book_source, file_sha256, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, voucher_no, voucher_type, voucher_date, party_name, party_id, debit_paise, credit_paise, narration, book_source, file_sha256, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     v_id,
@@ -1134,6 +1136,7 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
                     party_id,
                     v.get("debitPaise", 0),
                     v.get("creditPaise", 0),
+                    v.get("narration", ""),
                     v.get("bookSource", ""),
                     file_sha,
                     now,
@@ -1189,6 +1192,8 @@ def load_vouchers(
                 clauses.append("book_source = 'Cash GBD Book'")
             elif "cash" in bs_lower:
                 clauses.append("book_source = 'Cash Book'")
+            elif "day" in bs_lower:
+                clauses.append("book_source = 'Day Book'")
             else:
                 clauses.append("book_source = ?")
                 params.append(book_source)

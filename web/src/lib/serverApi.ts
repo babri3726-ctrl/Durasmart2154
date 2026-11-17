@@ -2069,8 +2069,27 @@ export interface ServerVoucher {
   created_at: string;
 }
 
-export function listVouchers(partyId?: string): Promise<ServerVoucher[]> {
-  const query = partyId ? `?partyId=${encodeURIComponent(partyId)}` : '';
+export function listVouchers(
+  params?: {
+    partyId?: string;
+    bookSource?: string;
+    voucherType?: string;
+    q?: string;
+    limit?: number;
+    offset?: number;
+  } | string,
+): Promise<ServerVoucher[]> {
+  if (typeof params === 'string') {
+    return send<ServerVoucher[]>(`/vouchers?partyId=${encodeURIComponent(params)}`);
+  }
+  const qp = new URLSearchParams();
+  if (params?.partyId) qp.set('partyId', params.partyId);
+  if (params?.bookSource) qp.set('bookSource', params.bookSource);
+  if (params?.voucherType) qp.set('voucherType', params.voucherType);
+  if (params?.q) qp.set('q', params.q);
+  if (params?.limit) qp.set('limit', String(params.limit));
+  if (params?.offset) qp.set('offset', String(params.offset));
+  const query = qp.toString() ? `?${qp.toString()}` : '';
   return send<ServerVoucher[]>(`/vouchers${query}`);
 }
 

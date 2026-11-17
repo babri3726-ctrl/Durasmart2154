@@ -314,3 +314,36 @@ def test_opening_balance_and_receipt_credit_recomputation():
         conn.execute("DELETE FROM vouchers WHERE party_id = ?", (party_id,))
         conn.commit()
 
+
+def test_daybook_parsing_and_import():
+    """Verify that Day Book spreadsheets parse all voucher types and non-currency units without error."""
+    import os
+    from fastapi.testclient import TestClient
+    from server.main import app
+    from server.voucher_parser import parse_accounting_workbook
+
+    daybook_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "daybook.xlsx")
+    if not os.path.exists(daybook_path):
+        return
+
+    parsed = parse_accounting_workbook(daybook_path)
+    assert parsed["bookSource"] == "Day Book"
+    assert parsed["voucherCount"] >= 480
+
+    types = {v["voucherType"] for v in parsed["vouchers"]}
+    assert "Sales" in types
+    assert "Receipt" in types
+    assert "Payment" in types
+    assert "Contra" in types
+
+    client = TestClient(app)
+    with open(daybook_path, "rb") as f:
+        content = f.read()
+
+    prev_res = client.post("/api/v1/debtors/imports/preview?fileName=daybook.xlsx", content=content)
+    assert prev_res.status_code == 200
+    prev_data = prev_res.json()
+    assert prev_data["source"] == "tally-vouchers"
+    assert len(prev_data["rows"]) >= 480
+
+

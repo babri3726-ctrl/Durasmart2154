@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
+  BookOpen,
   LayoutDashboard, TrendingUp, Wallet, Truck, Boxes,
   Map, Route, AlarmClock, Users, ShoppingCart, FilePlus2, IdCard, BarChart3, Settings, ReceiptIndianRupee,
   Megaphone, Landmark,
@@ -23,6 +24,7 @@ const NAV: { label: string; to: string; icon: LucideIcon; end?: boolean; hidden?
   { label: 'Marketing', to: '/marketing', icon: Megaphone },
   { label: 'Dispatch', to: '/dispatch', icon: Truck },
   { label: 'Stock', to: '/stock', icon: Boxes },
+  { label: 'Day Book', to: '/daybook', icon: BookOpen },
   { label: 'Account', to: '/account', icon: Landmark },
   { label: 'Vaccant Area', to: '/vaccant-area', icon: Map },
   { label: 'Tour Plan', to: '/tour-plan', icon: Route },

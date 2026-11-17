@@ -83,6 +83,22 @@ def is_accounting_workbook(filepath: str) -> bool:
         return False
 
 
+def parse_cell_amount(val: Any) -> tuple[float, str]:
+    """Safely extracts float amount and unit/quantity string from a cell."""
+    if val is None:
+        return 0.0, ""
+    if isinstance(val, (int, float)):
+        return float(val), ""
+    s = str(val).strip()
+    if not s:
+        return 0.0, ""
+    cleaned = s.replace(",", "").strip()
+    try:
+        return float(cleaned), ""
+    except ValueError:
+        return 0.0, s
+
+
 def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, filename: str | None = None) -> dict[str, Any]:
     """
     Parses Sales Register or Bank Book spreadsheets into a standardized transaction ledger.
@@ -105,11 +121,11 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
                     col_map["particulars"] = c_idx
                 elif val == "VCH TYPE":
                     col_map["vch_type"] = c_idx
-                elif val == "VCH NO.":
+                elif val in ("VCH NO.", "VCH NO", "VOUCHER NO", "VCH NO ."):
                     col_map["vch_no"] = c_idx
-                elif val == "DEBIT":
+                elif val.startswith("DEBIT"):
                     col_map["debit"] = c_idx
-                elif val == "CREDIT":
+                elif val.startswith("CREDIT"):
                     col_map["credit"] = c_idx
             break
 
@@ -148,6 +164,8 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
         book_source = "Yes Bank Book"
     elif "sales" in top_text or "sales" in fn_lower:
         book_source = "Sales Register"
+    elif "day book" in top_text or "daybook" in top_text or "daybook" in fn_lower or "day book" in fn_lower:
+        book_source = "Day Book"
     else:
         book_source = "Accounting Book"
 
@@ -208,24 +226,32 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
         else:
             vch_no = ""
 
-        # Debit and Credit
-        debit = float(ws.cell(r, col_map.get("debit", 5)).value or 0.0)
-        credit = float(ws.cell(r, col_map.get("credit", 6)).value or 0.0)
+        # Debit and Credit amounts / unit quantities
+        debit, d_qty = parse_cell_amount(ws.cell(r, col_map.get("debit", 5)).value)
+        credit, c_qty = parse_cell_amount(ws.cell(r, col_map.get("credit", 6)).value)
+        if d_qty:
+            narration = f"{narration} (Inwards: {d_qty})".strip()
+        if c_qty:
+            narration = f"{narration} (Outwards: {c_qty})".strip()
+
         debit_paise = round(debit * 100)
         credit_paise = round(credit * 100)
 
-        # Skip zero rows
-        if debit_paise == 0 and credit_paise == 0:
+        # Skip rows with no money and no inventory movements
+        if debit_paise == 0 and credit_paise == 0 and not (d_qty or c_qty):
             continue
 
         if not vch_type:
             vch_type = "Sales" if debit_paise > 0 else "Receipt"
 
+        if not vch_no and book_source == "Day Book":
+            vch_no = f"DB-{r}"
+
         # Format date as YYYY-MM-DD
         vch_date = normalize_date_str(date_cell)
 
         # Deterministic unique hash ID for idempotency
-        hash_src = f"{book_source}:{vch_date}:{vch_type}:{vch_no}:{party_name}:{debit_paise}:{credit_paise}"
+        hash_src = f"{book_source}:{vch_date}:{vch_type}:{vch_no}:{party_name}:{debit_paise}:{credit_paise}:{d_qty or c_qty}"
         vch_id = f"VCH-{hashlib.md5(hash_src.encode('utf-8')).hexdigest()[:16]}"
 
         vouchers.append({
