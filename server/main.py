@@ -111,6 +111,10 @@ def seed_all_accounting_books() -> dict[str, Any]:
                     party_id, _ = db.find_or_create_party_by_name(conn, cust_name)
                     if ob_paise != 0:
                         conn.execute(
+                            "DELETE FROM opening_balances WHERE customer_id = ? AND source = 'customer_ledger'",
+                            (party_id,)
+                        )
+                        conn.execute(
                             """
                             INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)
                             VALUES (?, ?, ?, ?, ?, ?)
@@ -3406,6 +3410,24 @@ def create_payment(body: PaymentCreate):
     pay_date = body.paymentDate or datetime.now().strftime("%Y-%m-%d")
     now_iso = datetime.now().isoformat()
 
+    # Prevent accidental duplicate manual payment on the same date for the same customer
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, voucher_no FROM payments 
+            WHERE customer_id = ? AND payment_date = ? AND amount_paise = ? AND voided_at IS NULL
+            LIMIT 1
+            """,
+            (cust_id, pay_date, amt_paise)
+        )
+        existing_pmt = cur.fetchone()
+        if existing_pmt:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Duplicate payment: A payment of ₹{amt_paise/100:,.2f} for {cust_name} on {pay_date} was already recorded ({existing_pmt['voucher_no']})."
+            )
+
     pay_dict = {
         "id": None,
         "voucherNo": None,
@@ -4480,6 +4502,10 @@ async def apply_debtor_bytes(
                 with db.get_connection() as conn:
                     party_id, _ = db.find_or_create_party_by_name(conn, cust_name)
                     if ob_paise != 0:
+                        conn.execute(
+                            "DELETE FROM opening_balances WHERE customer_id = ? AND source = 'customer_ledger'",
+                            (party_id,)
+                        )
                         conn.execute(
                             """
                             INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)

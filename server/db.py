@@ -1120,7 +1120,46 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
             v["partyId"] = party_id
             affected_party_ids.add(party_id)
 
+            vch_no = (v.get("voucherNo") or "").strip()
+            vch_type = (v.get("voucherType") or "Sales").strip()
+            vch_date = v.get("voucherDate", now[:10])
+            dr_paise = v.get("debitPaise", 0)
+            cr_paise = v.get("creditPaise", 0)
+
             cur = conn.cursor()
+            # Cross-book deduplication: check if identical transaction exists
+            if vch_no and not vch_no.startswith("DB-"):
+                cur.execute(
+                    """
+                    SELECT id FROM vouchers
+                    WHERE voucher_date = ?
+                      AND LOWER(voucher_type) = LOWER(?)
+                      AND (LOWER(TRIM(party_name)) = LOWER(TRIM(?)) OR party_id = ?)
+                      AND debit_paise = ?
+                      AND credit_paise = ?
+                      AND (voucher_no = ? OR voucher_no LIKE 'DB-%' OR voucher_no = '')
+                    LIMIT 1
+                    """,
+                    (vch_date, vch_type, party_name, party_id, dr_paise, cr_paise, vch_no)
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT id FROM vouchers
+                    WHERE voucher_date = ?
+                      AND LOWER(voucher_type) = LOWER(?)
+                      AND (LOWER(TRIM(party_name)) = LOWER(TRIM(?)) OR party_id = ?)
+                      AND debit_paise = ?
+                      AND credit_paise = ?
+                    LIMIT 1
+                    """,
+                    (vch_date, vch_type, party_name, party_id, dr_paise, cr_paise)
+                )
+
+            if cur.fetchone():
+                skipped += 1
+                continue
+
             cur.execute(
                 """
                 INSERT OR IGNORE INTO vouchers 
@@ -1129,13 +1168,13 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
                 """,
                 (
                     v_id,
-                    v.get("voucherNo", ""),
-                    v.get("voucherType", "Sales"),
-                    v.get("voucherDate", now[:10]),
+                    vch_no,
+                    vch_type,
+                    vch_date,
                     party_name,
                     party_id,
-                    v.get("debitPaise", 0),
-                    v.get("creditPaise", 0),
+                    dr_paise,
+                    cr_paise,
                     v.get("narration", ""),
                     v.get("bookSource", ""),
                     file_sha,

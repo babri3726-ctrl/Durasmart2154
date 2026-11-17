@@ -347,3 +347,64 @@ def test_daybook_parsing_and_import():
     assert len(prev_data["rows"]) >= 480
 
 
+def test_comprehensive_deduplication():
+    """Verify that cross-book, case-varying, and manual payment duplicates are strictly prevented."""
+    from fastapi.testclient import TestClient
+    from server.main import app
+
+    client = TestClient(app)
+
+    # 1. Test cross-book and case-insensitive deduplication in save_vouchers_batch
+    batch_1 = [{
+        "id": "VCH-DEDUP-1",
+        "voucherNo": "DB-100",
+        "voucherType": "Receipt",
+        "voucherDate": "2026-11-17",
+        "partyName": "DEDUP TEST PARTY",
+        "debitPaise": 0,
+        "creditPaise": 500000,
+        "bookSource": "Day Book"
+    }]
+    res1 = db.save_vouchers_batch(batch_1)
+    assert res1["insertedCount"] == 1
+
+    # Same receipt from bank book with blank voucher_no and mixed-case party name
+    batch_2 = [{
+        "id": "VCH-DEDUP-2",
+        "voucherNo": "",
+        "voucherType": "Receipt",
+        "voucherDate": "2026-11-17",
+        "partyName": "Dedup Test Party",
+        "debitPaise": 0,
+        "creditPaise": 500000,
+        "bookSource": "HDFC Bank Book"
+    }]
+    res2 = db.save_vouchers_batch(batch_2)
+    assert res2["insertedCount"] == 0
+    assert res2["skippedCount"] == 1
+
+    # 2. Test manual payment duplicate rejection (HTTP 409)
+    pmt_payload = {
+        "customerId": "DEBTOR-DEDUP-1",
+        "customerName": "Manual Dedup Customer",
+        "amount": 25000.0,
+        "paymentDate": "2026-11-17",
+        "method": "NEFT"
+    }
+    # First submission -> 200 OK
+    p1 = client.post("/api/v1/payments", json=pmt_payload)
+    assert p1.status_code == 200
+
+    # Second duplicate submission with same customer, date, amount -> 409 Conflict
+    p2 = client.post("/api/v1/payments", json=pmt_payload)
+    assert p2.status_code == 409
+    assert "Duplicate payment" in p2.json()["detail"]
+
+    # Clean up test artifacts
+    with db.get_connection() as conn:
+        conn.execute("DELETE FROM vouchers WHERE id IN ('VCH-DEDUP-1', 'VCH-DEDUP-2')")
+        conn.execute("DELETE FROM payments WHERE customer_id = 'DEBTOR-DEDUP-1'")
+        conn.commit()
+
+
+
