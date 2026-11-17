@@ -2080,7 +2080,7 @@ export function listVouchers(
   } | string,
 ): Promise<ServerVoucher[]> {
   if (typeof params === 'string') {
-    return send<ServerVoucher[]>(`/vouchers?partyId=${encodeURIComponent(params)}`);
+    return send<ServerVoucher[]>(`/vouchers?partyId=${encodeURIComponent(params)}&limit=5000`);
   }
   const qp = new URLSearchParams();
   if (params?.partyId) qp.set('partyId', params.partyId);

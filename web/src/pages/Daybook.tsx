@@ -50,7 +50,7 @@ export default function Daybook() {
       bookSource: selectedSource === 'all' ? undefined : selectedSource,
       voucherType: selectedType === 'all' ? undefined : selectedType,
       q: searchQuery.trim() || undefined,
-      limit: 1000,
+      limit: 20000,
     })
       .then((items) => {
         setVouchers(items || []);

@@ -1832,7 +1832,7 @@ def get_vouchers(
     bookSource: str | None = None,
     voucherType: str | None = None,
     q: str | None = None,
-    limit: int = 500,
+    limit: int = 20000,
     offset: int = 0
 ):
     return db.load_vouchers(
