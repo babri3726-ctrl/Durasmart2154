@@ -1015,11 +1015,26 @@ def find_or_create_party_by_name(conn, party_name: str) -> tuple[str, bool]:
     # 2. Simplified match (ignoring punctuation and spaces)
     simplified = re.sub(r"[^a-zA-Z0-9]", "", norm_name.lower())
     cur.execute("SELECT id, name FROM parties")
-    for pid, pname in cur.fetchall():
+    all_parties = cur.fetchall()
+    for pid, pname in all_parties:
         if re.sub(r"[^a-zA-Z0-9]", "", (pname or "").lower()) == simplified:
             return pid, False
 
-    # 3. Create new party
+    # 3. Cleaned fuzzy match: strip common Tally noise (Cash, Station in parens, Co., W, Acc)
+    def clean_name(s: str) -> str:
+        s = re.sub(r"\s*\([^)]*\)", "", s)
+        s = re.sub(r"\b(?:m/s|co|corp|pvt|ltd|cash|acc|account|w)\b", "", s, flags=re.IGNORECASE)
+        return re.sub(r"[^a-zA-Z0-9]", "", s.lower())
+
+    clean_target = clean_name(norm_name)
+    if len(clean_target) >= 5:
+        for pid, pname in all_parties:
+            clean_existing = clean_name(pname or "")
+            if len(clean_existing) >= 5:
+                if clean_existing == clean_target or clean_target.startswith(clean_existing) or clean_existing.startswith(clean_target):
+                    return pid, False
+
+    # 4. Create new party
     from .voucher_parser import detect_state_and_city
     state, city = detect_state_and_city(norm_name)
     slug = re.sub(r"[^A-Z0-9]", "", norm_name.upper())[:8] or "CUST"
@@ -1216,7 +1231,7 @@ def load_vouchers(
         if book_source:
             bs_lower = book_source.lower().strip()
             if bs_lower in ("all", "liquid"):
-                clauses.append("book_source IN ('HDFC Bank Book', 'Yes Bank Book', 'Cash Book', 'Khan Cash Book', 'Cash GBD Book')")
+                clauses.append("book_source IN ('HDFC Bank Book', 'Yes Bank Book', 'Cash Book', 'Khan Cash Book', 'Cash GBD Book', 'Day Book')")
             elif bs_lower in ("bank",):
                 clauses.append("book_source IN ('HDFC Bank Book', 'Yes Bank Book')")
             elif bs_lower in ("cash",):
@@ -1302,6 +1317,15 @@ def get_bank_summary(book_source: str | None = None) -> dict[str, Any]:
                     FROM vouchers 
                     WHERE book_source = 'Cash Book'
                 """)
+            elif "day" in bs_lower:
+                cur.execute("""
+                    SELECT 
+                        COUNT(*) as total_vouchers,
+                        COALESCE(SUM(credit_paise), 0) as total_receipts_paise,
+                        COALESCE(SUM(debit_paise), 0) as total_payments_paise
+                    FROM vouchers 
+                    WHERE book_source = 'Day Book'
+                """)
             elif "hdfc" in bs_lower:
                 cur.execute("""
                     SELECT 
@@ -1336,7 +1360,7 @@ def get_bank_summary(book_source: str | None = None) -> dict[str, Any]:
                     COALESCE(SUM(credit_paise), 0) as total_receipts_paise,
                     COALESCE(SUM(debit_paise), 0) as total_payments_paise
                 FROM vouchers 
-                WHERE book_source IN ('HDFC Bank Book', 'Yes Bank Book', 'Cash Book', 'Khan Cash Book', 'Cash GBD Book')
+                WHERE book_source IN ('HDFC Bank Book', 'Yes Bank Book', 'Cash Book', 'Khan Cash Book', 'Cash GBD Book', 'Day Book')
             """)
         row = cur.fetchone()
         receipts = row["total_receipts_paise"] if row else 0

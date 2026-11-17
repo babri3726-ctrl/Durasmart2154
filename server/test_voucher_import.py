@@ -123,10 +123,9 @@ def test_1click_sync_accounting_books_endpoint():
     assert "HDFC Bank Book" in data["booksSynced"]
     assert "Yes Bank Book" in data["booksSynced"]
 
-    # Clean up so test suite isolation is preserved
+    # Clean up test-synced vouchers
     with db.get_connection() as conn:
-        conn.execute("DELETE FROM vouchers")
-        conn.execute("UPDATE parties SET balance_paise = 0")
+        conn.execute("DELETE FROM vouchers WHERE book_source IN ('Sales Register', 'HDFC Bank Book', 'Yes Bank Book')")
         conn.commit()
     persisted = db.load_all_persisted_state()
     from server.main import STATE

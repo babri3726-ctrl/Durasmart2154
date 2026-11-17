@@ -79,7 +79,7 @@ export default function Payment() {
     netPaise: 0,
   });
   const [loadingBank, setLoadingBank] = useState(false);
-  const [bankFilter, setBankFilter] = useState<'all' | 'hdfc' | 'yes' | 'cash' | 'khan' | 'gbd'>('all');
+  const [bankFilter, setBankFilter] = useState<'all' | 'day' | 'hdfc' | 'yes' | 'cash' | 'khan' | 'gbd'>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'receipt' | 'payment'>('all');
   const [bankSearch, setBankSearch] = useState('');
 
@@ -618,10 +618,11 @@ export default function Payment() {
               <div className="flex flex-wrap items-center gap-2">
                 <select
                   value={bankFilter}
-                  onChange={(e) => setBankFilter(e.target.value as 'all' | 'hdfc' | 'yes' | 'cash' | 'khan' | 'gbd')}
+                  onChange={(e) => setBankFilter(e.target.value as 'all' | 'day' | 'hdfc' | 'yes' | 'cash' | 'khan' | 'gbd')}
                   className="input !w-auto !py-1.5 text-xs font-semibold"
                 >
-                  <option value="all">🏦 All Accounts (Bank &amp; Cash)</option>
+                  <option value="all">🏦 All Accounts (Bank, Cash &amp; Day Book)</option>
+                  <option value="day">📖 Day Book Vouchers</option>
                   <option value="hdfc">🏦 HDFC Bank Book</option>
                   <option value="yes">🏦 Yes Bank Book</option>
                   <option value="cash">💵 Cash Book</option>
