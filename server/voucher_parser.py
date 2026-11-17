@@ -303,8 +303,8 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
         # Format date as YYYY-MM-DD
         vch_date = normalize_date_str(date_cell)
 
-        # Deterministic unique hash ID for idempotency
-        hash_src = f"{book_source}:{vch_date}:{vch_type}:{vch_no}:{party_name}:{debit_paise}:{credit_paise}:{d_qty or c_qty}"
+        # Deterministic unique hash ID for idempotency (includes row number 'r' so identical legitimate transactions are preserved)
+        hash_src = f"{book_source}:{r}:{vch_date}:{vch_type}:{vch_no}:{party_name}:{debit_paise}:{credit_paise}:{d_qty or c_qty}"
         vch_id = f"VCH-{hashlib.md5(hash_src.encode('utf-8')).hexdigest()[:16]}"
 
         vouchers.append({

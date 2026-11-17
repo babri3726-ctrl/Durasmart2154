@@ -485,5 +485,34 @@ def test_roundoff_ledger_parsing_and_reconciliation():
     assert res["affectedPartiesCount"] >= 30
 
 
+def test_identical_vouchers_preservation_and_reconciliation():
+    """Verify that multiple legitimate identical vouchers on same date & amount are never dropped or deleted."""
+    from server.voucher_parser import parse_accounting_workbook
+    daybook_path = os.path.join(BASE_DIR, "daybook.xlsx")
+    discount_path = os.path.join(BASE_DIR, "discount.xlsx")
+    if not os.path.exists(daybook_path) or not os.path.exists(discount_path):
+        pytest.skip("daybook.xlsx or discount.xlsx not present")
+
+    # Daybook parse produces distinct IDs for row 5184 and 5185
+    parsed_db = parse_accounting_workbook(daybook_path)
+    disc_31 = [v for v in parsed_db["vouchers"] if v.get("voucherDate") == "2026-07-31" and v.get("debitPaise") == 1508300]
+    assert len(disc_31) == 2
+    assert disc_31[0]["id"] != disc_31[1]["id"], "Both vouchers must receive unique row-indexed IDs"
+
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM parties WHERE name LIKE '%RR BOBBY SAMANA%'")
+        row = cur.fetchone()
+        assert row is not None
+        p_id = row[0]
+        cur.execute("SELECT id, credit_paise FROM vouchers WHERE party_id = ? AND voucher_date = '2026-07-31' AND credit_paise = 1508300", (p_id,))
+        bobby_discounts = cur.fetchall()
+        assert len(bobby_discounts) == 2, f"Expected 2 identical discount vouchers for RR BOBBY SAMANA, found {len(bobby_discounts)}"
+        # Verify balance is 26,22,593.00 (262259300 paise)
+        cur.execute("SELECT balance_paise FROM parties WHERE id = ?", (p_id,))
+        assert cur.fetchone()[0] == 262259300
+
+
+
 
 

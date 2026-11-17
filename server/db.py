@@ -131,8 +131,7 @@ def init_db(seed_state: dict[str, Any] | None = None):
             narration TEXT DEFAULT '',
             book_source TEXT DEFAULT '',
             file_sha256 TEXT DEFAULT '',
-            created_at TEXT NOT NULL,
-            UNIQUE(voucher_no, voucher_type, voucher_date, party_name, debit_paise, credit_paise)
+            created_at TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS stock_movements (
@@ -248,6 +247,32 @@ def init_db(seed_state: dict[str, Any] | None = None):
         """)
 
         # Schema migrations
+        try:
+            cur = conn.cursor()
+            cur.execute("PRAGMA index_list(vouchers)")
+            if any(idx[1] == 'sqlite_autoindex_vouchers_2' for idx in cur.fetchall()):
+                conn.executescript("""
+                    CREATE TABLE vouchers_new (
+                        id TEXT PRIMARY KEY,
+                        voucher_no TEXT NOT NULL,
+                        voucher_type TEXT NOT NULL,
+                        voucher_date TEXT NOT NULL,
+                        party_name TEXT NOT NULL,
+                        party_id TEXT,
+                        debit_paise INTEGER DEFAULT 0,
+                        credit_paise INTEGER DEFAULT 0,
+                        narration TEXT DEFAULT '',
+                        book_source TEXT DEFAULT '',
+                        file_sha256 TEXT DEFAULT '',
+                        created_at TEXT NOT NULL
+                    );
+                    INSERT INTO vouchers_new SELECT * FROM vouchers;
+                    DROP TABLE vouchers;
+                    ALTER TABLE vouchers_new RENAME TO vouchers;
+                """)
+        except Exception:
+            pass
+
         for query in [
             "ALTER TABLE payments ADD COLUMN voided_at TEXT",
             "ALTER TABLE orders ADD COLUMN dispatch_status TEXT DEFAULT 'pending'",
@@ -1127,6 +1152,7 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
     skipped = 0
     new_parties_count = 0
     affected_party_ids = set()
+    claimed_cross_ids: set[str] = set()
 
     with get_connection() as conn:
         for v in vouchers:
@@ -1143,45 +1169,57 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
             vch_date = v.get("voucherDate", now[:10])
             dr_paise = v.get("debitPaise", 0)
             cr_paise = v.get("creditPaise", 0)
+            cur_book = v.get("bookSource", "")
 
             cur = conn.cursor()
-            # Cross-book deduplication: check if identical transaction exists
-            if vch_no and not vch_no.startswith("DB-"):
-                cur.execute(
-                    """
-                    SELECT id FROM vouchers
-                    WHERE voucher_date = ?
-                      AND LOWER(voucher_type) = LOWER(?)
-                      AND (LOWER(TRIM(party_name)) = LOWER(TRIM(?)) OR party_id = ?)
-                      AND debit_paise = ?
-                      AND credit_paise = ?
-                      AND (voucher_no = ? OR voucher_no LIKE 'DB-%' OR voucher_no = '')
-                    LIMIT 1
-                    """,
-                    (vch_date, vch_type, party_name, party_id, dr_paise, cr_paise, vch_no)
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT id FROM vouchers
-                    WHERE voucher_date = ?
-                      AND LOWER(voucher_type) = LOWER(?)
-                      AND (LOWER(TRIM(party_name)) = LOWER(TRIM(?)) OR party_id = ?)
-                      AND debit_paise = ?
-                      AND credit_paise = ?
-                    LIMIT 1
-                    """,
-                    (vch_date, vch_type, party_name, party_id, dr_paise, cr_paise)
-                )
+            # 1. Exact voucher ID check (re-import idempotency for the same physical row)
+            cur.execute("SELECT id FROM vouchers WHERE id = ?", (v_id,))
+            if cur.fetchone():
+                skipped += 1
+                continue
 
-            existing_match = cur.fetchone()
-            if existing_match:
+            # 2. Cross-book 1-to-1 deduplication (e.g. Day Book vs Sales/Bank Book)
+            # Only match against vouchers from a DIFFERENT book source that have not already been claimed
+            cross_match_id = None
+            if cur_book:
+                if vch_no and not vch_no.startswith("DB-"):
+                    cur.execute(
+                        """
+                        SELECT id FROM vouchers
+                        WHERE voucher_date = ?
+                          AND LOWER(voucher_type) = LOWER(?)
+                          AND (LOWER(TRIM(party_name)) = LOWER(TRIM(?)) OR party_id = ?)
+                          AND debit_paise = ?
+                          AND credit_paise = ?
+                          AND book_source != ?
+                          AND (voucher_no = ? OR voucher_no LIKE 'DB-%' OR voucher_no = '')
+                        """,
+                        (vch_date, vch_type, party_name, party_id, dr_paise, cr_paise, cur_book, vch_no)
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT id FROM vouchers
+                        WHERE voucher_date = ?
+                          AND LOWER(voucher_type) = LOWER(?)
+                          AND (LOWER(TRIM(party_name)) = LOWER(TRIM(?)) OR party_id = ?)
+                          AND debit_paise = ?
+                          AND credit_paise = ?
+                          AND book_source != ?
+                        """,
+                        (vch_date, vch_type, party_name, party_id, dr_paise, cr_paise, cur_book)
+                    )
+                candidates = cur.fetchall()
+                cross_match_id = next((row[0] for row in candidates if row[0] not in claimed_cross_ids), None)
+
+            if cross_match_id:
+                claimed_cross_ids.add(cross_match_id)
                 skipped += 1
                 incoming_narration = (v.get("narration") or "").strip()
                 if incoming_narration:
                     cur.execute(
                         "UPDATE vouchers SET narration = ? WHERE id = ? AND (narration IS NULL OR narration = '')",
-                        (incoming_narration, existing_match[0])
+                        (incoming_narration, cross_match_id)
                     )
                 continue
 
@@ -1201,7 +1239,7 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
                     dr_paise,
                     cr_paise,
                     v.get("narration", ""),
-                    v.get("bookSource", ""),
+                    cur_book,
                     file_sha,
                     now,
                 ),
@@ -1231,13 +1269,15 @@ def reconcile_adjustment_vouchers(
 ) -> dict[str, Any]:
     """
     Reconciles an Adjustment (Discount or Round Off) Ledger batch against generic Day Book vouchers.
-    Reassigns matching Day Book vouchers to their true customer debtor accounts.
+    Reassigns matching Day Book vouchers to their true customer debtor accounts using 1-to-1 claim tracking.
     """
     now = datetime.now().isoformat()
     reconciled = 0
     inserted = 0
     skipped = 0
     affected_party_ids = set()
+    claimed_match_ids: set[str] = set()
+    claimed_party_vids: set[str] = set()
 
     with get_connection() as conn:
         cur = conn.cursor()
@@ -1256,34 +1296,20 @@ def reconcile_adjustment_vouchers(
             short_label = book_source.replace(" Ledger", "")
             narration = v.get("narration") or (f"{short_label} ({vno})" if vno else short_label)
 
-            # Match generic voucher from Day Book on same date and amount
+            # Match generic voucher from Day Book on same date and amount (1-to-1 pairing, never delete)
             cur.execute(
                 """
                 SELECT id, voucher_no FROM vouchers
                 WHERE LOWER(party_name) = ?
                   AND voucher_date = ?
                   AND (debit_paise = ? OR credit_paise = ?)
-                LIMIT 1
                 """,
                 (target_generic_party.lower(), vdate, amt_paise, amt_paise)
             )
-            match = cur.fetchone()
+            candidates = cur.fetchall()
+            match = next((row for row in candidates if row[0] not in claimed_match_ids), None)
 
-            # Check if this voucher already exists for party
-            cur.execute(
-                """
-                SELECT id FROM vouchers
-                WHERE party_id = ? AND voucher_date = ? AND (credit_paise = ? OR debit_paise = ?) AND LOWER(voucher_type) = 'journal'
-                LIMIT 1
-                """,
-                (party_id, vdate, amt_paise, amt_paise)
-            )
-            already_exists = cur.fetchone()
-
-            if match and already_exists:
-                cur.execute("DELETE FROM vouchers WHERE id = ?", (match[0],))
-                reconciled += 1
-            elif match:
+            if match:
                 effective_vno = vno if vno else (match[1] or "")
                 cur.execute(
                     """
@@ -1293,19 +1319,40 @@ def reconcile_adjustment_vouchers(
                     """,
                     (party_id, party_name, deb_p, cred_p, effective_vno, narration, f"Day Book ({short_label})", match[0])
                 )
+                claimed_match_ids.add(match[0])
                 reconciled += 1
-            elif not already_exists:
+            else:
+                # No unallocated generic voucher; check if already inserted or insert 1-to-1
                 prefix = "DISC" if "discount" in target_generic_party.lower() else "ROFF"
                 v_id = v.get("id") or f"VCH-{prefix}-{now}-{inserted}"
-                cur.execute(
-                    """
-                    INSERT OR IGNORE INTO vouchers (id, voucher_no, voucher_type, voucher_date, party_name, party_id, debit_paise, credit_paise, narration, book_source, file_sha256, created_at)
-                    VALUES (?, ?, 'Journal', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (v_id, vno, vdate, party_name, party_id, deb_p, cred_p, narration, book_source, file_sha, now)
-                )
-                if cur.rowcount > 0:
-                    inserted += 1
+                cur.execute("SELECT id FROM vouchers WHERE id = ?", (v_id,))
+                already_has_id = cur.fetchone()
+                if not already_has_id:
+                    cur.execute(
+                        """
+                        SELECT id FROM vouchers
+                        WHERE party_id = ? AND voucher_date = ? AND (credit_paise = ? OR debit_paise = ?)
+                          AND LOWER(voucher_type) = 'journal'
+                          AND (book_source = ? OR book_source LIKE 'Day Book (%)')
+                        """,
+                        (party_id, vdate, amt_paise, amt_paise, book_source)
+                    )
+                    existing_party_vid = next((row[0] for row in cur.fetchall() if row[0] not in claimed_party_vids), None)
+                    if existing_party_vid:
+                        claimed_party_vids.add(existing_party_vid)
+                        skipped += 1
+                    else:
+                        cur.execute(
+                            """
+                            INSERT OR IGNORE INTO vouchers (id, voucher_no, voucher_type, voucher_date, party_name, party_id, debit_paise, credit_paise, narration, book_source, file_sha256, created_at)
+                            VALUES (?, ?, 'Journal', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (v_id, vno, vdate, party_name, party_id, deb_p, cred_p, narration, book_source, file_sha, now)
+                        )
+                        if cur.rowcount > 0:
+                            inserted += 1
+                        else:
+                            skipped += 1
                 else:
                     skipped += 1
 
@@ -1780,6 +1827,10 @@ def import_opening_balances(filepath: str, as_of: str = "") -> dict[str, Any]:
                 ob_paise = e["amountPaise"]
                 direction = "credit"
 
+            cur.execute(
+                "DELETE FROM opening_balances WHERE customer_id = ? AND source LIKE 'Import: %'",
+                (party_id,)
+            )
             cur.execute(
                 """
                 INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)
