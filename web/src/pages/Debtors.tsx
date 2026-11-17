@@ -101,12 +101,22 @@ function money(paise: number | null | undefined): string {
 
 function parseVoucherDate(str: string): Date {
   if (!str) return new Date();
-  const parts = str.split('-');
+  const clean = str.trim().replace(/[./]/g, '-');
+  const parts = clean.split('-');
   if (parts.length === 3) {
     const months: Record<string, number> = {
       jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
       jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
     };
+    // ISO YYYY-MM-DD
+    if (parts[0].length === 4) {
+      const year = parseInt(parts[0], 10);
+      const m = parts[1].toLowerCase();
+      const month = months[m] !== undefined ? months[m] : (parseInt(parts[1], 10) - 1 || 0);
+      const day = parseInt(parts[2], 10);
+      return new Date(year, month, day);
+    }
+    // DD-MM-YYYY or DD-Mon-YY
     const day = parseInt(parts[0], 10);
     const m = parts[1].toLowerCase();
     const month = months[m] !== undefined ? months[m] : (parseInt(parts[1], 10) - 1 || 0);
@@ -114,7 +124,7 @@ function parseVoucherDate(str: string): Date {
     if (year < 100) year += 2000;
     return new Date(year, month, day);
   }
-  const d = new Date(str);
+  const d = new Date(clean);
   return isNaN(d.getTime()) ? new Date() : d;
 }
 
@@ -204,15 +214,6 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
 
   // FIFO Aging Calculation
   const aging = useMemo(() => {
-    const salesVouchers = vouchers
-      .filter((v) => v.voucher_type.toLowerCase() === 'sales')
-      .slice()
-      .sort((a, b) => parseVoucherDate(a.voucher_date).getTime() - parseVoucherDate(b.voucher_date).getTime());
-
-    let remainingReceipts = vouchers
-      .filter((v) => v.voucher_type.toLowerCase() === 'receipt')
-      .reduce((sum, v) => sum + (v.credit_paise || v.debit_paise || 0), 0);
-
     const buckets = {
       bucket0_30: 0,
       bucket31_60: 0,
@@ -220,7 +221,38 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
       bucket90Plus: 0,
     };
 
-    if (salesVouchers.length === 0) {
+    if (currentOutstandingPaise <= 0) {
+      return buckets;
+    }
+
+    // Credits pool: receipts, credit notes, and credit journal entries
+    let remainingCredits = vouchers
+      .filter((v) => {
+        const t = v.voucher_type.toLowerCase();
+        return t === 'receipt' || t.includes('credit note') || (t === 'journal' && v.credit_paise > 0);
+      })
+      .reduce((sum, v) => sum + (v.credit_paise || v.debit_paise || 0), 0);
+
+    // 1. Opening balance is the oldest debit
+    if (currentOpeningPaise > 0) {
+      if (remainingCredits >= currentOpeningPaise) {
+        remainingCredits -= currentOpeningPaise;
+      } else {
+        buckets.bucket90Plus += (currentOpeningPaise - remainingCredits);
+        remainingCredits = 0;
+      }
+    }
+
+    // 2. Debit vouchers sorted chronologically oldest first
+    const debitVouchers = vouchers
+      .filter((v) => {
+        const t = v.voucher_type.toLowerCase();
+        return t === 'sales' || t.includes('debit note') || (t === 'journal' && v.debit_paise > 0);
+      })
+      .slice()
+      .sort((a, b) => parseVoucherDate(a.voucher_date).getTime() - parseVoucherDate(b.voucher_date).getTime());
+
+    if (debitVouchers.length === 0 && currentOpeningPaise === 0) {
       const balPaise = Math.round(
         (debtor.balance !== undefined ? parseFloat(String(debtor.balance)) : (debtor.debitPaise || 0) / 100) * 100
       );
@@ -235,14 +267,14 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
     }
 
     const now = Date.now();
-    for (const v of salesVouchers) {
+    for (const v of debitVouchers) {
       const billAmount = v.debit_paise;
       let unpaid = 0;
-      if (remainingReceipts >= billAmount) {
-        remainingReceipts -= billAmount;
+      if (remainingCredits >= billAmount) {
+        remainingCredits -= billAmount;
       } else {
-        unpaid = billAmount - remainingReceipts;
-        remainingReceipts = 0;
+        unpaid = billAmount - remainingCredits;
+        remainingCredits = 0;
       }
 
       if (unpaid > 0) {
@@ -261,7 +293,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
     }
 
     return buckets;
-  }, [vouchers, debtor]);
+  }, [vouchers, debtor, currentOpeningPaise, currentOutstandingPaise]);
 
   const filteredVouchers = vouchers.filter((v) => {
     if (filterType === 'SALES') return v.voucher_type.toLowerCase() === 'sales';
