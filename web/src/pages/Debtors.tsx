@@ -507,8 +507,8 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
             <p className="font-mono text-base font-extrabold text-blue-700">{rupees(totalSalesDebit)}</p>
           </div>
           <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Total Bank Receipts</span>
-            <p className="font-mono text-base font-extrabold text-emerald-700">{rupees(totalReceipts)}</p>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Total Credits / Receipts</span>
+            <p className="font-mono text-base font-extrabold text-emerald-700">{rupees(totalReceipts + totalJournalCredit)}</p>
           </div>
           <div>
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Current Outstanding</span>
