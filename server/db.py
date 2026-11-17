@@ -704,6 +704,13 @@ def load_all_persisted_state() -> dict[str, Any]:
     with get_connection() as conn:
         # Load parties
         cur = conn.cursor()
+        cur.execute("SELECT customer_id, amount_paise, direction FROM opening_balances ORDER BY id ASC")
+        ob_by_customer: dict[str, tuple[int, str]] = {}
+        for ob in cur.fetchall():
+            amt = ob["amount_paise"] or 0
+            signed_paise = amt if (ob["direction"] or "debit").lower() in ("debit", "owes") else -amt
+            ob_by_customer[ob["customer_id"]] = (signed_paise, ob["direction"] or "debit")
+
         cur.execute("SELECT * FROM parties ORDER BY name ASC")
         parties = cur.fetchall()
 
@@ -715,6 +722,9 @@ def load_all_persisted_state() -> dict[str, Any]:
             norm_name = (p["name"] or "").strip().lower()
             if norm_name not in seen_debtor_names:
                 seen_debtor_names.add(norm_name)
+                ob_info = ob_by_customer.get(p["id"])
+                signed_ob = ob_info[0] if ob_info else 0
+                ob_dir = ob_info[1] if ob_info else "debit"
                 d_row = {
                     "id": p["id"],
                     "name": p["name"],
@@ -730,7 +740,9 @@ def load_all_persisted_state() -> dict[str, Any]:
                     "status": p["status"] or "active",
                     "contactPerson": p["name"],
                     "source": "database",
-                    "openingPaise": 0,
+                    "openingPaise": signed_ob,
+                    "openingBalance": round(signed_ob / 100.0, 2),
+                    "openingDirection": ob_dir,
                     "outstandingPaise": bal_paise,
                     "advancePaise": 0,
                     "unbilledValuePaise": 0,

@@ -216,9 +216,9 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
     .filter((v) => v.voucher_type.toLowerCase() === 'journal')
     .reduce((sum, v) => sum + (v.debit_paise || 0), 0);
 
-  const currentOutstandingPaise = vouchers.length > 0
-    ? Math.max(0, currentOpeningPaise + totalSalesDebit + totalJournalDebit - totalReceipts - totalJournalCredit)
-    : (debtor.balance !== undefined ? Math.round(Number(debtor.balance) * 100) : (debtor.debitPaise || 0));
+  const currentOutstandingPaise = debtor.balance !== undefined
+    ? Math.round(Number(debtor.balance) * 100)
+    : Math.max(0, currentOpeningPaise + totalSalesDebit + totalJournalDebit - totalReceipts - totalJournalCredit);
 
   // FIFO Aging Calculation
   const aging = useMemo(() => {
@@ -241,7 +241,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
       })
       .reduce((sum, v) => sum + (v.credit_paise || v.debit_paise || 0), 0);
 
-    // 1. Opening balance is the oldest debit
+    // 1. Opening balance: debit increases oldest obligation, credit increases remaining credits buffer
     if (currentOpeningPaise > 0) {
       if (remainingCredits >= currentOpeningPaise) {
         remainingCredits -= currentOpeningPaise;
@@ -249,6 +249,8 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
         buckets.bucket90Plus += (currentOpeningPaise - remainingCredits);
         remainingCredits = 0;
       }
+    } else if (currentOpeningPaise < 0) {
+      remainingCredits += Math.abs(currentOpeningPaise);
     }
 
     // 2. Debit vouchers sorted chronologically oldest first
@@ -500,7 +502,9 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
                 ✏️ Edit
               </button>
             </div>
-            <p className="font-mono text-base font-extrabold text-slate-800">{rupees(currentOpeningPaise)}</p>
+            <p className="font-mono text-base font-extrabold text-slate-800">
+              {currentOpeningPaise < 0 ? `${rupees(Math.abs(currentOpeningPaise))} Cr` : rupees(currentOpeningPaise)}
+            </p>
           </div>
           <div>
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Total Billed Sales</span>
