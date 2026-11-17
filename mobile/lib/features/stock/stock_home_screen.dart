@@ -23,26 +23,24 @@ class _StockHomeScreenState extends State<StockHomeScreen>
   bool _isSyncing = false;
   String _syncStatus = '3 sheets synced from 1-8-26.xlsx';
   String? _errorMessage;
-  String? _activeHost;
 
   // Snapshot provenance
-  String _filename = '1-8-26.xlsx';
-  String _fileSha256 =
-      'ab5e51aefc65378bca58092c9a7db41f04c26f10df569ff8177ba19240f6f20d';
-  String _syncedAt = '2026-10-26T10:52:40';
-  int _itemCount = 73;
-  List<String> _sheetsRead = ['TOTAL STOCK', 'UPVC TOTAL STOCK', 'UPVC ITEM'];
+  String _filename = 'Connecting...';
+  String _fileSha256 = '';
+  String _syncedAt = '';
+  int _itemCount = 0;
+  List<String> _sheetsRead = [];
 
   // Category KPIs
-  String _metalQty = '1,444,769';
-  int _metalItemCount = 42;
-  String _upvcPieces = '2,043';
-  String _upvcFootage = '24,500';
-  int _upvcItemCount = 28;
-  int _ridgePieces = 907;
-  int _jhallarPieces = 1019;
-  int _capsPieces = 526200;
-  int _hiraRidgePieces = 348;
+  String _metalQty = '0';
+  int _metalItemCount = 0;
+  String _upvcPieces = '0';
+  String _upvcFootage = '0';
+  int _upvcItemCount = 0;
+  int _ridgePieces = 0;
+  int _jhallarPieces = 0;
+  int _capsPieces = 0;
+  int _hiraRidgePieces = 0;
 
   // Detailed lists
   List<Map<String, dynamic>> _steelCoils = [];
@@ -52,13 +50,6 @@ class _StockHomeScreenState extends State<StockHomeScreen>
   // Filter state
   String _steelSearchTerm = '';
   String _selectedUpvcColor = 'ALL';
-
-  static const List<String> _candidateHosts = [
-    'http://127.0.0.1:8010',
-    'http://10.0.2.2:8010',
-    'http://192.168.29.86:8010',
-    'http://localhost:8010',
-  ];
 
   @override
   void initState() {
@@ -75,25 +66,18 @@ class _StockHomeScreenState extends State<StockHomeScreen>
   }
 
   void _populateDefaultData() {
-    _metalQty = '1,444,769';
-    _metalItemCount = 42;
-    _upvcPieces = '2,043';
-    _upvcFootage = '24,500';
-    _upvcItemCount = 28;
-    _ridgePieces = 907;
-    _jhallarPieces = 1019;
-    _capsPieces = 526200;
-    _hiraRidgePieces = 348;
+    _metalQty = '0';
+    _metalItemCount = 0;
+    _upvcPieces = '0';
+    _upvcFootage = '0';
+    _upvcItemCount = 0;
+    _ridgePieces = 0;
+    _jhallarPieces = 0;
+    _capsPieces = 0;
+    _hiraRidgePieces = 0;
   }
 
-  Future<String?> _resolveWorkingHost() async {
-    final host = await ApiSyncService.resolveWorkingHost();
-    if (host != null) {
-      _activeHost = host;
-      return host;
-    }
-    return null;
-  }
+  Future<String?> _resolveWorkingHost() => ApiSyncService.resolveWorkingHost();
 
   Future<void> _fetchLiveStock() async {
     if (!mounted) return;
@@ -240,7 +224,7 @@ class _StockHomeScreenState extends State<StockHomeScreen>
     });
 
     try {
-      final host = await _resolveWorkingHost() ?? 'http://127.0.0.1:8010';
+      final host = await _resolveWorkingHost() ?? 'http://127.0.0.1:8000';
       final client = HttpClient()
         ..connectionTimeout = const Duration(seconds: 15);
       final req = await client.postUrl(
@@ -739,31 +723,40 @@ class _StockHomeScreenState extends State<StockHomeScreen>
         ),
         const SizedBox(height: 4),
         Expanded(
-          child: filtered.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+          child: RefreshIndicator(
+            onRefresh: _fetchLiveStock,
+            child: filtered.isEmpty
+                ? ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
                     children: [
-                      const Icon(
-                        Icons.inventory_2_outlined,
-                        size: 48,
-                        color: AppColors.muted,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _steelSearchTerm.isEmpty
-                            ? 'Loading steel coils...'
-                            : 'No coils match "$_steelSearchTerm"',
-                        style: const TextStyle(color: AppColors.muted),
+                      const SizedBox(height: 60),
+                      Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.inventory_2_outlined,
+                              size: 48,
+                              color: AppColors.muted,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _steelSearchTerm.isEmpty
+                                  ? 'Loading steel coils...'
+                                  : 'No coils match "$_steelSearchTerm"',
+                              style: const TextStyle(color: AppColors.muted),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
-                  ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                  itemCount: filtered.length,
-                  separatorBuilder: (context, index) =>
-                      const SizedBox(height: 8),
+                  )
+                : ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                    itemCount: filtered.length,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(height: 8),
                   itemBuilder: (context, idx) {
                     final item = filtered[idx];
                     final company = (item['company'] ?? 'STEEL').toString();
@@ -773,8 +766,9 @@ class _StockHomeScreenState extends State<StockHomeScreen>
 
                     Color companyColor = AppColors.blue;
                     if (company == 'JSW') companyColor = AppColors.purple;
-                    if (company.contains('KAM'))
+                    if (company.contains('KAM')) {
                       companyColor = AppColors.orange;
+                    }
                     if (company == 'APL') companyColor = AppColors.teal;
 
                     return Container(
@@ -840,6 +834,7 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                     );
                   },
                 ),
+          ),
         ),
       ],
     );
@@ -909,30 +904,39 @@ class _StockHomeScreenState extends State<StockHomeScreen>
         ),
         const SizedBox(height: 4),
         Expanded(
-          child: filtered.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+          child: RefreshIndicator(
+            onRefresh: _fetchLiveStock,
+            child: filtered.isEmpty
+                ? ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
                     children: [
-                      const Icon(
-                        Icons.roofing_rounded,
-                        size: 48,
-                        color: AppColors.muted,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _selectedUpvcColor == 'ALL'
-                            ? 'Loading UPVC matrix...'
-                            : 'No UPVC items for $_selectedUpvcColor',
-                        style: const TextStyle(color: AppColors.muted),
+                      const SizedBox(height: 60),
+                      Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.roofing_rounded,
+                              size: 48,
+                              color: AppColors.muted,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _selectedUpvcColor == 'ALL'
+                                  ? 'Loading UPVC matrix...'
+                                  : 'No UPVC items for $_selectedUpvcColor',
+                              style: const TextStyle(color: AppColors.muted),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
-                  ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                  itemCount: filtered.length,
-                  separatorBuilder: (context, index) =>
+                  )
+                : ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                    itemCount: filtered.length,
+                    separatorBuilder: (context, index) =>
                       const SizedBox(height: 8),
                   itemBuilder: (context, idx) {
                     final item = filtered[idx];
@@ -1013,6 +1017,7 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                     );
                   },
                 ),
+          ),
         ),
       ],
     );

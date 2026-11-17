@@ -122,19 +122,32 @@ class _OrderListScreenState extends State<OrderListScreen> {
     }).toList()..sort((a, b) => b.orderDate.compareTo(a.orderDate));
 
     if (orders.isEmpty) {
-      return const EmptyState(
-        icon: Icons.receipt_long_rounded,
-        title: 'No orders',
-        subtitle: 'No orders match this view or search.',
+      return RefreshIndicator(
+        onRefresh: () => repo.syncWithBackend(),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: const [
+            SizedBox(height: 60),
+            EmptyState(
+              icon: Icons.receipt_long_rounded,
+              title: 'No orders',
+              subtitle: 'No orders match this view or search.',
+            ),
+          ],
+        ),
       );
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.only(bottom: 96, top: 4),
-      itemCount: orders.length,
-      itemBuilder: (context, i) => Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: OrderCard(order: orders[i], repo: repo),
+    return RefreshIndicator(
+      onRefresh: () => repo.syncWithBackend(),
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.only(bottom: 96, top: 4),
+        itemCount: orders.length,
+        itemBuilder: (context, i) => Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: OrderCard(order: orders[i], repo: repo),
+        ),
       ),
     );
   }

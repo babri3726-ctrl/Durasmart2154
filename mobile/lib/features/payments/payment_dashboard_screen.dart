@@ -201,9 +201,12 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
           ),
         ],
       ),
-      body: ListView(
-        padding: AppSpacing.page,
-        children: [
+      body: RefreshIndicator(
+        onRefresh: () => repo.syncWithBackend(),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: AppSpacing.page,
+          children: [
           const DemoNotice(
             text:
                 'Demo payment dashboard. Every figure below is calculated live from the demo orders, payments '
@@ -409,6 +412,7 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
           ),
           const SizedBox(height: 20),
         ],
+      ),
       ),
     );
   }

@@ -156,46 +156,55 @@ class _OutstandingScreenState extends State<OutstandingScreen> {
           ),
           const SizedBox(height: 6),
           Expanded(
-            child: rows.isEmpty
-                ? EmptyState(
-                    icon: Icons.verified_rounded,
-                    title: _mode == _modes[1]
-                        ? 'No overdue balances'
-                        : 'Everything is settled',
-                    subtitle: _mode == _modes[1]
-                        ? 'Customers in this demo still have balances, but none are past their due date.'
-                        : 'No customer has an open balance in the demo data.',
-                    action: SizedBox(
-                      width: double.infinity,
-                      child: ActionPill(
-                        icon: Icons.account_balance_rounded,
-                        label: 'Back to payments',
-                        onTap: () =>
-                            Navigator.of(context).pushNamed('/payments'),
+            child: RefreshIndicator(
+              onRefresh: () => repo.syncWithBackend(),
+              child: rows.isEmpty
+                  ? ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      children: [
+                        EmptyState(
+                          icon: Icons.verified_rounded,
+                          title: _mode == _modes[1]
+                              ? 'No overdue balances'
+                              : 'Everything is settled',
+                          subtitle: _mode == _modes[1]
+                              ? 'Customers in this demo still have balances, but none are past their due date.'
+                              : 'No customer has an open balance in the demo data.',
+                          action: SizedBox(
+                            width: double.infinity,
+                            child: ActionPill(
+                              icon: Icons.account_balance_rounded,
+                              label: 'Back to payments',
+                              onTap: () =>
+                                  Navigator.of(context).pushNamed('/payments'),
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : ListView.separated(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                      itemCount: rows.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) => _OutstandingCard(
+                        row: rows[index],
+                        repo: repo,
+                        onOpen: () => Navigator.of(context).pushNamed(
+                          '/customer',
+                          arguments: <String, String>{
+                            'customerId': rows[index].customer.id,
+                          },
+                        ),
+                        onLedger: () => Navigator.of(context).pushNamed(
+                          '/ledger',
+                          arguments: <String, String>{
+                            'customerId': rows[index].customer.id,
+                          },
+                        ),
                       ),
                     ),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                    itemCount: rows.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 12),
-                    itemBuilder: (context, index) => _OutstandingCard(
-                      row: rows[index],
-                      repo: repo,
-                      onOpen: () => Navigator.of(context).pushNamed(
-                        '/customer',
-                        arguments: <String, String>{
-                          'customerId': rows[index].customer.id,
-                        },
-                      ),
-                      onLedger: () => Navigator.of(context).pushNamed(
-                        '/ledger',
-                        arguments: <String, String>{
-                          'customerId': rows[index].customer.id,
-                        },
-                      ),
-                    ),
-                  ),
+            ),
           ),
         ],
       ),

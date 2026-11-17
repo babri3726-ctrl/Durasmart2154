@@ -11,6 +11,11 @@ import 'models.dart';
 class MockRepository extends ChangeNotifier {
   MockRepository() {
     _seed();
+    ApiSyncService.resolveWorkingHost().then((host) {
+      if (host != null) {
+        syncWithBackend();
+      }
+    }).catchError((_) {});
   }
 
   static const ownerPasscode = 'Ishu@DuraSmart#2026';
@@ -96,6 +101,12 @@ class MockRepository extends ChangeNotifier {
     debtors.insert(0, item);
     // Mirror into customers list so debtor is immediately selectable in New Order form
     final existingCust = customers.where((c) => c.id == item.id).firstOrNull;
+    final sp = employees.where(
+      (e) =>
+          e.name.toLowerCase() == item.salesperson.toLowerCase() ||
+          e.id.toLowerCase() == item.salesperson.toLowerCase(),
+    ).firstOrNull ?? employees.first;
+
     if (existingCust == null) {
       customers.insert(
         0,
@@ -108,7 +119,7 @@ class MockRepository extends ChangeNotifier {
           city: item.city.isNotEmpty
               ? item.city
               : (item.district.isNotEmpty ? item.district : item.state),
-          salespersonId: item.salesperson,
+          salespersonId: sp.id,
           status: CustomerStatus.active,
         ),
       );
@@ -122,7 +133,7 @@ class MockRepository extends ChangeNotifier {
       'district': item.district,
       'salesperson': item.salesperson,
       'balance': item.balance,
-    });
+    }).then((_) => syncWithBackend()).catchError((_) {});
     notifyListeners();
   }
 
@@ -130,6 +141,12 @@ class MockRepository extends ChangeNotifier {
     final idx = debtors.indexWhere((d) => d.id == item.id);
     if (idx != -1) {
       debtors[idx] = item;
+      final sp = employees.where(
+        (e) =>
+            e.name.toLowerCase() == item.salesperson.toLowerCase() ||
+            e.id.toLowerCase() == item.salesperson.toLowerCase(),
+      ).firstOrNull ?? employees.first;
+
       final cIdx = customers.indexWhere((c) => c.id == item.id);
       if (cIdx != -1) {
         customers[cIdx] = Customer(
@@ -139,7 +156,7 @@ class MockRepository extends ChangeNotifier {
           contactPerson: item.name,
           mobile: customers[cIdx].mobile,
           city: item.city.isNotEmpty ? item.city : item.district,
-          salespersonId: item.salesperson,
+          salespersonId: sp.id,
           status: customers[cIdx].status,
         );
       }
@@ -151,7 +168,7 @@ class MockRepository extends ChangeNotifier {
         'district': item.district,
         'salesperson': item.salesperson,
         'balance': item.balance,
-      });
+      }).then((_) => syncWithBackend()).catchError((_) {});
       notifyListeners();
     }
   }
@@ -160,6 +177,146 @@ class MockRepository extends ChangeNotifier {
     debtors.removeWhere((d) => d.id == id);
     customers.removeWhere((c) => c.id == id);
     notifyListeners();
+  }
+
+  /// Live two-way sync with backend REST API
+  Future<void> syncWithBackend() async {
+    try {
+      // 1. Employees
+      final remoteEmps = await ApiSyncService.fetchEmployees();
+      if (remoteEmps != null && remoteEmps.isNotEmpty) {
+        final parsed = remoteEmps.map(Employee.fromJson).toList();
+        for (final e in parsed) {
+          final idx = employees.indexWhere((x) => x.id == e.id);
+          if (idx != -1) {
+            employees[idx] = e;
+          } else {
+            employees.add(e);
+          }
+        }
+      }
+
+      // 2. Customers & Debtors
+      final remoteCusts = await ApiSyncService.fetchCustomers();
+      if (remoteCusts != null && remoteCusts.isNotEmpty) {
+        final parsed = remoteCusts.map(Customer.fromJson).toList();
+        for (final c in parsed) {
+          final idx = customers.indexWhere((existing) => existing.id == c.id);
+          if (idx != -1) {
+            customers[idx] = c;
+          } else {
+            customers.add(c);
+          }
+          final dIdx = debtors.indexWhere((existing) => existing.id == c.id);
+          if (dIdx == -1) {
+            final spObj = employees.where((e) => e.id == c.salespersonId).firstOrNull;
+            debtors.add(
+              DebtorItem(
+                id: c.id,
+                name: c.name,
+                state: 'Punjab/Haryana',
+                city: c.city,
+                district: c.city,
+                salesperson: spObj?.name ?? 'AJAY JI',
+                balance: 0.0,
+              ),
+            );
+          }
+        }
+      }
+
+      // 3. Orders
+      final remoteOrders = await ApiSyncService.fetchOrders();
+      if (remoteOrders != null && remoteOrders.isNotEmpty) {
+        final parsedOrders = remoteOrders.map(SalesOrder.fromJson).toList();
+        for (final o in parsedOrders) {
+          final idx = orders.indexWhere((existing) => existing.id == o.id);
+          if (idx != -1) {
+            orders[idx] = o;
+          } else {
+            orders.add(o);
+          }
+        }
+      }
+
+      // 4. Payments
+      final remotePayments = await ApiSyncService.fetchPayments();
+      if (remotePayments != null && remotePayments.isNotEmpty) {
+        final parsedPayments = remotePayments.map(Payment.fromJson).toList();
+        for (final p in parsedPayments) {
+          final idx = payments.indexWhere((existing) => existing.id == p.id);
+          if (idx != -1) {
+            payments[idx] = p;
+          } else {
+            payments.add(p);
+          }
+        }
+      }
+
+      // 5. Dispatches
+      final remoteDispatches = await ApiSyncService.fetchDispatches();
+      if (remoteDispatches != null && remoteDispatches.isNotEmpty) {
+        final parsedDispatches = remoteDispatches.map(Dispatch.fromJson).toList();
+        for (final d in parsedDispatches) {
+          final idx = dispatches.indexWhere((existing) => existing.id == d.id);
+          if (idx != -1) {
+            dispatches[idx] = d;
+          } else {
+            dispatches.add(d);
+          }
+        }
+      }
+
+      // 6. Tour Plans
+      final remoteTours = await ApiSyncService.fetchTourPlans();
+      if (remoteTours != null && remoteTours.isNotEmpty) {
+        final parsedTours = remoteTours.map(TourPlan.fromJson).toList();
+        for (final t in parsedTours) {
+          final idx = tours.indexWhere((existing) => existing.id == t.id);
+          if (idx != -1) {
+            tours[idx] = t;
+          } else {
+            tours.add(t);
+          }
+        }
+      }
+
+      // 7. Tasks
+      await syncTasksFromBackend();
+
+      // 8. Sales Targets
+      final remoteTargets = await ApiSyncService.fetchSalesTargets();
+      if (remoteTargets != null && remoteTargets.isNotEmpty) {
+        final parsedTargets = remoteTargets.map(SalesTargetItem.fromJson).toList();
+        salesTargets
+          ..clear()
+          ..addAll(parsedTargets);
+      }
+
+      // 9. Products
+      final remoteProducts = await ApiSyncService.fetchProducts();
+      if (remoteProducts != null && remoteProducts.isNotEmpty) {
+        for (final p in remoteProducts) {
+          if (!products.contains(p)) products.add(p);
+        }
+      }
+
+      // 10. Vacant Areas & Territory Coverage
+      final vacantData = await ApiSyncService.fetchVacantAreas();
+      if (vacantData != null && vacantData['districts'] is List) {
+        final list = (vacantData['districts'] as List)
+            .whereType<Map<String, dynamic>>()
+            .map(AreaInfo.fromJson)
+            .toList();
+        if (list.isNotEmpty) {
+          areas
+            ..clear()
+            ..addAll(list);
+        }
+      }
+
+      notifyListeners();
+    } catch (_) {}
   }
 
   final products = <String>[
@@ -238,9 +395,19 @@ class MockRepository extends ChangeNotifier {
     return order.total - orderPaid(orderId);
   }
 
-  double customerOutstanding(String customerId) => ordersFor(
-    customerId,
-  ).fold(0, (sum, o) => sum + _positive(orderBalance(o.id)));
+  double customerOutstanding(String customerId) {
+    final debtor = debtors.where(
+      (d) =>
+          d.id == customerId ||
+          (customerById(customerId)?.name.toLowerCase() ==
+              d.name.toLowerCase()),
+    ).firstOrNull;
+    final openingBalance = debtor?.balance ?? 0.0;
+    final orderSum = ordersFor(
+      customerId,
+    ).fold(0.0, (sum, o) => sum + _positive(orderBalance(o.id)));
+    return openingBalance + orderSum;
+  }
 
   double customerAdvance(String customerId) {
     var credit = 0.0;
@@ -254,6 +421,15 @@ class MockRepository extends ChangeNotifier {
   double customerOverdue(String customerId) {
     final now = DateTime.now();
     var overdue = 0.0;
+    final debtor = debtors.where(
+      (d) =>
+          d.id == customerId ||
+          (customerById(customerId)?.name.toLowerCase() ==
+              d.name.toLowerCase()),
+    ).firstOrNull;
+    if (debtor != null && debtor.balance > 0) {
+      overdue += debtor.balance;
+    }
     for (final o in ordersFor(customerId)) {
       final bal = orderBalance(o.id);
       if (bal > 0 && o.dueDate.isBefore(now)) overdue += bal;
@@ -266,6 +442,15 @@ class MockRepository extends ChangeNotifier {
   int overdueDaysFor(String customerId) {
     final now = DateTime.now();
     var worst = 0;
+    final debtor = debtors.where(
+      (d) =>
+          d.id == customerId ||
+          (customerById(customerId)?.name.toLowerCase() ==
+              d.name.toLowerCase()),
+    ).firstOrNull;
+    if (debtor != null && debtor.balance > 0) {
+      worst = 30; // standard terms for opening ledger balance
+    }
     for (final o in ordersFor(customerId)) {
       if (orderBalance(o.id) > 0 && o.dueDate.isBefore(now)) {
         final days = now.difference(o.dueDate).inDays;
@@ -494,7 +679,7 @@ class MockRepository extends ChangeNotifier {
             },
           )
           .toList(),
-    });
+    }).then((_) => syncWithBackend()).catchError((_) {});
     _pushNotification(
       'Order submitted',
       '${order.number} • ${customer?.name ?? customerId}',
@@ -511,7 +696,7 @@ class MockRepository extends ChangeNotifier {
         'Order deleted',
         '${order.number} permanently deleted',
       );
-      ApiSyncService.deleteOrder(orderId);
+      ApiSyncService.deleteOrder(orderId).then((_) => syncWithBackend()).catchError((_) {});
       notifyListeners();
       return true;
     }
@@ -723,7 +908,7 @@ class MockRepository extends ChangeNotifier {
       'reference': reference,
       'notes': notes,
     };
-    ApiSyncService.postPayment(payPayload);
+    ApiSyncService.postPayment(payPayload).then((_) => syncWithBackend()).catchError((_) {});
 
     notifyListeners();
     return payment;
@@ -880,6 +1065,12 @@ class MockRepository extends ChangeNotifier {
     a.salespersonId = salespersonId;
     a.status = salespersonId == null ? AreaStatus.vacant : AreaStatus.assigned;
     notifyListeners();
+    final spName = salespersonId != null ? salespersonName(salespersonId) : 'Unassigned';
+    ApiSyncService.assignTerritory(
+      district: a.district.isNotEmpty ? a.district : a.name,
+      salesperson: spName,
+      salespersonId: salespersonId,
+    ).then((_) => syncWithBackend()).catchError((_) {});
   }
 
   int existingCustomersIn(AreaInfo area) => customers
@@ -1092,10 +1283,6 @@ class MockRepository extends ChangeNotifier {
   List<AppUser> get demoAccounts => List.unmodifiable(_accounts);
 
   void _seed() {
-    final now = DateTime.now();
-    DateTime d(int day, {int monthOffset = 0}) =>
-        DateTime(now.year, now.month + monthOffset, day);
-
     employees.addAll([
       Employee(
         id: 'EMP-SP-01',
@@ -1229,559 +1416,7 @@ class MockRepository extends ChangeNotifier {
       ),
     ]);
 
-    customers.addAll([
-      Customer(
-        id: 'CUS-1001',
-        name: 'Gupta Steel Traders',
-        city: 'Ludhiana',
-        mobile: '919814022110',
-        salespersonId: 'SAL-01',
-        contactPerson: 'Anil Gupta',
-        address: 'Shop 14, Steel Market, Ludhiana',
-        type: 'Dealer',
-        lastPaymentDate: d(2),
-      ),
-      Customer(
-        id: 'CUS-1002',
-        name: 'Bansal Iron & Pipes',
-        city: 'Jalandhar',
-        mobile: '919815540021',
-        salespersonId: 'SAL-02',
-        contactPerson: 'Sunil Bansal',
-        address: 'Industrial Area B, Jalandhar',
-        type: 'Dealer',
-        lastPaymentDate: d(5),
-      ),
-      Customer(
-        id: 'CUS-1003',
-        name: 'Sharma Roofing Works',
-        city: 'Amritsar',
-        mobile: '919876011234',
-        salespersonId: 'SAL-03',
-        contactPerson: 'Rakesh Sharma',
-        address: 'Grand Trunk Road, Amritsar',
-        type: 'Contractor',
-        lastPaymentDate: d(1),
-      ),
-      Customer(
-        id: 'CUS-1004',
-        name: 'Khanna Sheet Metal',
-        city: 'Khanna',
-        mobile: '919872055410',
-        salespersonId: 'SAL-01',
-        contactPerson: 'Mandeep Khanna',
-        address: 'GT Nagar Market, Khanna',
-        type: 'Dealer',
-        lastPaymentDate: d(8),
-      ),
-      Customer(
-        id: 'CUS-1005',
-        name: 'Patiala Buildmart',
-        city: 'Patiala',
-        mobile: '919877712345',
-        salespersonId: 'SAL-04',
-        contactPerson: 'Deep Sandhu',
-        address: 'Bus Stand Road, Patiala',
-        type: 'Retailer',
-        lastPaymentDate: null,
-      ),
-      Customer(
-        id: 'CUS-1006',
-        name: 'Chawla Engineering Co',
-        city: 'Ludhiana',
-        mobile: '919814099887',
-        salespersonId: 'SAL-01',
-        contactPerson: 'Pankaj Chawla',
-        address: 'CISCO Market, Ludhiana',
-        type: 'Fabricator',
-        lastPaymentDate: d(12),
-      ),
-      Customer(
-        id: 'CUS-1007',
-        name: 'Nakra Fabricators',
-        city: 'Amritsar',
-        mobile: '919876500112',
-        salespersonId: 'SAL-03',
-        contactPerson: 'Rajeev Nakra',
-        address: 'Hall Bazaar, Amritsar',
-        type: 'Fabricator',
-        lastPaymentDate: null,
-      ),
-      Customer(
-        id: 'CUS-1008',
-        name: 'Brar Traders',
-        city: 'Bathinda',
-        mobile: '919814455667',
-        salespersonId: 'SAL-02',
-        contactPerson: 'Jaspreet Brar',
-        address: 'Kachi Arzi, Bathinda',
-        type: 'Dealer',
-        status: CustomerStatus.pendingApproval,
-        lastPaymentDate: null,
-      ),
-    ]);
-
-    orders.addAll([
-      SalesOrder(
-        id: 'ORD-101',
-        number: 'DS-2591',
-        customerId: 'CUS-1001',
-        salespersonId: 'SAL-01',
-        orderDate: d(1),
-        items: [
-          OrderItem(
-            product: 'PPGI Coil',
-            quantity: 12,
-            unit: 'MT',
-            rate: 62000,
-          ),
-        ],
-        dueDate: d(-6),
-        status: OrderStatus.dispatched,
-        paymentTerms: '30 days credit',
-      ),
-      SalesOrder(
-        id: 'ORD-102',
-        number: 'DS-2596',
-        customerId: 'CUS-1002',
-        salespersonId: 'SAL-02',
-        orderDate: d(3),
-        items: [
-          OrderItem(
-            product: 'Galvanized C Purlin',
-            quantity: 8,
-            unit: 'MT',
-            rate: 58500,
-          ),
-        ],
-        dueDate: d(-1),
-        status: OrderStatus.dispatched,
-      ),
-      SalesOrder(
-        id: 'ORD-103',
-        number: 'DS-2601',
-        customerId: 'CUS-1001',
-        salespersonId: 'SAL-01',
-        orderDate: d(6),
-        items: [
-          OrderItem(
-            product: 'PPGI Coil',
-            quantity: 4.5,
-            unit: 'MT',
-            rate: 62500,
-          ),
-          OrderItem(
-            product: 'Colour Coated Sheet',
-            quantity: 2.5,
-            unit: 'MT',
-            rate: 71000,
-          ),
-        ],
-        expectedDispatchDate: d(14),
-        dueDate: d(36),
-        status: OrderStatus.pendingDispatch,
-      ),
-      SalesOrder(
-        id: 'ORD-104',
-        number: 'DS-2602',
-        customerId: 'CUS-1002',
-        salespersonId: 'SAL-02',
-        orderDate: d(7),
-        items: [
-          OrderItem(product: 'Z Purlin', quantity: 6, unit: 'MT', rate: 59000),
-        ],
-        dueDate: d(37),
-        status: OrderStatus.pending,
-      ),
-      SalesOrder(
-        id: 'ORD-105',
-        number: 'DS-2603',
-        customerId: 'CUS-1003',
-        salespersonId: 'SAL-03',
-        orderDate: d(8),
-        items: [
-          OrderItem(
-            product: 'UPVC Roofing Sheet',
-            quantity: 3.2,
-            unit: 'MT',
-            rate: 94000,
-          ),
-        ],
-        expectedDispatchDate: d(15),
-        dueDate: d(38),
-        status: OrderStatus.pendingDispatch,
-      ),
-      SalesOrder(
-        id: 'ORD-106',
-        number: 'DS-2604',
-        customerId: 'CUS-1004',
-        salespersonId: 'SAL-01',
-        orderDate: d(8),
-        items: [
-          OrderItem(product: 'PPGL Coil', quantity: 5, unit: 'MT', rate: 64000),
-        ],
-        dueDate: d(38),
-        status: OrderStatus.confirmed,
-      ),
-      SalesOrder(
-        id: 'ORD-107',
-        number: 'DS-2605',
-        customerId: 'CUS-1005',
-        salespersonId: 'SAL-04',
-        orderDate: d(9),
-        items: [
-          OrderItem(
-            product: 'Colour Coated Sheet',
-            quantity: 3,
-            unit: 'MT',
-            rate: 72000,
-          ),
-        ],
-        dueDate: d(39),
-        status: OrderStatus.pending,
-      ),
-      SalesOrder(
-        id: 'ORD-108',
-        number: 'DS-2606',
-        customerId: 'CUS-1006',
-        salespersonId: 'SAL-01',
-        orderDate: d(9),
-        items: [
-          OrderItem(
-            product: 'Hot Rolled Coil',
-            quantity: 9,
-            unit: 'MT',
-            rate: 56000,
-          ),
-        ],
-        dueDate: d(39),
-        status: OrderStatus.confirmed,
-      ),
-      SalesOrder(
-        id: 'ORD-109',
-        number: 'DS-2588',
-        customerId: 'CUS-1007',
-        salespersonId: 'SAL-03',
-        orderDate: d(2, monthOffset: -1),
-        items: [
-          OrderItem(product: 'PPGI Coil', quantity: 6, unit: 'MT', rate: 61500),
-        ],
-        dueDate: d(28, monthOffset: -1),
-        status: OrderStatus.dispatched,
-      ),
-      SalesOrder(
-        id: 'ORD-110',
-        number: 'DS-2584',
-        customerId: 'CUS-1003',
-        salespersonId: 'SAL-03',
-        orderDate: d(10, monthOffset: -1),
-        items: [
-          OrderItem(
-            product: 'UPVC Roofing Sheet',
-            quantity: 2.4,
-            unit: 'MT',
-            rate: 93000,
-          ),
-        ],
-        dueDate: d(6, monthOffset: -1),
-        status: OrderStatus.dispatched,
-      ),
-    ]);
-
-    dispatches.addAll([
-      Dispatch(
-        id: 'DSP-101',
-        orderId: 'ORD-101',
-        orderNumber: 'DS-2591',
-        customerId: 'CUS-1001',
-        dispatchDate: d(3),
-        lines: [DispatchLine(product: 'PPGI Coil', quantity: 12, unit: 'MT')],
-        vehicle: 'PB10 A 4422',
-        driver: 'Manjit Singh',
-        transportName: 'Gill Logistics',
-        notes: 'Full consignment loaded',
-      ),
-      Dispatch(
-        id: 'DSP-102',
-        orderId: 'ORD-102',
-        orderNumber: 'DS-2596',
-        customerId: 'CUS-1002',
-        dispatchDate: d(5),
-        lines: [
-          DispatchLine(product: 'Galvanized C Purlin', quantity: 8, unit: 'MT'),
-        ],
-        vehicle: 'PB14 C 9071',
-        driver: 'Harjinder Singh',
-        transportName: 'Sandhu Carriers',
-      ),
-      Dispatch(
-        id: 'DSP-103',
-        orderId: 'ORD-109',
-        orderNumber: 'DS-2588',
-        customerId: 'CUS-1007',
-        dispatchDate: d(4, monthOffset: -1),
-        lines: [DispatchLine(product: 'PPGI Coil', quantity: 6, unit: 'MT')],
-        vehicle: 'PB08 G 1123',
-        driver: 'Lakhwinder Singh',
-        transportName: 'Nakoda Transport',
-      ),
-      Dispatch(
-        id: 'DSP-104',
-        orderId: 'ORD-110',
-        orderNumber: 'DS-2584',
-        customerId: 'CUS-1003',
-        dispatchDate: d(12, monthOffset: -1),
-        lines: [
-          DispatchLine(
-            product: 'UPVC Roofing Sheet',
-            quantity: 2.4,
-            unit: 'MT',
-          ),
-        ],
-        vehicle: 'PB02 H 5566',
-        driver: 'Gurdev Singh',
-        transportName: 'Nakoda Transport',
-      ),
-    ]);
-
-    payments.addAll([
-      Payment(
-        id: 'PAY-101',
-        customerId: 'CUS-1001',
-        orderId: 'ORD-101',
-        invoiceNumber: 'DS-2591',
-        invoiceAmount: 744000,
-        amount: 500000,
-        date: d(2),
-        method: PaymentMethod.neft,
-        reference: 'HDFC458812',
-        notes: 'Part payment',
-      ),
-      Payment(
-        id: 'PAY-102',
-        customerId: 'CUS-1002',
-        orderId: 'ORD-102',
-        invoiceNumber: 'DS-2596',
-        invoiceAmount: 468000,
-        amount: 250000,
-        date: d(5),
-        method: PaymentMethod.upi,
-        reference: 'UPI-9921',
-      ),
-      Payment(
-        id: 'PAY-103',
-        customerId: 'CUS-1003',
-        orderId: 'ORD-110',
-        invoiceNumber: 'DS-2584',
-        invoiceAmount: 223200,
-        amount: 100000,
-        date: d(8),
-        method: PaymentMethod.cheque,
-        reference: 'CHQ-778211',
-      ),
-      Payment(
-        id: 'PAY-104',
-        customerId: 'CUS-1004',
-        orderId: 'ORD-106',
-        invoiceNumber: 'DS-2604',
-        invoiceAmount: 320000,
-        amount: 100000,
-        date: d(9),
-        method: PaymentMethod.cash,
-        notes: 'Advance against order',
-      ),
-      Payment(
-        id: 'PAY-105',
-        customerId: 'CUS-1006',
-        orderId: 'ORD-108',
-        invoiceNumber: 'DS-2606',
-        invoiceAmount: 504000,
-        amount: 150000,
-        date: d(12, monthOffset: -1),
-        method: PaymentMethod.neft,
-        reference: 'ICICI77120',
-      ),
-      Payment(
-        id: 'PAY-106',
-        customerId: 'CUS-1007',
-        orderId: 'ORD-109',
-        invoiceNumber: 'DS-2588',
-        invoiceAmount: 369000,
-        amount: 369000,
-        date: d(18, monthOffset: -1),
-        method: PaymentMethod.neft,
-        reference: 'AXIS55210',
-      ),
-    ]);
-
-    areas.addAll([
-      AreaInfo(
-        id: 'AREA-101',
-        name: 'Bathinda Belt',
-        city: 'Bathinda',
-        district: 'Bathinda',
-        state: 'Punjab',
-        potentialCustomers: 14,
-        notes: 'Two fabricator clusters near Kachi Arzi. No active dealer yet.',
-      ),
-      AreaInfo(
-        id: 'AREA-102',
-        name: 'Moga Corridor',
-        city: 'Moga',
-        district: 'Moga',
-        state: 'Punjab',
-        potentialCustomers: 9,
-        notes: 'Roofing contractors demand UPVC sheets.',
-      ),
-      AreaInfo(
-        id: 'AREA-103',
-        name: 'Firozpur South',
-        city: 'Firozpur',
-        district: 'Firozpur',
-        state: 'Punjab',
-        salespersonId: 'SAL-03',
-        potentialCustomers: 7,
-        status: AreaStatus.partial,
-        notes: 'One dealer active, coverage pending.',
-      ),
-      AreaInfo(
-        id: 'AREA-104',
-        name: 'Sangrur Town',
-        city: 'Sangrur',
-        district: 'Sangrur',
-        state: 'Haryana',
-        potentialCustomers: 11,
-        notes: 'Neighbouring market, weekend trips.',
-      ),
-      AreaInfo(
-        id: 'AREA-105',
-        name: 'Patiala Rural',
-        city: 'Patiala',
-        district: 'Patiala',
-        state: 'Punjab',
-        salespersonId: 'SAL-04',
-        potentialCustomers: 6,
-        status: AreaStatus.assigned,
-      ),
-      AreaInfo(
-        id: 'AREA-106',
-        name: 'Hoshiarpur Hills',
-        city: 'Hoshiarpur',
-        district: 'Hoshiarpur',
-        state: 'Punjab',
-        potentialCustomers: 8,
-        notes: 'Seasonal demand, good for tour plans.',
-      ),
-    ]);
-
-    tours.addAll([
-      TourPlan(
-        id: 'TOUR-101',
-        salespersonId: 'SAL-01',
-        date: d(10),
-        area: 'Ludhiana City',
-        notes: 'Monthly review visits',
-        visits: [
-          TourVisit(
-            id: 'VST-1011',
-            customerId: 'CUS-1001',
-            customerName: 'Gupta Steel Traders',
-            city: 'Ludhiana',
-            purpose: 'Payment follow-up',
-            sequence: 1,
-            status: VisitStatus.completed,
-            actualTime: d(10),
-            notes: 'Promise for balance by Friday.',
-          ),
-          TourVisit(
-            id: 'VST-1012',
-            customerId: 'CUS-1006',
-            customerName: 'Chawla Engineering Co',
-            city: 'Ludhiana',
-            purpose: 'New order discussion',
-            sequence: 2,
-          ),
-          TourVisit(
-            id: 'VST-1013',
-            customerId: 'CUS-1004',
-            customerName: 'Khanna Sheet Metal',
-            city: 'Khanna',
-            purpose: 'Stock check',
-            sequence: 3,
-          ),
-        ],
-      ),
-      TourPlan(
-        id: 'TOUR-102',
-        salespersonId: 'SAL-02',
-        date: d(11),
-        area: 'Jalandhar + Khanna',
-        visits: [
-          TourVisit(
-            id: 'VST-1021',
-            customerId: 'CUS-1002',
-            customerName: 'Bansal Iron & Pipes',
-            city: 'Jalandhar',
-            purpose: 'Balance collection',
-            sequence: 1,
-          ),
-          TourVisit(
-            id: 'VST-1022',
-            customerId: 'CUS-1008',
-            customerName: 'Brar Traders',
-            city: 'Bathinda',
-            purpose: 'Onboarding',
-            sequence: 2,
-            status: VisitStatus.missed,
-            notes: 'Shut for maintenance.',
-          ),
-        ],
-      ),
-      TourPlan(
-        id: 'TOUR-103',
-        salespersonId: 'SAL-03',
-        date: d(13),
-        area: 'Amritsar + Tarn Taran',
-        visits: [
-          TourVisit(
-            id: 'VST-1031',
-            customerId: 'CUS-1003',
-            customerName: 'Sharma Roofing Works',
-            city: 'Amritsar',
-            purpose: 'Order handover',
-            sequence: 1,
-          ),
-          TourVisit(
-            id: 'VST-1032',
-            customerId: 'CUS-1007',
-            customerName: 'Nakra Fabricators',
-            city: 'Amritsar',
-            purpose: 'Payment follow-up',
-            sequence: 2,
-          ),
-        ],
-      ),
-      TourPlan(
-        id: 'TOUR-104',
-        salespersonId: 'SAL-04',
-        date: d(4, monthOffset: -1),
-        area: 'Patiala Rural',
-        visits: [
-          TourVisit(
-            id: 'VST-1041',
-            customerId: 'CUS-1005',
-            customerName: 'Patiala Buildmart',
-            city: 'Patiala',
-            purpose: 'First meeting',
-            sequence: 1,
-            status: VisitStatus.missed,
-          ),
-        ],
-      ),
-    ]);
-
-    // No dummy tasks seeded; tasks are created by owner or synced from backend.
-
+    // Customers, orders, payments, dispatches, and tour plans are live-synced from backend via syncWithBackend().
     debtors.addAll([
       DebtorItem(
         id: 'DEBTOR-001',
@@ -1875,139 +1510,26 @@ class MockRepository extends ChangeNotifier {
       ),
     ]);
 
-    salesTargets.addAll([
-      SalesTargetItem(
-        id: 'TGT-HR-001',
-        state: 'Haryana',
-        partyName: 'KALRA TRADERS/ STEEL DERABASSI',
-        station: 'Dera Bassi',
-        district: 'Mohali',
-        salesperson: 'Mozi Ram',
-        targetMt: '50.000',
-        dispatchedMt: '28.395',
-        pendingMt: '21.605',
-      ),
-      SalesTargetItem(
-        id: 'TGT-HR-002',
-        state: 'Haryana',
-        partyName: 'DOORKRM SIRSA ENTERPRISES SIRSA',
-        station: 'Sirsa',
-        district: 'SIRSA',
-        salesperson: 'AJAY JI',
-        targetMt: '60.000',
-        dispatchedMt: '32.140',
-        pendingMt: '27.860',
-      ),
-      SalesTargetItem(
-        id: 'TGT-HR-003',
-        state: 'Haryana',
-        partyName: 'BANSAL POLES JHAJJAR',
-        station: 'Jhajjar',
-        district: 'JHAJJAR',
-        salesperson: 'PANKAJ JI',
-        targetMt: '45.000',
-        dispatchedMt: '18.250',
-        pendingMt: '26.750',
-      ),
-      SalesTargetItem(
-        id: 'TGT-PB-001',
-        state: 'Punjab',
-        partyName: 'GURU KIRPA INDUSTRY BARNALA',
-        station: 'Barnala',
-        district: 'Barnala',
-        salesperson: 'Pankaj Goyal',
-        targetMt: '30.000',
-        dispatchedMt: '25.000',
-        pendingMt: '5.000',
-      ),
-      SalesTargetItem(
-        id: 'TGT-PB-002',
-        state: 'Punjab',
-        partyName: 'BHAGWATI INDUSTRIES TARB TARAN',
-        station: 'Tarn Taran',
-        district: 'Tarn Taran',
-        salesperson: 'Jagdeep Singh',
-        targetMt: '30.000',
-        dispatchedMt: '13.715',
-        pendingMt: '16.285',
-      ),
-      SalesTargetItem(
-        id: 'TGT-PB-003',
-        state: 'Punjab',
-        partyName: 'SAGGU STEEL FEROZPUR',
-        station: 'FEROZPUR',
-        district: 'FEROZPUR',
-        salesperson: 'Pankaj Goyal',
-        targetMt: '15.000',
-        dispatchedMt: '10.345',
-        pendingMt: '4.655',
-      ),
-      SalesTargetItem(
-        id: 'TGT-PB-004',
-        state: 'Punjab',
-        partyName: 'J P INDUSTRIAL JAGRAON',
-        station: 'Jagraon',
-        district: 'Ludhiana',
-        salesperson: 'Sandeep Mahajan',
-        targetMt: '25.000',
-        dispatchedMt: '16.315',
-        pendingMt: '8.685',
-      ),
-      SalesTargetItem(
-        id: 'TGT-PB-005',
-        state: 'Punjab',
-        partyName: 'SANDEEP RAMPURA',
-        station: 'Rampura',
-        district: 'Bathinda',
-        salesperson: 'Suresh Jindal',
-        targetMt: '10.000',
-        dispatchedMt: '7.884',
-        pendingMt: '2.116',
-      ),
-      SalesTargetItem(
-        id: 'TGT-PB-006',
-        state: 'Punjab',
-        partyName: 'SHIV IRON STORE PHAGWARA',
-        station: 'Phagwara',
-        district: 'Kapurthala',
-        salesperson: 'Sandeep Mahajan',
-        targetMt: '15.000',
-        dispatchedMt: '14.151',
-        pendingMt: '0.849',
-      ),
-      SalesTargetItem(
-        id: 'TGT-PB-007',
-        state: 'Punjab',
-        partyName: 'CHINTPURNI TRADING CO. HOSHIARPUR',
-        station: 'Hoshiarpur',
-        district: 'Hoshiarpur',
-        salesperson: 'JAGDEEP 2/ Aakash Kumar',
-        targetMt: '20.000',
-        dispatchedMt: '17.230',
-        pendingMt: '2.770',
-      ),
-    ]);
+    for (final d in debtors) {
+      final sp = employees.where(
+        (e) =>
+            e.name.toLowerCase() == d.salesperson.toLowerCase() ||
+            e.id.toLowerCase() == d.salesperson.toLowerCase(),
+      ).firstOrNull ?? employees.first;
 
-    notifications.addAll([
-      AppNotification(
-        id: 'NTF-9001',
-        title: 'Overdue alert',
-        body: 'DS-2591 (Gupta Steel Traders) balance is past due date.',
-        time: d(9),
-      ),
-      AppNotification(
-        id: 'NTF-9002',
-        title: 'Pending approval',
-        body: 'Brar Traders customer record is waiting for approval.',
-        time: d(9),
-      ),
-      AppNotification(
-        id: 'NTF-9003',
-        title: 'Dispatch reminder',
-        body: 'DS-2603 expected dispatch date is near.',
-        time: d(10),
-      ),
-    ]);
+      customers.add(
+        Customer(
+          id: d.id,
+          name: d.name,
+          city: d.city.isNotEmpty ? d.city : (d.district.isNotEmpty ? d.district : d.state),
+          mobile: '919800000000',
+          salespersonId: sp.id,
+          contactPerson: d.name,
+          address: '${d.district}, ${d.state}',
+          type: 'Dealer',
+        ),
+      );
+    }
   }
 }
 

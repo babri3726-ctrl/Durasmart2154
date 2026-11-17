@@ -79,6 +79,20 @@ class Employee {
   final String city;
   double monthlyTargetQty;
   bool active;
+
+  factory Employee.fromJson(Map<String, dynamic> json) {
+    return Employee(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      role: json['role']?.toString() ?? 'Area Sales Officer',
+      department: json['department']?.toString() ?? 'Sales',
+      phone: json['phone']?.toString() ?? '',
+      email: json['email']?.toString() ?? '',
+      city: json['city']?.toString() ?? '',
+      monthlyTargetQty: (json['monthlyTargetQty'] as num?)?.toDouble() ?? 0.0,
+      active: json['active'] == null || json['active'] == true,
+    );
+  }
 }
 
 enum CustomerStatus { active, pendingApproval }
@@ -108,6 +122,27 @@ class Customer {
   final String notes;
   CustomerStatus status;
   DateTime? lastPaymentDate;
+
+  factory Customer.fromJson(Map<String, dynamic> json) {
+    return Customer(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? 'Dealer',
+      city: json['city']?.toString() ?? (json['district']?.toString() ?? 'Punjab'),
+      mobile: json['mobile']?.toString() ?? json['phone']?.toString() ?? '919800000000',
+      salespersonId: json['salespersonId']?.toString() ?? json['salesperson_id']?.toString() ?? 'EMP-SP-01',
+      contactPerson: json['contactPerson']?.toString() ?? json['name']?.toString() ?? '',
+      address: json['address']?.toString() ?? json['state']?.toString() ?? '',
+      type: json['type']?.toString() ?? 'Dealer',
+      notes: json['notes']?.toString() ?? '',
+      status: (json['status']?.toString().toLowerCase() == 'pending' ||
+              json['status']?.toString().toLowerCase() == 'pendingapproval')
+          ? CustomerStatus.pendingApproval
+          : CustomerStatus.active,
+      lastPaymentDate: json['lastPaymentDate'] != null
+          ? DateTime.tryParse(json['lastPaymentDate'].toString())
+          : null,
+    );
+  }
 }
 
 class OrderItem {
@@ -124,6 +159,27 @@ class OrderItem {
   double get lineTotal => quantity * rate;
   String get quantityLabel =>
       '${quantity % 1 == 0 ? quantity.toInt() : quantity} $unit';
+
+  factory OrderItem.fromJson(Map<String, dynamic> json) {
+    final q = double.tryParse(json['orderedQuantity']?.toString() ??
+            json['quantity']?.toString() ??
+            '0') ??
+        0.0;
+    final rPaise = json['ratePaise'] is num
+        ? (json['ratePaise'] as num).toDouble()
+        : double.tryParse(json['ratePaise']?.toString() ?? '0') ?? 0.0;
+    final rate = rPaise > 0
+        ? rPaise / 100.0
+        : (double.tryParse(json['rate']?.toString() ?? '0') ?? 0.0);
+    return OrderItem(
+      product: json['productName']?.toString() ??
+          json['product']?.toString() ??
+          'Steel Material',
+      quantity: q,
+      unit: json['unit']?.toString() ?? 'MT',
+      rate: rate,
+    );
+  }
 }
 
 enum OrderStatus { pending, confirmed, pendingDispatch, dispatched }
@@ -169,6 +225,40 @@ class SalesOrder {
 
   /// Fully dispatched only when every item quantity has been dispatched.
   bool get fullyDispatched => status == OrderStatus.dispatched;
+
+  factory SalesOrder.fromJson(Map<String, dynamic> json) {
+    final rawLines = json['lines'] as List<dynamic>? ?? [];
+    final items = rawLines
+        .map((l) => OrderItem.fromJson(l as Map<String, dynamic>))
+        .toList();
+    final stStr = (json['status']?.toString() ?? 'pending').toLowerCase();
+    final dStatus = (json['dispatchStatus']?.toString() ?? '').toLowerCase();
+    final status = dStatus == 'dispatched'
+        ? OrderStatus.dispatched
+        : (dStatus == 'pending' && stStr == 'confirmed')
+            ? OrderStatus.pendingDispatch
+            : stStr == 'confirmed'
+                ? OrderStatus.confirmed
+                : OrderStatus.pending;
+
+    return SalesOrder(
+      id: json['id']?.toString() ?? '',
+      number: json['number']?.toString() ?? json['id']?.toString() ?? 'DS-0000',
+      customerId: json['customerId']?.toString() ?? '',
+      salespersonId: json['salespersonId']?.toString() ?? 'EMP-SP-01',
+      orderDate: DateTime.tryParse(json['orderDate']?.toString() ?? '') ??
+          DateTime.now(),
+      dueDate: DateTime.tryParse(json['dueDate']?.toString() ?? '') ??
+          DateTime.now().add(const Duration(days: 15)),
+      expectedDispatchDate: json['expectedDispatchDate'] != null
+          ? DateTime.tryParse(json['expectedDispatchDate'].toString())
+          : null,
+      paymentTerms: json['paymentTerms']?.toString() ?? '30 days credit',
+      notes: json['notes']?.toString() ?? '',
+      status: status,
+      items: items,
+    );
+  }
 }
 
 class DispatchLine {
@@ -180,6 +270,14 @@ class DispatchLine {
   final String product;
   final double quantity;
   final String unit;
+
+  factory DispatchLine.fromJson(Map<String, dynamic> json) {
+    return DispatchLine(
+      product: json['product']?.toString() ?? '',
+      quantity: (json['quantity'] as num?)?.toDouble() ?? 0.0,
+      unit: json['unit']?.toString() ?? 'MT',
+    );
+  }
 }
 
 class Dispatch {
@@ -209,6 +307,24 @@ class Dispatch {
   List<DemoPhoto> photos;
 
   double get totalQuantity => lines.fold(0, (sum, l) => sum + l.quantity);
+
+  factory Dispatch.fromJson(Map<String, dynamic> json) {
+    final rawLines = json['lines'] as List<dynamic>? ?? [];
+    return Dispatch(
+      id: json['id']?.toString() ?? '',
+      orderId: json['orderId']?.toString() ?? '',
+      orderNumber: json['orderNumber']?.toString() ?? '',
+      customerId: json['customerId']?.toString() ?? '',
+      dispatchDate: json['dispatchDate'] != null
+          ? DateTime.tryParse(json['dispatchDate'].toString()) ?? DateTime.now()
+          : (json['date'] != null ? DateTime.tryParse(json['date'].toString()) ?? DateTime.now() : DateTime.now()),
+      lines: rawLines.map((l) => DispatchLine.fromJson(l as Map<String, dynamic>)).toList(),
+      vehicle: json['vehicle']?.toString() ?? '',
+      driver: json['driver']?.toString() ?? '',
+      transportName: json['transportName']?.toString() ?? '',
+      notes: json['notes']?.toString() ?? '',
+    );
+  }
 }
 
 enum PaymentMethod { cash, upi, neft, cheque, other }
@@ -244,6 +360,33 @@ class Payment {
   final PaymentMethod method;
   final String reference;
   final String notes;
+
+  factory Payment.fromJson(Map<String, dynamic> json) {
+    final methStr = (json['method']?.toString() ?? 'neft').toLowerCase();
+    final meth = methStr == 'cheque'
+        ? PaymentMethod.cheque
+        : methStr == 'cash'
+            ? PaymentMethod.cash
+            : methStr == 'upi'
+                ? PaymentMethod.upi
+                : PaymentMethod.neft;
+    final amt = (json['amount'] as num?)?.toDouble() ??
+        ((json['amountPaise'] as num?)?.toDouble() ?? 0.0) / 100.0;
+    return Payment(
+      id: json['id']?.toString() ?? '',
+      customerId: json['customerId']?.toString() ?? '',
+      orderId: json['orderId']?.toString() ?? '',
+      invoiceNumber: json['invoiceNumber']?.toString() ?? '',
+      invoiceAmount: (json['invoiceAmount'] as num?)?.toDouble() ?? amt,
+      amount: amt,
+      date: json['paymentDate'] != null
+          ? DateTime.tryParse(json['paymentDate'].toString()) ?? DateTime.now()
+          : (json['date'] != null ? DateTime.tryParse(json['date'].toString()) ?? DateTime.now() : DateTime.now()),
+      method: meth,
+      reference: json['reference']?.toString() ?? '',
+      notes: json['notes']?.toString() ?? '',
+    );
+  }
 }
 
 enum TaskPriority { low, normal, high }
@@ -396,6 +539,25 @@ class TourVisit {
   double? gpsLng;
   bool gpsVerified;
   DemoPhoto? photo;
+
+  factory TourVisit.fromJson(Map<String, dynamic> json) {
+    final stStr = (json['status']?.toString() ?? 'planned').toLowerCase();
+    final st = stStr == 'completed'
+        ? VisitStatus.completed
+        : stStr == 'missed'
+            ? VisitStatus.missed
+            : VisitStatus.planned;
+    return TourVisit(
+      id: json['id']?.toString() ?? '',
+      customerId: json['customerId']?.toString() ?? '',
+      customerName: json['customerName']?.toString() ?? '',
+      city: json['city']?.toString() ?? '',
+      purpose: json['purpose']?.toString() ?? '',
+      sequence: (json['sequence'] as num?)?.toInt() ?? 1,
+      status: st,
+      notes: json['notes']?.toString() ?? '',
+    );
+  }
 }
 
 class TourPlan {
@@ -413,6 +575,22 @@ class TourPlan {
   final String area;
   final List<TourVisit> visits;
   final String notes;
+
+  factory TourPlan.fromJson(Map<String, dynamic> json) {
+    final rawVisits = json['visits'] as List<dynamic>? ?? [];
+    return TourPlan(
+      id: json['id']?.toString() ?? '',
+      salespersonId: json['salespersonId']?.toString() ?? '',
+      date: json['date'] != null
+          ? DateTime.tryParse(json['date'].toString()) ?? DateTime.now()
+          : DateTime.now(),
+      area: json['area']?.toString() ?? '',
+      visits: rawVisits
+          .map((v) => TourVisit.fromJson(v as Map<String, dynamic>))
+          .toList(),
+      notes: json['notes']?.toString() ?? '',
+    );
+  }
 }
 
 enum AreaStatus { vacant, assigned, partial }
@@ -444,6 +622,31 @@ class AreaInfo {
   int potentialCustomers;
   AreaStatus status;
   String notes;
+
+  factory AreaInfo.fromJson(Map<String, dynamic> json) {
+    final statusStr = (json['status'] ?? 'vacant').toString().toLowerCase();
+    final status = switch (statusStr) {
+      'assigned' => AreaStatus.assigned,
+      'partial' => AreaStatus.partial,
+      _ => AreaStatus.vacant,
+    };
+    final district = (json['district'] ?? '').toString();
+    final cities = json['cities'];
+    final city = (cities is List && cities.isNotEmpty)
+        ? cities.first.toString()
+        : district;
+    return AreaInfo(
+      id: json['id']?.toString() ?? 'AREA-$district',
+      name: json['name']?.toString() ?? district,
+      city: json['city']?.toString() ?? city,
+      district: district,
+      state: (json['state'] ?? 'Punjab').toString(),
+      salespersonId: json['salespersonId']?.toString(),
+      potentialCustomers: (json['totalShops'] as num?)?.toInt() ?? 0,
+      status: status,
+      notes: json['notes']?.toString() ?? '',
+    );
+  }
 }
 
 class AppNotification {

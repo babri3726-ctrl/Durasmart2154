@@ -211,7 +211,7 @@ class _DispatchScreenState extends State<DispatchScreen> {
             },
           )
           .toList(),
-    });
+    }).then((_) => repo.syncWithBackend()).catchError((_) {});
 
     if (!mounted) return;
     Navigator.of(context).pushReplacement(

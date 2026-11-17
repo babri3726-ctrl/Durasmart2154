@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/api_sync_service.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock_repository.dart';
@@ -302,12 +303,31 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
           IconButton(
             icon: const Icon(Icons.sync_rounded),
             tooltip: '1-Click Sync HR-PB',
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
+            onPressed: () async {
+              final sm = ScaffoldMessenger.of(context);
+              sm.showSnackBar(
                 const SnackBar(
-                  content: Text('HR-PB Dealers synced with initial ₹0 balance'),
+                  content: Text('Syncing HR-PB Dealers & Targets with server...'),
+                  duration: Duration(seconds: 1),
                 ),
               );
+              try {
+                final result = await ApiSyncService.syncHrPbTargets();
+                await repo.syncWithBackend();
+                sm.showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      result != null && result['ok'] == true
+                          ? 'HR-PB Synced: ${result['customers_imported'] ?? result['dealers_matched'] ?? 'completed'}'
+                          : 'HR-PB refreshed with server',
+                    ),
+                  ),
+                );
+              } catch (e) {
+                sm.showSnackBar(
+                  SnackBar(content: Text('HR-PB Sync failed: $e')),
+                );
+              }
             },
           ),
         ],
@@ -338,99 +358,109 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
             ),
           ),
           Expanded(
-            child: items.isEmpty
-                ? const EmptyState(
-                    icon: Icons.account_balance_wallet_outlined,
-                    title: 'No debtors found',
-                    subtitle: 'Add a new debtor or pull from HR-PB.',
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
-                    itemCount: items.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
-                    itemBuilder: (context, i) {
-                      final item = items[i];
-                      return Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppColors.line),
+            child: RefreshIndicator(
+              onRefresh: () => repo.syncWithBackend(),
+              child: items.isEmpty
+                  ? ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      children: const [
+                        SizedBox(height: 60),
+                        EmptyState(
+                          icon: Icons.account_balance_wallet_outlined,
+                          title: 'No debtors found',
+                          subtitle: 'Add a new debtor or pull from HR-PB.',
                         ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    item.name,
-                                    style: AppText.body.copyWith(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    '${item.city.isNotEmpty ? item.city : item.district} (${item.state}) • Rep: ${item.salesperson}',
-                                    style: AppText.caption.copyWith(
-                                      color: AppColors.muted,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: item.balance == 0.0
-                                          ? AppColors.background
-                                          : const Color(0xFFFFEEEE),
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: AppColors.line),
-                                    ),
-                                    child: Text(
-                                      'Balance: ${item.balanceFormatted}',
-                                      style: AppText.caption.copyWith(
+                      ],
+                    )
+                  : ListView.separated(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
+                      itemCount: items.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      itemBuilder: (context, i) {
+                        final item = items[i];
+                        return Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: AppColors.line),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      item.name,
+                                      style: AppText.body.copyWith(
                                         fontWeight: FontWeight.bold,
-                                        color: item.balance == 0.0
-                                            ? AppColors.muted
-                                            : AppColors.red,
                                       ),
                                     ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      '${item.city.isNotEmpty ? item.city : item.district} (${item.state}) • Rep: ${item.salesperson}',
+                                      style: AppText.caption.copyWith(
+                                        color: AppColors.muted,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 2,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: item.balance == 0.0
+                                            ? AppColors.background
+                                            : const Color(0xFFFFEEEE),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: AppColors.line),
+                                      ),
+                                      child: Text(
+                                        'Balance: ${item.balanceFormatted}',
+                                        style: AppText.caption.copyWith(
+                                          fontWeight: FontWeight.bold,
+                                          color: item.balance == 0.0
+                                              ? AppColors.muted
+                                              : AppColors.red,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.edit_outlined,
+                                      size: 20,
+                                    ),
+                                    color: AppColors.muted,
+                                    onPressed: () =>
+                                        _showEditDebtorDialog(context, item),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.delete_outline_rounded,
+                                      size: 20,
+                                    ),
+                                    color: AppColors.red,
+                                    onPressed: () =>
+                                        _showDeleteConfirmDialog(context, item),
                                   ),
                                 ],
                               ),
-                            ),
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.edit_outlined,
-                                    size: 20,
-                                  ),
-                                  color: AppColors.muted,
-                                  onPressed: () =>
-                                      _showEditDebtorDialog(context, item),
-                                ),
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.delete_outline_rounded,
-                                    size: 20,
-                                  ),
-                                  color: AppColors.red,
-                                  onPressed: () =>
-                                      _showDeleteConfirmDialog(context, item),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
           ),
         ],
       ),

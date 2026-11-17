@@ -576,37 +576,38 @@ class _TaskDashboardScreenState extends State<TaskDashboardScreen> {
 
     return DefaultTabController(
       length: tabs.length,
-      child: RefreshIndicator(
-        onRefresh: _syncAndCheck,
-        child: Column(
-          children: [
-            TabBar(
-              isScrollable: true,
-              tabAlignment: TabAlignment.start,
-              labelColor: AppColors.purple,
-              unselectedLabelColor: AppColors.muted,
-              indicatorColor: AppColors.purple,
-              dividerColor: AppColors.line,
-              labelStyle: const TextStyle(
-                fontWeight: FontWeight.w900,
-                fontSize: 12.5,
-              ),
-              unselectedLabelStyle: const TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: 12.5,
-              ),
-              tabs: [
-                Tab(text: 'Today (${dueToday.length})'),
-                Tab(text: 'Pending (${pending.length})'),
-                Tab(text: 'Overdue (${overdue.length})'),
-                Tab(text: 'Completed (${completed.length})'),
-              ],
+      child: Column(
+        children: [
+          TabBar(
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            labelColor: AppColors.purple,
+            unselectedLabelColor: AppColors.muted,
+            indicatorColor: AppColors.purple,
+            dividerColor: AppColors.line,
+            labelStyle: const TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: 12.5,
             ),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  for (var i = 0; i < tabs.length; i++)
-                    ListView(
+            unselectedLabelStyle: const TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 12.5,
+            ),
+            tabs: [
+              Tab(text: 'Today (${dueToday.length})'),
+              Tab(text: 'Pending (${pending.length})'),
+              Tab(text: 'Overdue (${overdue.length})'),
+              Tab(text: 'Completed (${completed.length})'),
+            ],
+          ),
+          Expanded(
+            child: TabBarView(
+              children: [
+                for (var i = 0; i < tabs.length; i++)
+                  RefreshIndicator(
+                    onRefresh: _syncAndCheck,
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
                       padding: AppSpacing.page,
                       children: [
                         DemoNotice(
@@ -646,11 +647,11 @@ class _TaskDashboardScreenState extends State<TaskDashboardScreen> {
                         ),
                       ],
                     ),
-                ],
-              ),
+                  ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

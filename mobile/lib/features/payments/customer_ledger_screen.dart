@@ -55,9 +55,12 @@ class CustomerLedgerScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Customer Ledger')),
-      body: ListView(
-        padding: AppSpacing.page,
-        children: [
+      body: RefreshIndicator(
+        onRefresh: () => repo.syncWithBackend(),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: AppSpacing.page,
+          children: [
           GradientHero(
             gradient: AppGradients.customer,
             height: 178,
@@ -334,6 +337,7 @@ class CustomerLedgerScreen extends StatelessWidget {
           ),
           const SizedBox(height: 20),
         ],
+      ),
       ),
     );
   }

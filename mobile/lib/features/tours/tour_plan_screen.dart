@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/api_sync_service.dart';
 import '../../core/formatters.dart';
 import '../../core/share_service.dart';
 import '../../core/theme.dart';
@@ -142,51 +143,55 @@ class _TourPlanScreenState extends State<TourPlanScreen> {
     required String emptyTitle,
     required String emptySubtitle,
   }) {
-    return ListView(
-      padding: AppSpacing.page,
-      children: [
-        _scopeNotice(isOwner, myEmployeeId, repo),
-        const SizedBox(height: 14),
-        if (plans.isEmpty)
-          EmptyState(
-            icon: Icons.route_outlined,
-            title: emptyTitle,
-            subtitle: emptySubtitle,
-            action: canPlan
-                ? GradientButton(
-                    label: 'Add plan',
-                    icon: Icons.add_rounded,
-                    height: 46,
-                    expand: false,
-                    onPressed: () => _addPlan(
-                      repo,
-                      lockedSalespersonId: isOwner ? null : myEmployeeId,
+    return RefreshIndicator(
+      onRefresh: () => repo.syncWithBackend(),
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: AppSpacing.page,
+        children: [
+          _scopeNotice(isOwner, myEmployeeId, repo),
+          const SizedBox(height: 14),
+          if (plans.isEmpty)
+            EmptyState(
+              icon: Icons.route_outlined,
+              title: emptyTitle,
+              subtitle: emptySubtitle,
+              action: canPlan
+                  ? GradientButton(
+                      label: 'Add plan',
+                      icon: Icons.add_rounded,
+                      height: 46,
+                      expand: false,
+                      onPressed: () => _addPlan(
+                        repo,
+                        lockedSalespersonId: isOwner ? null : myEmployeeId,
+                      ),
+                    )
+                  : null,
+            )
+          else ...[
+            SectionHeading(
+              title: '${plans.length} plan(s)',
+              subtitle:
+                  'Open a plan to update visit status, GPS proof and photos.',
+            ),
+            const SizedBox(height: 10),
+            for (final plan in plans)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _TourPlanCard(
+                  plan: plan,
+                  salespersonName: repo.salespersonName(plan.salespersonId),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => _TourDetailPage(tourId: plan.id),
                     ),
-                  )
-                : null,
-          )
-        else ...[
-          SectionHeading(
-            title: '${plans.length} plan(s)',
-            subtitle:
-                'Open a plan to update visit status, GPS proof and photos.',
-          ),
-          const SizedBox(height: 10),
-          for (final plan in plans)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _TourPlanCard(
-                plan: plan,
-                salespersonName: repo.salespersonName(plan.salespersonId),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => _TourDetailPage(tourId: plan.id),
                   ),
                 ),
               ),
-            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 
@@ -196,39 +201,43 @@ class _TourPlanScreenState extends State<TourPlanScreen> {
     required bool isOwner,
     required String? myEmployeeId,
   }) {
-    return ListView(
-      padding: AppSpacing.page,
-      children: [
-        _scopeNotice(isOwner, myEmployeeId, repo),
-        const SizedBox(height: 14),
-        if (rows.isEmpty)
-          const EmptyState(
-            icon: Icons.how_to_reg_outlined,
-            title: 'No missed visits',
-            subtitle: 'Every visit on the plans you can see is still on track.',
-          )
-        else ...[
-          SectionHeading(
-            title: '${rows.length} missed visit(s)',
-            subtitle: 'Open the plan to reschedule or record a reason.',
-          ),
-          const SizedBox(height: 10),
-          for (final row in rows)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: _TourPlanCard(
-                plan: row.plan,
-                salespersonName: repo.salespersonName(row.plan.salespersonId),
-                missedVisitId: row.visit.id,
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => _TourDetailPage(tourId: row.plan.id),
+    return RefreshIndicator(
+      onRefresh: () => repo.syncWithBackend(),
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: AppSpacing.page,
+        children: [
+          _scopeNotice(isOwner, myEmployeeId, repo),
+          const SizedBox(height: 14),
+          if (rows.isEmpty)
+            const EmptyState(
+              icon: Icons.how_to_reg_outlined,
+              title: 'No missed visits',
+              subtitle: 'Every visit on the plans you can see is still on track.',
+            )
+          else ...[
+            SectionHeading(
+              title: '${rows.length} missed visit(s)',
+              subtitle: 'Open the plan to reschedule or record a reason.',
+            ),
+            const SizedBox(height: 10),
+            for (final row in rows)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _TourPlanCard(
+                  plan: row.plan,
+                  salespersonName: repo.salespersonName(row.plan.salespersonId),
+                  missedVisitId: row.visit.id,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => _TourDetailPage(tourId: row.plan.id),
+                    ),
                   ),
                 ),
               ),
-            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 
@@ -1427,6 +1436,12 @@ Future<void> _completeVisit(
     notes: proof.notes,
     photo: proof.photo,
   );
+  ApiSyncService.updateTourVisitStatus(
+    tourId: plan.id,
+    visitId: visit.id,
+    status: 'completed',
+    notes: proof.notes,
+  );
   showDemoSnack(
     context,
     proof.photo == null
@@ -1463,6 +1478,12 @@ Future<void> _missVisit(
     plan.id,
     visit.id,
     status: VisitStatus.missed,
+    notes: draft.reason,
+  );
+  ApiSyncService.updateTourVisitStatus(
+    tourId: plan.id,
+    visitId: visit.id,
+    status: 'missed',
     notes: draft.reason,
   );
   showDemoSnack(context, '${visit.customerName} recorded as missed.');

@@ -5473,11 +5473,6 @@ def get_stock_movements(page: int = 1, pageSize: int = 20):
         "nextCursor": None
     }
 
-# ----------------- Tasks -----------------
-@app.get("/api/v1/tasks")
-def get_tasks():
-    return {"items": STATE["tasks"]}
-
 # ----------------- Single Page Application (SPA) Frontend Mount -----------------
 WEB_DIST_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web", "dist")
 assets_dir = os.path.join(WEB_DIST_DIR, "assets")

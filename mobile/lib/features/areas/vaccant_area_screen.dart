@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/api_sync_service.dart';
 import '../../core/formatters.dart';
 import '../../core/share_service.dart';
 import '../../core/theme.dart';
@@ -182,6 +183,11 @@ class _VaccantAreaScreenState extends State<VaccantAreaScreen> {
     );
     if (!ok || !mounted) return;
     repo.assignArea(area.id, unassign ? null : choice);
+    ApiSyncService.assignTerritory(
+      district: area.district.isNotEmpty ? area.district : area.name,
+      salesperson: name,
+      salespersonId: unassign ? null : choice,
+    );
     showDemoSnack(
       context,
       unassign
@@ -239,9 +245,12 @@ class _VaccantAreaScreenState extends State<VaccantAreaScreen> {
               label: const Text('Add Area'),
             )
           : null,
-      body: ListView(
-        padding: AppSpacing.page,
-        children: [
+      body: RefreshIndicator(
+        onRefresh: () => repo.syncWithBackend(),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: AppSpacing.page,
+          children: [
           GradientHero(
             height: 156,
             gradient: AppGradients.area,
@@ -337,6 +346,7 @@ class _VaccantAreaScreenState extends State<VaccantAreaScreen> {
                 ),
               ),
         ],
+      ),
       ),
     );
   }
@@ -891,9 +901,12 @@ class _AreaDetailPage extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(title: Text(area.name)),
-      body: ListView(
-        padding: AppSpacing.page,
-        children: [
+      body: RefreshIndicator(
+        onRefresh: () => repo.syncWithBackend(),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: AppSpacing.page,
+          children: [
           GradientHero(
             height: 132,
             gradient: AppGradients.area,
@@ -1144,6 +1157,7 @@ class _AreaDetailPage extends StatelessWidget {
           ),
           const SizedBox(height: 10),
         ],
+      ),
       ),
     );
   }

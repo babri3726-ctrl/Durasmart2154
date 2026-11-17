@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -71,6 +73,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (onlineRes != null && onlineRes['user'] != null) {
       final appUser = AppUser.fromJson(onlineRes['user'] as Map<String, dynamic>);
       repo.setSignedInUser(appUser);
+      unawaited(repo.syncWithBackend());
       setState(() => _loading = false);
       Navigator.pushReplacementNamed(context, '/home');
       return;
@@ -89,6 +92,7 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       return;
     }
+    unawaited(repo.syncWithBackend());
     Navigator.pushReplacementNamed(context, '/home');
   }
 

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/api_sync_service.dart';
 import '../../core/formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -295,6 +297,185 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
     );
   }
 
+  void _showInviteModal(BuildContext context, MockRepository repo) {
+    String dept = 'Sales';
+    String role = 'Area Sales Officer';
+    String territory = 'Punjab';
+    final targetCtrl = TextEditingController(text: '100');
+    bool isCreating = false;
+    String? createdCode;
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            20,
+            20,
+            MediaQuery.of(ctx).viewInsets.bottom + 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Invite Employee', style: AppText.title),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Generate an authorized registration code for onboarding new staff.',
+                style: TextStyle(color: AppColors.muted, fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              if (createdCode != null) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF6FF),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.blue),
+                  ),
+                  child: Column(
+                    children: [
+                      const Text(
+                        'INVITATION CODE GENERATED',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.blue,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SelectableText(
+                        createdCode!,
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 2,
+                          color: AppColors.navy,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '$role • $dept • Valid for 7 days',
+                        style: const TextStyle(fontSize: 11.5, color: AppColors.muted),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.copy_rounded, size: 16),
+                        label: const Text('Copy Code'),
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: createdCode!));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Code copied to clipboard!')),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: WhatsAppButton(
+                        label: 'WhatsApp',
+                        phone: '',
+                        message:
+                            'DuraSmart Staff Invite:\nUse code $createdCode to register your account as $role in $dept.',
+                      ),
+                    ),
+                  ],
+                ),
+              ] else ...[
+                DropdownButtonFormField<String>(
+                  initialValue: dept,
+                  decoration: const InputDecoration(labelText: 'Department'),
+                  items: const [
+                    DropdownMenuItem(value: 'Sales', child: Text('Sales')),
+                    DropdownMenuItem(value: 'Dispatch', child: Text('Dispatch')),
+                    DropdownMenuItem(value: 'Accounts', child: Text('Accounts')),
+                    DropdownMenuItem(value: 'Production', child: Text('Production')),
+                  ],
+                  onChanged: (v) => setSheetState(() {
+                    dept = v ?? 'Sales';
+                    if (dept == 'Dispatch') role = 'Yard Dispatch';
+                    if (dept == 'Sales') role = 'Area Sales Officer';
+                  }),
+                ),
+                const SizedBox(height: 12),
+                if (dept == 'Sales') ...[
+                  DropdownButtonFormField<String>(
+                    initialValue: territory,
+                    decoration: const InputDecoration(labelText: 'Territory'),
+                    items: const [
+                      DropdownMenuItem(value: 'Punjab', child: Text('Punjab')),
+                      DropdownMenuItem(value: 'Haryana', child: Text('Haryana')),
+                    ],
+                    onChanged: (v) => setSheetState(() => territory = v ?? 'Punjab'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: targetCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Monthly Target (MT)',
+                      hintText: 'e.g. 100',
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
+                GradientButton(
+                  label: isCreating ? 'Generating...' : 'Generate Invite Code',
+                  icon: Icons.key_rounded,
+                  onPressed: isCreating
+                      ? null
+                      : () async {
+                          setSheetState(() => isCreating = true);
+                          final target = double.tryParse(targetCtrl.text.trim()) ?? 100.0;
+                          final res = await ApiSyncService.createInvitation(
+                            role: role,
+                            department: dept,
+                            salesTerritory: dept == 'Sales' ? territory : null,
+                            monthlyTargetQty: target,
+                            mayDispatch: dept == 'Dispatch',
+                          );
+                          setSheetState(() {
+                            isCreating = false;
+                            if (res != null && res['code'] != null) {
+                              createdCode = res['code'].toString();
+                            }
+                          });
+                          if (createdCode == null && context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(res?['error']?.toString() ?? 'Failed to generate code')),
+                            );
+                          }
+                        },
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final repo = context.watch<MockRepository>();
@@ -315,57 +496,70 @@ class _EmployeeListScreenState extends State<EmployeeListScreen> {
           ),
         ],
       ),
+      floatingActionButton: isOwner
+          ? FloatingActionButton.extended(
+              onPressed: () => _showInviteModal(context, repo),
+              backgroundColor: AppColors.purple,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.person_add_rounded),
+              label: const Text('Invite Employee'),
+            )
+          : null,
       body: SafeArea(
-        child: ListView(
-          padding: AppSpacing.page,
-          children: [
-            _hero(repo.employees.length, salesCount, departments),
-            const SizedBox(height: 14),
-            SearchField(
-              hint: 'Search name, role, city, mobile or ID',
-              controller: _searchController,
-              onChanged: (value) => setState(() => _query = value),
-            ),
-            const SizedBox(height: 12),
-            FilterChipsRow(
-              options: _departments(repo),
-              selected: _department,
-              onSelected: (option) => setState(() => _department = option),
-            ),
-            const SizedBox(height: 12),
-            DemoNotice(
-              text: isOwner
-                  ? 'Employee records come from the demo data set. Targets update as orders are booked against each salesperson.'
-                  : 'Team directory is read-only for employee accounts. Contact a colleague on WhatsApp to coordinate.',
-            ),
-            const SizedBox(height: 12),
-            if (rows.isEmpty)
-              WhitePanel(
-                child: EmptyState(
-                  icon: Icons.person_search_rounded,
-                  title: 'No employee matches',
-                  subtitle:
-                      'Clear the search text or pick another department to see the full team.',
-                  action: ActionPill(
-                    icon: Icons.filter_alt_off_rounded,
-                    label: 'Reset filters',
-                    onTap: () {
-                      _searchController.clear();
-                      setState(() {
-                        _query = '';
-                        _department = _allDepartmentsLabel;
-                      });
-                    },
+        child: RefreshIndicator(
+          onRefresh: () => repo.syncWithBackend(),
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: AppSpacing.page,
+            children: [
+              _hero(repo.employees.length, salesCount, departments),
+              const SizedBox(height: 14),
+              SearchField(
+                hint: 'Search name, role, city, mobile or ID',
+                controller: _searchController,
+                onChanged: (value) => setState(() => _query = value),
+              ),
+              const SizedBox(height: 12),
+              FilterChipsRow(
+                options: _departments(repo),
+                selected: _department,
+                onSelected: (option) => setState(() => _department = option),
+              ),
+              const SizedBox(height: 12),
+              DemoNotice(
+                text: isOwner
+                    ? 'Owner control: Generate invitation codes to onboard employees. Employee performance updates live with booked orders.'
+                    : 'Team directory is read-only for employee accounts. Contact a colleague on WhatsApp to coordinate.',
+              ),
+              const SizedBox(height: 12),
+              if (rows.isEmpty)
+                WhitePanel(
+                  child: EmptyState(
+                    icon: Icons.person_search_rounded,
+                    title: 'No employee matches',
+                    subtitle:
+                        'Clear the search text or pick another department to see the full team.',
+                    action: ActionPill(
+                      icon: Icons.filter_alt_off_rounded,
+                      label: 'Reset filters',
+                      onTap: () {
+                        _searchController.clear();
+                        setState(() {
+                          _query = '';
+                          _department = _allDepartmentsLabel;
+                        });
+                      },
+                    ),
                   ),
-                ),
-              )
-            else
-              for (final employee in rows) ...[
-                _card(repo, employee),
-                const SizedBox(height: 12),
-              ],
-            const SizedBox(height: 4),
-          ],
+                )
+              else
+                for (final employee in rows) ...[
+                  _card(repo, employee),
+                  const SizedBox(height: 12),
+                ],
+              const SizedBox(height: 4),
+            ],
+          ),
         ),
       ),
     );

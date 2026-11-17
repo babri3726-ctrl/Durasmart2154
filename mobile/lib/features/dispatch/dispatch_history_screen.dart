@@ -174,34 +174,43 @@ class _DispatchHistoryScreenState extends State<DispatchHistoryScreen> {
           ),
           const SizedBox(height: 6),
           Expanded(
-            child: rows.isEmpty
-                ? EmptyState(
-                    icon: Icons.no_transfer_rounded,
-                    title: _query.trim().isEmpty && _salespersonId == null
-                        ? 'No dispatches yet'
-                        : 'No dispatch matches this filter',
-                    subtitle: _query.trim().isEmpty && _salespersonId == null
-                        ? 'Record a dispatch from the dispatch desk to see it listed here.'
-                        : 'Try a different search word, or clear the salesperson filter.',
-                    action: SizedBox(
-                      width: double.infinity,
-                      child: ActionPill(
-                        icon: Icons.local_shipping_rounded,
-                        label: 'Open dispatch desk',
-                        onTap: () =>
-                            Navigator.of(context).pushNamed('/dispatch'),
+            child: RefreshIndicator(
+              onRefresh: () => repo.syncWithBackend(),
+              child: rows.isEmpty
+                  ? ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      children: [
+                        EmptyState(
+                          icon: Icons.no_transfer_rounded,
+                          title: _query.trim().isEmpty && _salespersonId == null
+                              ? 'No dispatches yet'
+                              : 'No dispatch matches this filter',
+                          subtitle: _query.trim().isEmpty && _salespersonId == null
+                              ? 'Record a dispatch from the dispatch desk to see it listed here.'
+                              : 'Try a different search word, or clear the salesperson filter.',
+                          action: SizedBox(
+                            width: double.infinity,
+                            child: ActionPill(
+                              icon: Icons.local_shipping_rounded,
+                              label: 'Open dispatch desk',
+                              onTap: () =>
+                                  Navigator.of(context).pushNamed('/dispatch'),
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : ListView.separated(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                      itemCount: rows.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) => _DispatchCard(
+                        row: rows[index],
+                        onTap: () => _openOrder(rows[index].dispatch.orderId),
                       ),
                     ),
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-                    itemCount: rows.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 12),
-                    itemBuilder: (context, index) => _DispatchCard(
-                      row: rows[index],
-                      onTap: () => _openOrder(rows[index].dispatch.orderId),
-                    ),
-                  ),
+            ),
           ),
         ],
       ),

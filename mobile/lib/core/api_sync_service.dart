@@ -335,6 +335,366 @@ class ApiSyncService {
   /// Stored active JWT bearer token
   static String? authToken;
 
+  static File get _tokenFile => File('${Directory.systemTemp.path}/durasmart_auth.json');
+
+  static void setAuthToken(String? token) {
+    authToken = token;
+    try {
+      if (token != null) {
+        _tokenFile.writeAsStringSync(jsonEncode({'token': token}));
+      } else if (_tokenFile.existsSync()) {
+        _tokenFile.deleteSync();
+      }
+    } catch (_) {}
+  }
+
+  static String? initAuthToken() {
+    if (authToken != null) return authToken;
+    try {
+      if (_tokenFile.existsSync()) {
+        final content = _tokenFile.readAsStringSync();
+        final map = jsonDecode(content) as Map<String, dynamic>;
+        authToken = map['token'] as String?;
+      }
+    } catch (_) {}
+    return authToken;
+  }
+
+  /// Fetches tour plans from backend /api/v1/tours
+  static Future<List<Map<String, dynamic>>?> fetchTourPlans({
+    String? salespersonId,
+    String? date,
+    String? status,
+  }) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final params = <String>[];
+      if (salespersonId != null && salespersonId.isNotEmpty) {
+        params.add('salespersonId=${Uri.encodeComponent(salespersonId)}');
+      }
+      if (date != null && date.isNotEmpty) {
+        params.add('date=${Uri.encodeComponent(date)}');
+      }
+      if (status != null && status.isNotEmpty) {
+        params.add('status=${Uri.encodeComponent(status)}');
+      }
+      final query = params.isEmpty ? '' : '?${params.join('&')}';
+      final req = await client.getUrl(Uri.parse('$host/api/v1/tours$query'));
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data is List) {
+          return data.map((e) => e as Map<String, dynamic>).toList();
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetches vacant areas and district coverage from backend
+  static Future<Map<String, dynamic>?> fetchVacantAreas() async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.getUrl(Uri.parse('$host/api/v1/territories/vacant-areas'));
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        return jsonDecode(body) as Map<String, dynamic>;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetches orders from backend /api/v1/orders
+  static Future<List<Map<String, dynamic>>?> fetchOrders({
+    String? q,
+    String? salespersonId,
+    String? status,
+  }) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final params = <String>[];
+      if (q != null && q.isNotEmpty) params.add('q=${Uri.encodeComponent(q)}');
+      if (salespersonId != null && salespersonId.isNotEmpty) {
+        params.add('salespersonId=${Uri.encodeComponent(salespersonId)}');
+      }
+      if (status != null && status.isNotEmpty) {
+        params.add('status=${Uri.encodeComponent(status)}');
+      }
+      params.add('pageSize=100');
+      final query = '?${params.join('&')}';
+      final req = await client.getUrl(Uri.parse('$host/api/v1/orders$query'));
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data is Map && data['items'] is List) {
+          return (data['items'] as List).map((e) => e as Map<String, dynamic>).toList();
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetches customers / dealers from backend /api/v1/customers
+  static Future<List<Map<String, dynamic>>?> fetchCustomers({
+    String? q,
+    String? salespersonId,
+  }) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final params = <String>[];
+      if (q != null && q.isNotEmpty) params.add('q=${Uri.encodeComponent(q)}');
+      if (salespersonId != null && salespersonId.isNotEmpty) {
+        params.add('salespersonId=${Uri.encodeComponent(salespersonId)}');
+      }
+      params.add('pageSize=200');
+      final query = '?${params.join('&')}';
+      final req = await client.getUrl(Uri.parse('$host/api/v1/customers$query'));
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data is Map && data['items'] is List) {
+          return (data['items'] as List).map((e) => e as Map<String, dynamic>).toList();
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetches payments from backend /api/v1/payments
+  static Future<List<Map<String, dynamic>>?> fetchPayments({
+    String? q,
+  }) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final qParam = (q != null && q.isNotEmpty) ? '?q=${Uri.encodeComponent(q)}&pageSize=100' : '?pageSize=100';
+      final req = await client.getUrl(Uri.parse('$host/api/v1/payments$qParam'));
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data is Map && data['items'] is List) {
+          return (data['items'] as List).map((e) => e as Map<String, dynamic>).toList();
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetches dispatches from backend /api/v1/dispatches
+  static Future<List<Map<String, dynamic>>?> fetchDispatches({
+    String? orderId,
+  }) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final qParam = (orderId != null && orderId.isNotEmpty) ? '?orderId=${Uri.encodeComponent(orderId)}&pageSize=100' : '?pageSize=100';
+      final req = await client.getUrl(Uri.parse('$host/api/v1/dispatches$qParam'));
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data is Map && data['items'] is List) {
+          return (data['items'] as List).map((e) => e as Map<String, dynamic>).toList();
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetches sales targets from backend /api/v1/sales/targets
+  static Future<List<Map<String, dynamic>>?> fetchSalesTargets() async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.getUrl(Uri.parse('$host/api/v1/sales/targets'));
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data is Map && data['items'] is List) {
+          return (data['items'] as List).map((e) => e as Map<String, dynamic>).toList();
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetches employees from backend /api/v1/employees
+  static Future<List<Map<String, dynamic>>?> fetchEmployees() async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.getUrl(Uri.parse('$host/api/v1/employees?pageSize=200'));
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data is Map && data['items'] is List) {
+          return (data['items'] as List).map((e) => e as Map<String, dynamic>).toList();
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetches products from backend /api/v1/products
+  static Future<List<String>?> fetchProducts() async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.getUrl(Uri.parse('$host/api/v1/products'));
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data is Map && data['items'] is List) {
+          return (data['items'] as List).map((e) => e.toString()).toList();
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Triggers 1-Click HR-PB Targets & Dealers Sync on backend
+  static Future<Map<String, dynamic>?> syncHrPbTargets() async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      final req = await client.postUrl(Uri.parse('$host/api/v1/imports/excel/hr-pb/sync'));
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        return jsonDecode(body) as Map<String, dynamic>;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Assigns territory to salesperson on backend
+  static Future<bool> assignTerritory({
+    required String district,
+    required String salesperson,
+    String? salespersonId,
+  }) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return false;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.postUrl(Uri.parse('$host/api/v1/territories/assign'));
+      req.headers.contentType = ContentType.json;
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      req.write(jsonEncode({
+        'district': district,
+        'salesperson': salesperson,
+        'salespersonId': salespersonId ?? 'EMP-SP-01',
+      }));
+      final resp = await req.close();
+      return resp.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Updates tour visit status on backend /api/v1/tours/$tourId/visits/$visitId/status
+  static Future<bool> updateTourVisitStatus({
+    required String tourId,
+    required String visitId,
+    required String status,
+    String? notes,
+  }) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return false;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.postUrl(
+        Uri.parse('$host/api/v1/tours/$tourId/visits/$visitId/status'),
+      );
+      req.headers.contentType = ContentType.json;
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      req.write(jsonEncode({
+        'status': status,
+        if (notes != null) 'notes': notes,
+      }));
+      final resp = await req.close();
+      return resp.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Verifies an invitation code against the backend
   static Future<Map<String, dynamic>?> verifyInviteCode(String code) async {
     final host = await resolveWorkingHost();
@@ -389,7 +749,7 @@ class ApiSyncService {
       final data = jsonDecode(body) as Map<String, dynamic>;
       if (resp.statusCode == 200 || resp.statusCode == 201) {
         if (data['accessToken'] is String) {
-          authToken = data['accessToken'] as String;
+          setAuthToken(data['accessToken'] as String);
         }
         return data;
       }
@@ -424,7 +784,7 @@ class ApiSyncService {
       final data = jsonDecode(body) as Map<String, dynamic>;
       if (resp.statusCode == 200) {
         if (data['accessToken'] is String) {
-          authToken = data['accessToken'] as String;
+          setAuthToken(data['accessToken'] as String);
         }
         return data;
       }
@@ -544,6 +904,70 @@ class ApiSyncService {
       return {'error': data['detail'] ?? 'Password reset failed'};
     } catch (e) {
       return {'error': 'Connection failed ($e)'};
+    }
+  }
+
+  /// Generates a staff invitation code (Owner only)
+  static Future<Map<String, dynamic>?> createInvitation({
+    String role = 'employee',
+    String department = 'Sales',
+    String? salesTerritory,
+    double monthlyTargetQty = 100.0,
+    bool mayDispatch = false,
+    int expiresInDays = 7,
+  }) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+      final req = await client.postUrl(Uri.parse('$host/api/v1/auth/invitations'));
+      req.headers.contentType = ContentType.json;
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      req.headers.set('X-User-Role', 'owner');
+      req.write(jsonEncode({
+        'role': role,
+        'department': department,
+        'salesTerritory': salesTerritory,
+        'monthlyTargetQty': monthlyTargetQty,
+        'mayDispatch': mayDispatch,
+        'expiresInDays': expiresInDays,
+      }));
+      final resp = await req.close();
+      final body = await resp.transform(utf8.decoder).join();
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      if (resp.statusCode == 200 || resp.statusCode == 201) {
+        return data;
+      }
+      return {'error': data['detail'] ?? 'Failed to generate invitation'};
+    } catch (e) {
+      return {'error': 'Could not connect ($e)'};
+    }
+  }
+
+  /// Lists invitation codes (Owner only)
+  static Future<List<Map<String, dynamic>>?> listInvitations() async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+      final req = await client.getUrl(Uri.parse('$host/api/v1/auth/invitations'));
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      req.headers.set('X-User-Role', 'owner');
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data is List) {
+          return data.whereType<Map<String, dynamic>>().toList();
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
     }
   }
 }
