@@ -170,7 +170,7 @@ export default function Payment() {
       );
       setBankPhase({ kind: 'idle' });
       reloadBankTransactions();
-      invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
+      invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard, syncKeys.vouchers);
       toast.success('Bank book applied successfully!');
     } catch (err: unknown) {
       const errObj = err as { message?: string };

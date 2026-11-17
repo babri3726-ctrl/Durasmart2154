@@ -66,6 +66,7 @@ export const syncKeys = {
   debtors: 'debtors',
   customers: 'customers',
   payments: 'payments',
+  vouchers: 'vouchers',
   dashboard: 'dashboard',
   target: (employeeId: string) => `targets:${employeeId}`,
   targetBook: 'targets:',

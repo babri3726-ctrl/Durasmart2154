@@ -94,13 +94,19 @@ export default function Daybook() {
         fileName: selectedFile.name,
       });
 
-      toast.success(
-        `Applied Day Book: ${res.createdRowCount} new, ${res.unchangedRowCount} existing vouchers.`
-      );
+      if (res.createdRowCount === 0 && res.unchangedRowCount > 0) {
+        toast.info(
+          `Day Book up to date: all ${res.unchangedRowCount} vouchers are already in the database (0 new records).`
+        );
+      } else {
+        toast.success(
+          `Applied Day Book: ${res.createdRowCount} new vouchers, ${res.unchangedRowCount} existing vouchers.`
+        );
+      }
       setUploadOpen(false);
       setSelectedFile(null);
       setPreview(null);
-      invalidate(syncKeys.debtors, syncKeys.customers);
+      invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.vouchers);
       loadData();
     } catch (err: any) {
       toast.error(`Failed to apply Day Book: ${err.message || 'Error'}`);
@@ -431,6 +437,9 @@ export default function Daybook() {
                 <div className="flex items-center justify-between text-xs font-bold text-slate-700">
                   <span>File SHA256:</span>
                   <span className="font-mono text-[10px] text-slate-500">{preview.fileSha256?.substring(0, 16)}...</span>
+                </div>
+                <div className="rounded-lg bg-blue-100/80 p-2 text-center text-xs font-bold text-blue-900 border border-blue-200">
+                  ⚡ Preview ready. Click <strong>"Import into Day Book"</strong> below to save to database.
                 </div>
               </div>
             )}

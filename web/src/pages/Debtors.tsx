@@ -193,11 +193,17 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
   }, [reloadVouchers]);
 
   const totalSalesDebit = vouchers
-    .filter((v) => v.voucher_type.toLowerCase() === 'sales')
+    .filter((v) => {
+      const t = v.voucher_type.toLowerCase();
+      return t === 'sales' || t.includes('debit note');
+    })
     .reduce((sum, v) => sum + (v.debit_paise || 0), 0);
 
   const totalReceipts = vouchers
-    .filter((v) => v.voucher_type.toLowerCase() === 'receipt')
+    .filter((v) => {
+      const t = v.voucher_type.toLowerCase();
+      return t === 'receipt' || t.includes('credit note');
+    })
     .reduce((sum, v) => sum + (v.credit_paise || v.debit_paise || 0), 0);
 
   const totalJournalCredit = vouchers
@@ -2152,7 +2158,7 @@ function DebtorWorkbookPreview() {
         // The apply is the one debtor write. Bumping the key re-reads the stored list so a freshly
         // applied balance shows without the owner turning the page. A replay bumps it too — the read
         // is still the server's current answer, not a row the panel assumes.
-        invalidate(syncKeys.debtors);
+        invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.vouchers);
       } catch (error) {
         if (error instanceof ServerError) {
           setApplyState({
@@ -2237,7 +2243,7 @@ function DebtorWorkbookPreview() {
           </div>
           <p className="text-sm font-bold text-ink">Click to Choose or Drag & Drop Excel File</p>
           <p className="mt-1 text-xs text-muted max-w-md">
-            Upload <strong>sales.xlsx</strong> (Sales Register), individual debtor ledgers (e.g. <strong>S S Kalra Zira.xlsx</strong>), or <strong>HR-PB.xlsx</strong> (Dealer Targets). <em>Bank &amp; Cash Books must be uploaded in the Payment section.</em>
+            Upload <strong>daybook.xlsx</strong> (Day Book), <strong>sales.xlsx</strong> (Sales Register), individual debtor ledgers (e.g. <strong>S S Kalra Zira.xlsx</strong>), or <strong>HR-PB.xlsx</strong> (Dealer Targets). <em>Bank &amp; Cash Books can also be uploaded in the Payment section.</em>
           </p>
           <span className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-brand-blue px-3 py-1.5 text-xs font-bold text-white shadow-sm group-hover:bg-brand-blue/90">
             Browse Excel File

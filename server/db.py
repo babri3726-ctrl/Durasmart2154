@@ -1045,23 +1045,23 @@ def recompute_party_balance(party_id: str, conn = None):
         ob_row = cur.fetchone()
         ob_paise = ob_row[0] if ob_row else 0
 
-        # Sales debits minus credits
+        # Sales & Debit Notes debits
         cur.execute(
             """
-            SELECT COALESCE(SUM(debit_paise - credit_paise), 0)
+            SELECT COALESCE(SUM(CASE WHEN debit_paise > 0 THEN debit_paise - credit_paise ELSE 0 END), 0)
             FROM vouchers
-            WHERE party_id = ? AND LOWER(voucher_type) = 'sales'
+            WHERE party_id = ? AND (LOWER(voucher_type) = 'sales' OR LOWER(voucher_type) LIKE '%debit note%')
             """,
             (party_id,)
         )
         sales_paise = cur.fetchone()[0]
 
-        # Receipts (money in from customer reduces debtor balance)
+        # Receipts & Credit Notes (money in from customer or returns reduce debtor balance)
         cur.execute(
             """
             SELECT COALESCE(SUM(CASE WHEN credit_paise > 0 THEN credit_paise ELSE debit_paise END), 0)
             FROM vouchers
-            WHERE party_id = ? AND LOWER(voucher_type) = 'receipt'
+            WHERE party_id = ? AND (LOWER(voucher_type) = 'receipt' OR LOWER(voucher_type) LIKE '%credit note%')
             """,
             (party_id,)
         )

@@ -4538,7 +4538,11 @@ async def apply_debtor_bytes(
                 "replayed": batch_res["insertedCount"] == 0,
                 "databaseRowsWritten": True,
                 "businessRecordsCreated": False,
-                "disclaimer": f"Applied {batch_res['insertedCount']} vouchers from {acct_data['bookSource']}. {batch_res['newPartiesCount']} new parties created, {batch_res['affectedPartiesCount']} debtor balances updated in SQLite."
+                "disclaimer": (
+                    f"All {batch_res['skippedCount']} vouchers from {acct_data['bookSource']} are already in database (0 new entries)."
+                    if batch_res["insertedCount"] == 0 and batch_res["skippedCount"] > 0
+                    else f"Applied {batch_res['insertedCount']} vouchers from {acct_data['bookSource']}. {batch_res['newPartiesCount']} new parties created, {batch_res['affectedPartiesCount']} debtor balances updated in SQLite."
+                )
             }
 
         target_path = os.path.join(db.DATA_DIR, "HR-PB.xlsx")
