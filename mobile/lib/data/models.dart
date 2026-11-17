@@ -673,6 +673,7 @@ class DebtorItem {
     this.district = '',
     this.salesperson = 'Unassigned',
     this.balance = 0.0,
+    this.openingBalance = 0.0,
     this.status = 'active',
   });
 
@@ -683,9 +684,10 @@ class DebtorItem {
   String district;
   String salesperson;
   double balance;
+  double openingBalance;
   String status;
 
-  String get balanceFormatted => '₹';
+  String get balanceFormatted => '₹${balance.toStringAsFixed(2)}';
 
   factory DebtorItem.fromJson(Map<String, dynamic> json) {
     return DebtorItem(
@@ -698,6 +700,9 @@ class DebtorItem {
       balance: (json['balance'] is num)
           ? (json['balance'] as num).toDouble()
           : (double.tryParse(json['balance']?.toString() ?? '0') ?? 0.0),
+      openingBalance: (json['openingBalance'] is num)
+          ? (json['openingBalance'] as num).toDouble()
+          : (double.tryParse(json['openingBalance']?.toString() ?? '0') ?? 0.0),
       status: json['status']?.toString() ?? 'active',
     );
   }
@@ -710,8 +715,65 @@ class DebtorItem {
     'district': district,
     'salesperson': salesperson,
     'balance': balance,
+    'openingBalance': openingBalance,
     'status': status,
   };
+}
+
+class VoucherItem {
+  VoucherItem({
+    required this.id,
+    required this.voucherNo,
+    required this.voucherType,
+    required this.voucherDate,
+    required this.debitPaise,
+    required this.creditPaise,
+    this.narration = '',
+    this.bookSource = '',
+  });
+
+  final String id;
+  final String voucherNo;
+  final String voucherType;
+  final String voucherDate;
+  final int debitPaise;
+  final int creditPaise;
+  final String narration;
+  final String bookSource;
+
+  double get debit => debitPaise / 100.0;
+  double get credit => creditPaise / 100.0;
+  bool get isSales =>
+      voucherType.toLowerCase() == 'sales' ||
+      voucherType.toLowerCase().contains('debit note');
+  bool get isReceipt => voucherType.toLowerCase() == 'receipt';
+  bool get isCreditNote => voucherType.toLowerCase().contains('credit note');
+  bool get isJournal => voucherType.toLowerCase() == 'journal';
+
+  factory VoucherItem.fromJson(Map<String, dynamic> json) {
+    return VoucherItem(
+      id: json['id']?.toString() ?? '',
+      voucherNo: json['voucher_no']?.toString() ??
+          json['voucherNo']?.toString() ??
+          '',
+      voucherType: json['voucher_type']?.toString() ??
+          json['voucherType']?.toString() ??
+          'Sales',
+      voucherDate: json['voucher_date']?.toString() ??
+          json['voucherDate']?.toString() ??
+          '',
+      debitPaise: (json['debit_paise'] as num?)?.toInt() ??
+          (json['debitPaise'] as num?)?.toInt() ??
+          0,
+      creditPaise: (json['credit_paise'] as num?)?.toInt() ??
+          (json['creditPaise'] as num?)?.toInt() ??
+          0,
+      narration: json['narration']?.toString() ?? '',
+      bookSource: json['book_source']?.toString() ??
+          json['bookSource']?.toString() ??
+          '',
+    );
+  }
 }
 
 class SalesTargetItem {

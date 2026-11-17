@@ -200,27 +200,21 @@ class MockRepository extends ChangeNotifier {
       final remoteCusts = await ApiSyncService.fetchCustomers();
       if (remoteCusts != null && remoteCusts.isNotEmpty) {
         final parsed = remoteCusts.map(Customer.fromJson).toList();
-        for (final c in parsed) {
+        for (var i = 0; i < remoteCusts.length; i++) {
+          final raw = remoteCusts[i];
+          final c = parsed[i];
           final idx = customers.indexWhere((existing) => existing.id == c.id);
           if (idx != -1) {
             customers[idx] = c;
           } else {
             customers.add(c);
           }
+          final debtorObj = DebtorItem.fromJson(raw);
           final dIdx = debtors.indexWhere((existing) => existing.id == c.id);
-          if (dIdx == -1) {
-            final spObj = employees.where((e) => e.id == c.salespersonId).firstOrNull;
-            debtors.add(
-              DebtorItem(
-                id: c.id,
-                name: c.name,
-                state: 'Punjab/Haryana',
-                city: c.city,
-                district: c.city,
-                salesperson: spObj?.name ?? 'AJAY JI',
-                balance: 0.0,
-              ),
-            );
+          if (dIdx != -1) {
+            debtors[dIdx] = debtorObj;
+          } else {
+            debtors.add(debtorObj);
           }
         }
       }
@@ -327,8 +321,23 @@ class MockRepository extends ChangeNotifier {
   ];
 
   // ── lookups ──────────────────────────────────────────────────────────
-  Customer? customerById(String id) =>
-      customers.where((c) => c.id == id).firstOrNull;
+  Customer? customerById(String id) {
+    final direct = customers.where((c) => c.id == id).firstOrNull;
+    if (direct != null) return direct;
+    final debtor = debtors.where((d) => d.id == id).firstOrNull;
+    if (debtor != null) {
+      return Customer(
+        id: debtor.id,
+        name: debtor.name,
+        city: debtor.city.isNotEmpty ? debtor.city : debtor.district,
+        mobile: '9814000000',
+        salespersonId: 'EMP-SP-01',
+        contactPerson: debtor.name,
+        type: 'Dealer',
+      );
+    }
+    return null;
+  }
   SalesOrder? orderById(String id) =>
       orders.where((o) => o.id == id).firstOrNull;
   Employee? employeeById(String id) =>
@@ -336,6 +345,22 @@ class MockRepository extends ChangeNotifier {
   WorkTask? taskById(String id) => tasks.where((t) => t.id == id).firstOrNull;
   AreaInfo? areaById(String id) => areas.where((a) => a.id == id).firstOrNull;
   TourPlan? tourById(String id) => tours.where((t) => t.id == id).firstOrNull;
+
+  final Map<String, List<VoucherItem>> _vouchersByCustomer = {};
+
+  List<VoucherItem> vouchersFor(String customerId) =>
+      _vouchersByCustomer[customerId] ?? const [];
+
+  Future<List<VoucherItem>> fetchVouchersFor(String customerId) async {
+    final raw = await ApiSyncService.fetchVouchers(customerId);
+    if (raw != null) {
+      final items = raw.map(VoucherItem.fromJson).toList();
+      _vouchersByCustomer[customerId] = items;
+      notifyListeners();
+      return items;
+    }
+    return _vouchersByCustomer[customerId] ?? const [];
+  }
 
   String salespersonName(String employeeId) =>
       employeeById(employeeId)?.name ?? 'Unassigned';
@@ -402,11 +427,13 @@ class MockRepository extends ChangeNotifier {
           (customerById(customerId)?.name.toLowerCase() ==
               d.name.toLowerCase()),
     ).firstOrNull;
-    final openingBalance = debtor?.balance ?? 0.0;
+    if (debtor != null) {
+      return debtor.balance;
+    }
     final orderSum = ordersFor(
       customerId,
     ).fold(0.0, (sum, o) => sum + _positive(orderBalance(o.id)));
-    return openingBalance + orderSum;
+    return orderSum;
   }
 
   double customerAdvance(String customerId) {

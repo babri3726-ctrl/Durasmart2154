@@ -379,83 +379,105 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                       separatorBuilder: (_, _) => const SizedBox(height: 8),
                       itemBuilder: (context, i) {
                         final item = items[i];
-                        return Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
+                        return Material(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          child: InkWell(
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppColors.line),
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      item.name,
-                                      style: AppText.body.copyWith(
-                                        fontWeight: FontWeight.bold,
-                                      ),
+                            onTap: () => Navigator.of(context).pushNamed(
+                              '/ledger',
+                              arguments: {'customerId': item.id},
+                            ),
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: AppColors.line),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          item.name,
+                                          style: AppText.body.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          '${item.city.isNotEmpty ? item.city : item.district} (${item.state}) • Rep: ${item.salesperson}',
+                                          style: AppText.caption.copyWith(
+                                            color: AppColors.muted,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: item.balance == 0.0
+                                                ? AppColors.background
+                                                : const Color(0xFFFFEEEE),
+                                            borderRadius: BorderRadius.circular(6),
+                                            border: Border.all(color: AppColors.line),
+                                          ),
+                                          child: Text(
+                                            'Balance: ${item.balanceFormatted}',
+                                            style: AppText.caption.copyWith(
+                                              fontWeight: FontWeight.bold,
+                                              color: item.balance == 0.0
+                                                  ? AppColors.muted
+                                                  : AppColors.red,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                    const SizedBox(height: 3),
-                                    Text(
-                                      '${item.city.isNotEmpty ? item.city : item.district} (${item.state}) • Rep: ${item.salesperson}',
-                                      style: AppText.caption.copyWith(
-                                        color: AppColors.muted,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 2,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: item.balance == 0.0
-                                            ? AppColors.background
-                                            : const Color(0xFFFFEEEE),
-                                        borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(color: AppColors.line),
-                                      ),
-                                      child: Text(
-                                        'Balance: ${item.balanceFormatted}',
-                                        style: AppText.caption.copyWith(
-                                          fontWeight: FontWeight.bold,
-                                          color: item.balance == 0.0
-                                              ? AppColors.muted
-                                              : AppColors.red,
+                                  ),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        icon: const Icon(
+                                          Icons.receipt_long_rounded,
+                                          size: 20,
+                                        ),
+                                        color: AppColors.teal,
+                                        tooltip: 'View Statement',
+                                        onPressed: () => Navigator.of(context).pushNamed(
+                                          '/ledger',
+                                          arguments: {'customerId': item.id},
                                         ),
                                       ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(
-                                      Icons.edit_outlined,
-                                      size: 20,
-                                    ),
-                                    color: AppColors.muted,
-                                    onPressed: () =>
-                                        _showEditDebtorDialog(context, item),
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(
-                                      Icons.delete_outline_rounded,
-                                      size: 20,
-                                    ),
-                                    color: AppColors.red,
-                                    onPressed: () =>
-                                        _showDeleteConfirmDialog(context, item),
+                                      IconButton(
+                                        icon: const Icon(
+                                          Icons.edit_outlined,
+                                          size: 20,
+                                        ),
+                                        color: AppColors.muted,
+                                        onPressed: () =>
+                                            _showEditDebtorDialog(context, item),
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(
+                                          Icons.delete_outline_rounded,
+                                          size: 20,
+                                        ),
+                                        color: AppColors.red,
+                                        onPressed: () =>
+                                            _showDeleteConfirmDialog(context, item),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),
-                            ],
+                            ),
                           ),
                         );
                       },

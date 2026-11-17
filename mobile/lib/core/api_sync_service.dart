@@ -472,7 +472,7 @@ class ApiSyncService {
       if (salespersonId != null && salespersonId.isNotEmpty) {
         params.add('salespersonId=${Uri.encodeComponent(salespersonId)}');
       }
-      params.add('pageSize=200');
+      params.add('pageSize=2000');
       final query = '?${params.join('&')}';
       final req = await client.getUrl(Uri.parse('$host/api/v1/customers$query'));
       if (authToken != null) {
@@ -483,6 +483,34 @@ class ApiSyncService {
         final body = await resp.transform(utf8.decoder).join();
         final data = jsonDecode(body);
         if (data is Map && data['items'] is List) {
+          return (data['items'] as List).map((e) => e as Map<String, dynamic>).toList();
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Fetches vouchers for a specific party from backend /api/v1/vouchers
+  static Future<List<Map<String, dynamic>>?> fetchVouchers(String partyId) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+      final req = await client.getUrl(
+        Uri.parse('$host/api/v1/vouchers?partyId=${Uri.encodeComponent(partyId)}&limit=5000'),
+      );
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data is List) {
+          return data.map((e) => e as Map<String, dynamic>).toList();
+        } else if (data is Map && data['items'] is List) {
           return (data['items'] as List).map((e) => e as Map<String, dynamic>).toList();
         }
       }
