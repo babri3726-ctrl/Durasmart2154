@@ -2032,6 +2032,24 @@ def sync_accounting_books_excel():
         raise HTTPException(status_code=404, detail="No accounting books found in workspace root or data/imports folder.")
     return res
 
+@app.post("/api/v1/accounting/resubmit-and-reconcile")
+def resubmit_and_reconcile_endpoint():
+    """Wipes redundant vouchers, re-ingests Day Book and liquid cash books, and reconciles discount ledger."""
+    from scripts.resubmit_daybook_and_sync import run_resubmit
+    from scripts.reconcile_discount import reconcile_discount_ledger
+    run_resubmit()
+    res = reconcile_discount_ledger()
+    # Refresh in-memory state
+    persisted = db.load_all_persisted_state()
+    for k in ["debtors", "customers", "opening_balances"]:
+        if k in persisted:
+            STATE[k] = persisted[k]
+    return {
+        "status": "success",
+        "message": "Day Book resubmitted and discount ledger reconciled successfully.",
+        "discountReconciliation": res
+    }
+
 @app.get("/api/v1/sales/targets")
 def get_sales_targets(
     state: str | None = None,

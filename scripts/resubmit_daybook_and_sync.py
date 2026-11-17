@@ -79,6 +79,15 @@ def run_resubmit():
         conn.commit()
     print("Seeded Opening Balance of ₹4,70,360.00 Dr for AMAR TRADING CO. (Nasrala)W.")
 
+    print("\n=== Step 3.5: Reconciling Discount Ledger ===")
+    disc_path = os.path.join(imports_dir, "discount.xlsx")
+    if not os.path.exists(disc_path):
+        disc_path = os.path.join(base_dir, "discount.xlsx")
+    if os.path.exists(disc_path):
+        parsed_disc = parse_accounting_workbook(disc_path)
+        disc_res = db.reconcile_discount_vouchers(parsed_disc["vouchers"])
+        print(f"Reconciled {disc_res.get('reconciledCount', 0)} discount vouchers across {disc_res.get('affectedPartiesCount', 0)} debtors.")
+
     print("\n=== Step 4: Recomputing all party balances ===")
     with db.get_connection() as conn:
         cur = conn.cursor()
