@@ -59,6 +59,7 @@ def seed_all_accounting_books() -> dict[str, Any]:
         "daybook.xlsx",
         "sales.xlsx", "hdfc.xlsx", "yes.xlsx",
         "cash.xlsx", "khan cash.xlsx", "cash gbd.xlsx",
+        "discount.xlsx",
         "S S Kalra Zira.xlsx"
     ]
     imports_dir = os.path.join(base_dir, "data", "imports")
@@ -96,10 +97,15 @@ def seed_all_accounting_books() -> dict[str, Any]:
                 f_bytes = f.read()
             f_sha = hashlib.sha256(f_bytes).hexdigest()
             parsed = parse_accounting_workbook(path, file_sha256=f_sha)
-            res = db.save_vouchers_batch(parsed["vouchers"], file_sha=f_sha)
-            total_inserted += res["insertedCount"]
-            total_skipped += res["skippedCount"]
-            total_new_parties += res["newPartiesCount"]
+            if parsed.get("isDiscountLedger"):
+                res = db.reconcile_discount_vouchers(parsed["vouchers"], file_sha=f_sha)
+                total_inserted += res.get("reconciledCount", 0) + res.get("insertedCount", 0)
+                total_skipped += res.get("skippedCount", 0)
+            else:
+                res = db.save_vouchers_batch(parsed["vouchers"], file_sha=f_sha)
+                total_inserted += res["insertedCount"]
+                total_skipped += res["skippedCount"]
+                total_new_parties += res["newPartiesCount"]
             sources.append(parsed["bookSource"])
 
             if parsed.get("isCustomerLedger") and parsed.get("customerName"):
@@ -4492,7 +4498,11 @@ async def apply_debtor_bytes(
                 )
 
             vouchers = acct_data["vouchers"]
-            batch_res = db.save_vouchers_batch(vouchers, file_sha=file_sha)
+            if acct_data.get("isDiscountLedger"):
+                batch_res = db.reconcile_discount_vouchers(vouchers, file_sha=file_sha)
+                batch_res["newPartiesCount"] = 0
+            else:
+                batch_res = db.save_vouchers_batch(vouchers, file_sha=file_sha)
 
             if is_cust_ledger and acct_data.get("customerName"):
                 cust_name = acct_data["customerName"]
@@ -4540,9 +4550,13 @@ async def apply_debtor_bytes(
                 "databaseRowsWritten": True,
                 "businessRecordsCreated": False,
                 "disclaimer": (
-                    f"All {batch_res['skippedCount']} vouchers from {acct_data['bookSource']} are already in database (0 new entries)."
-                    if batch_res["insertedCount"] == 0 and batch_res["skippedCount"] > 0
-                    else f"Applied {batch_res['insertedCount']} vouchers from {acct_data['bookSource']}. {batch_res['newPartiesCount']} new parties created, {batch_res['affectedPartiesCount']} debtor balances updated in SQLite."
+                    f"Reconciled {batch_res.get('reconciledCount', 0)} discount vouchers to customer debtor ledgers. {batch_res['affectedPartiesCount']} debtor balances updated in SQLite."
+                    if acct_data.get("isDiscountLedger")
+                    else (
+                        f"All {batch_res['skippedCount']} vouchers from {acct_data['bookSource']} are already in database (0 new entries)."
+                        if batch_res["insertedCount"] == 0 and batch_res["skippedCount"] > 0
+                        else f"Applied {batch_res['insertedCount']} vouchers from {acct_data['bookSource']}. {batch_res['newPartiesCount']} new parties created, {batch_res['affectedPartiesCount']} debtor balances updated in SQLite."
+                    )
                 )
             }
 

@@ -140,10 +140,14 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
     row3_val = str(ws.cell(3, 1).value or "").strip()
 
     is_customer_ledger = False
+    is_discount_ledger = False
     customer_name = ""
     opening_balance_paise = 0
 
-    if "ledger account" in top_text or "ledger" in row3_val.lower() or "ledger" in row2_val.lower():
+    if "discount" in top_text or "discount" in fn_lower:
+        is_discount_ledger = True
+        book_source = "Discount Ledger"
+    elif "ledger account" in top_text or "ledger" in row3_val.lower() or "ledger" in row2_val.lower():
         is_customer_ledger = True
         if "ledger" in row2_val.lower():
             customer_name = clean_party_name(ws.cell(1, 1).value)
@@ -211,6 +215,9 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
             party_name = customer_name
             opposing_account = part_detail
             narration = f"{prefix} {opposing_account}".strip()
+        elif is_discount_ledger:
+            party_name = part_detail
+            narration = "Discount"
         elif is_liquid:
             party_name = part_detail
             liquid_name = book_source.replace(" Book", "").strip()
@@ -234,6 +241,9 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
         else:
             vch_no = ""
 
+        if is_discount_ledger and vch_no:
+            narration = f"Discount ({vch_no})"
+
         # Debit and Credit amounts / unit quantities
         raw_debit, d_qty = parse_cell_amount(ws.cell(r, col_map.get("debit", 5)).value)
         raw_credit, c_qty = parse_cell_amount(ws.cell(r, col_map.get("credit", 6)).value)
@@ -250,6 +260,11 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
             credit = raw_debit
             if not vch_type:
                 vch_type = "Receipt" if credit > 0 else "Payment"
+        elif is_discount_ledger:
+            debit = 0.0
+            credit = raw_debit
+            if not vch_type:
+                vch_type = "Journal"
         else:
             debit = raw_debit
             credit = raw_credit
@@ -294,6 +309,7 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
     return {
         "bookSource": book_source,
         "isCustomerLedger": is_customer_ledger,
+        "isDiscountLedger": is_discount_ledger,
         "customerName": customer_name,
         "openingBalancePaise": opening_balance_paise,
         "periodText": period_text,

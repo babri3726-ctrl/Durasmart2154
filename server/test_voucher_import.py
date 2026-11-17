@@ -409,4 +409,30 @@ def test_comprehensive_deduplication():
         conn.commit()
 
 
+def test_discount_ledger_parsing_and_reconciliation():
+    discount_path = os.path.join(BASE_DIR, "discount.xlsx")
+    if not os.path.exists(discount_path):
+        pytest.skip("discount.xlsx not present in workspace")
+
+    parsed = parse_accounting_workbook(discount_path)
+    assert parsed["isDiscountLedger"] is True
+    assert parsed["bookSource"] == "Discount Ledger"
+    assert parsed["voucherCount"] >= 270
+
+    # Verify Amar Trading row exists
+    amar_v = next((v for v in parsed["vouchers"] if "AMAR TRADING" in v["partyName"]), None)
+    assert amar_v is not None
+    assert amar_v["partyName"] == "AMAR TRADING CO. (Nasrala)W"
+    assert amar_v["voucherDate"] == "2026-06-01"
+    assert amar_v["voucherNo"] == "3"
+    assert amar_v["creditPaise"] == 209200
+    assert amar_v["debitPaise"] == 0
+
+    # Test reconciliation
+    res = db.reconcile_discount_vouchers(parsed["vouchers"], file_sha="test_discount_sha")
+    assert res["status"] == "success"
+    assert res["affectedPartiesCount"] > 0
+
+
+
 

@@ -1220,6 +1220,102 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
         "affectedPartiesCount": len(affected_party_ids),
     }
 
+def reconcile_discount_vouchers(vouchers: list[dict[str, Any]], file_sha: str = "") -> dict[str, Any]:
+    """
+    Reconciles a Discount Ledger batch against generic 'Discount' Day Book vouchers.
+    Reassigns matching Day Book vouchers to their true customer debtor accounts as Credit.
+    """
+    now = datetime.now().isoformat()
+    reconciled = 0
+    inserted = 0
+    skipped = 0
+    affected_party_ids = set()
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        for v in vouchers:
+            party_name = (v.get("partyName") or "").strip()
+            if not party_name:
+                continue
+            party_id, _ = find_or_create_party_by_name(conn, party_name)
+            affected_party_ids.add(party_id)
+
+            vdate = v.get("voucherDate", "")
+            amt_paise = v.get("creditPaise", 0) or v.get("debitPaise", 0)
+            vno = (v.get("voucherNo") or "").strip()
+            narration = v.get("narration") or (f"Discount ({vno})" if vno else "Discount")
+
+            # Match generic Discount voucher from Day Book on same date and amount
+            cur.execute(
+                """
+                SELECT id, voucher_no FROM vouchers
+                WHERE LOWER(party_name) = 'discount'
+                  AND voucher_date = ?
+                  AND (debit_paise = ? OR credit_paise = ?)
+                LIMIT 1
+                """,
+                (vdate, amt_paise, amt_paise)
+            )
+            match = cur.fetchone()
+
+            # Check if this voucher already exists for party
+            cur.execute(
+                """
+                SELECT id FROM vouchers
+                WHERE party_id = ? AND voucher_date = ? AND (credit_paise = ? OR debit_paise = ?) AND LOWER(voucher_type) = 'journal'
+                LIMIT 1
+                """,
+                (party_id, vdate, amt_paise, amt_paise)
+            )
+            already_exists = cur.fetchone()
+
+            if match and already_exists:
+                cur.execute("DELETE FROM vouchers WHERE id = ?", (match[0],))
+                reconciled += 1
+            elif match:
+                effective_vno = vno if vno else (match[1] or "")
+                cur.execute(
+                    """
+                    UPDATE vouchers
+                    SET party_id = ?, party_name = ?, credit_paise = ?, debit_paise = 0, voucher_no = ?, narration = ?, book_source = 'Day Book (Discount)'
+                    WHERE id = ?
+                    """,
+                    (party_id, party_name, amt_paise, effective_vno, narration, match[0])
+                )
+                reconciled += 1
+            elif not already_exists:
+                v_id = v.get("id") or f"VCH-DISC-{now}-{inserted}"
+                cur.execute(
+                    """
+                    INSERT OR IGNORE INTO vouchers (id, voucher_no, voucher_type, voucher_date, party_name, party_id, debit_paise, credit_paise, narration, book_source, file_sha256, created_at)
+                    VALUES (?, ?, 'Journal', ?, ?, ?, 0, ?, ?, 'Discount Ledger', ?, ?)
+                    """,
+                    (v_id, vno, vdate, party_name, party_id, amt_paise, narration, file_sha, now)
+                )
+                if cur.rowcount > 0:
+                    inserted += 1
+                else:
+                    skipped += 1
+
+        for pid in affected_party_ids:
+            recompute_party_balance(pid, conn)
+
+        # Clear fake 'Discount' party balance
+        cur.execute("SELECT id FROM parties WHERE LOWER(name) = 'discount'")
+        disc_row = cur.fetchone()
+        if disc_row:
+            recompute_party_balance(disc_row[0], conn)
+
+        conn.commit()
+
+    return {
+        "status": "success",
+        "reconciledCount": reconciled,
+        "insertedCount": inserted,
+        "skippedCount": skipped,
+        "affectedPartiesCount": len(affected_party_ids),
+    }
+
 def load_vouchers(
     party_id: str | None = None,
     book_source: str | None = None,
