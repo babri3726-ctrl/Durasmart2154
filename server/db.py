@@ -1056,9 +1056,12 @@ def recompute_party_balance(party_id: str, conn = None):
     def _run(c):
         cur = c.cursor()
         # Opening balance
-        cur.execute("SELECT amount_paise FROM opening_balances WHERE customer_id = ? ORDER BY id DESC LIMIT 1", (party_id,))
+        cur.execute("SELECT amount_paise, direction FROM opening_balances WHERE customer_id = ? ORDER BY id DESC LIMIT 1", (party_id,))
         ob_row = cur.fetchone()
-        ob_paise = ob_row[0] if ob_row else 0
+        if ob_row:
+            ob_paise = ob_row[0] if (ob_row[1] or "debit").lower() in ("debit", "owes") else -ob_row[0]
+        else:
+            ob_paise = 0
 
         # Sales & Debit Notes debits
         cur.execute(
@@ -1703,6 +1706,86 @@ def update_party_opening_balance(party_id: str, amount_paise: int, as_of: str = 
             "openingBalancePaise": amount_paise,
             "newBalancePaise": b_row[0] if b_row else 0,
         }
+
+def import_opening_balances(filepath: str, as_of: str = "") -> dict[str, Any]:
+    """Imports opening/trial balances from an Excel sheet into opening_balances and updates party balances."""
+    from .voucher_parser import parse_opening_balance_workbook
+    data = parse_opening_balance_workbook(filepath)
+    entries = data["entries"]
+    period_text = data.get("periodText", "")
+    now = datetime.now().isoformat()
+    record_date = as_of or (now[:10])
+
+    updated_count = 0
+    created_party_count = 0
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name FROM parties")
+        existing_parties = cur.fetchall()
+        import re
+        norm = lambda s: re.sub(r'[^a-z0-9]', '', (s or "").lower())
+        p_by_norm = {norm(p[1]): p[0] for p in existing_parties if p[1]}
+        p_by_exact = {(p[1] or "").strip().lower(): p[0] for p in existing_parties if p[1]}
+
+        for e in entries:
+            name = e["name"]
+            norm_name = norm(name)
+            party_id = p_by_exact.get(name.lower()) or p_by_norm.get(norm_name)
+
+            if not party_id:
+                party_id, _ = find_or_create_party_by_name(conn, name)
+                p_by_norm[norm_name] = party_id
+                p_by_exact[name.lower()] = party_id
+                created_party_count += 1
+
+            # Compute existing voucher net movement for this party
+            cur.execute(
+                """
+                SELECT
+                    COALESCE(SUM(CASE WHEN (LOWER(voucher_type) = 'sales' OR LOWER(voucher_type) LIKE '%debit note%') AND debit_paise > 0 THEN debit_paise - credit_paise ELSE 0 END), 0) -
+                    COALESCE(SUM(CASE WHEN LOWER(voucher_type) = 'receipt' OR LOWER(voucher_type) LIKE '%credit note%' THEN credit_paise ELSE 0 END), 0) +
+                    COALESCE(SUM(CASE WHEN LOWER(voucher_type) = 'journal' THEN debit_paise - credit_paise ELSE 0 END), 0)
+                FROM vouchers
+                WHERE party_id = ?
+                """,
+                (party_id,)
+            )
+            v_row = cur.fetchone()
+            vch_net = v_row[0] if v_row else 0
+
+            # If party has vouchers during the period, Closing C = Opening + vch_net => Opening = max(0, C - vch_net)
+            if e["direction"] == "debit":
+                if vch_net != 0:
+                    ob_paise = max(0, e["amountPaise"] - vch_net)
+                else:
+                    ob_paise = e["amountPaise"]
+                direction = "debit"
+            else:
+                ob_paise = e["amountPaise"]
+                direction = "credit"
+
+            cur.execute(
+                """
+                INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (party_id, record_date, ob_paise, direction, f"Import: {os.path.basename(filepath)}", now)
+            )
+
+            recompute_party_balance(party_id, conn)
+            updated_count += 1
+
+        conn.commit()
+
+    return {
+        "success": True,
+        "updatedCount": updated_count,
+        "createdPartyCount": created_party_count,
+        "periodText": period_text,
+        "totalDebitPaise": data["totalDebitPaise"],
+        "totalCreditPaise": data["totalCreditPaise"],
+    }
 
 # ----------------- Invitations & User Management -----------------
 

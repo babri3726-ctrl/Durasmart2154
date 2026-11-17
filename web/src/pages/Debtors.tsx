@@ -49,6 +49,7 @@ import {
   GitMerge,
   ArrowRightLeft,
   Edit2,
+  Upload,
 } from 'lucide-react';
 import { Card, EmptyState, PageHeader, Spinner } from '../components/ui/Card';
 import { LiveSyncBar } from '../components/ui/LiveSync';
@@ -73,6 +74,7 @@ import {
   addJournalEntry,
   mergeDebtors,
   updateOpeningBalance,
+  uploadOpeningBalances,
   listEmployees,
   serverHost,
   ServerError,
@@ -935,6 +937,8 @@ function DebtorListCard() {
   const [selectedDebtorLedger, setSelectedDebtorLedger] = useState<ServerDebtor | null>(null);
   const [syncingBooks, setSyncingBooks] = useState(false);
   const [booksMessage, setBooksMessage] = useState<string | null>(null);
+  const [uploadingOpening, setUploadingOpening] = useState(false);
+  const [openingMessage, setOpeningMessage] = useState<string | null>(null);
 
   // Salespeople for dropdown selection
   const [salespeople, setSalespeople] = useState<string[]>([]);
@@ -1044,6 +1048,26 @@ function DebtorListCard() {
       setBooksMessage(errObj?.message || 'Failed to sync accounting books');
     } finally {
       setSyncingBooks(false);
+    }
+  };
+
+  const handleOpeningFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingOpening(true);
+    setOpeningMessage(null);
+    try {
+      const bytes = await file.arrayBuffer();
+      const res = await uploadOpeningBalances(bytes, file.name);
+      setOpeningMessage(res.message || 'Opening balances imported successfully!');
+      invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
+      sync.refresh();
+    } catch (err: unknown) {
+      const errObj = err as { message?: string };
+      setOpeningMessage(errObj?.message || 'Failed to import opening balances');
+    } finally {
+      setUploadingOpening(false);
+      e.target.value = '';
     }
   };
 
@@ -1164,6 +1188,9 @@ function DebtorListCard() {
           {booksMessage && (
             <p className="mt-1 text-[11px] font-bold text-brand-blue">{booksMessage}</p>
           )}
+          {openingMessage && (
+            <p className="mt-1 text-[11px] font-bold text-emerald-600">{openingMessage}</p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -1176,6 +1203,22 @@ function DebtorListCard() {
             <RefreshCw size={13} className={syncingBooks ? 'animate-spin' : ''} />
             {syncingBooks ? 'Syncing Books...' : '⚡ 1-Click Sync Sales & Bank'}
           </button>
+          <label
+            htmlFor="opening-balance-file-input"
+            className="btn-primary !py-1.5 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-sm bg-emerald-600 hover:bg-emerald-700 text-white"
+            title="Upload opening.xlsx or Trial Balance Excel to update opening balances for all parties"
+          >
+            <Upload size={13} className={uploadingOpening ? 'animate-spin' : ''} />
+            {uploadingOpening ? 'Importing Opening...' : '📥 Import Opening (.xlsx)'}
+          </label>
+          <input
+            id="opening-balance-file-input"
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            disabled={uploadingOpening}
+            onChange={handleOpeningFileUpload}
+          />
           <label
             htmlFor="debtor-workbook-file-input"
             className="btn-primary !py-1.5 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-sm bg-indigo-600 hover:bg-indigo-700 text-white"

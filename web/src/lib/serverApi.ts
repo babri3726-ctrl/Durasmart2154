@@ -2187,6 +2187,20 @@ export function updateOpeningBalance(
   });
 }
 
+export async function uploadOpeningBalances(
+  bytes: Uint8Array | ArrayBuffer,
+  fileName: string = 'opening.xlsx',
+): Promise<{ status: string; message: string; details: Record<string, unknown> }> {
+  const query = new URLSearchParams({ fileName });
+  return send<{ status: string; message: string; details: Record<string, unknown> }>(
+    `/imports/excel/opening-balance?${query.toString()}`,
+    {
+      method: 'POST',
+      bytes,
+    },
+  );
+}
+
 export async function uploadExcelWorkbook(file: File): Promise<Record<string, unknown>> {
   const formData = new FormData();
   formData.append('file', file);

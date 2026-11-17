@@ -56,6 +56,7 @@ def seed_all_accounting_books() -> dict[str, Any]:
     from .voucher_parser import parse_accounting_workbook
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     candidates = [
+        "opening.xlsx",
         "daybook.xlsx",
         "sales.xlsx", "hdfc.xlsx", "yes.xlsx",
         "cash.xlsx", "khan cash.xlsx", "cash gbd.xlsx",
@@ -93,6 +94,14 @@ def seed_all_accounting_books() -> dict[str, Any]:
 
     for path in found:
         try:
+            if os.path.basename(path).lower() in ("opening.xlsx", "trial_balance.xlsx"):
+                try:
+                    ob_res = db.import_opening_balances(path)
+                    sources.append(f"Opening Balances ({ob_res['updatedCount']} accounts)")
+                except Exception as e:
+                    print(f"Warning: Failed to import opening balances from {path}: {e}")
+                continue
+
             with open(path, "rb") as f:
                 f_bytes = f.read()
             f_sha = hashlib.sha256(f_bytes).hexdigest()
@@ -2059,6 +2068,36 @@ def sync_accounting_books_excel():
     if res["insertedCount"] == 0 and res["skippedCount"] == 0 and not res["booksSynced"]:
         raise HTTPException(status_code=404, detail="No accounting books found in workspace root or data/imports folder.")
     return res
+
+@app.post("/api/v1/imports/excel/opening-balance")
+async def import_opening_balance_endpoint(request: Request, fileName: str | None = "opening.xlsx"):
+    """Accepts uploaded opening/trial balance Excel workbook and updates opening balances."""
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty opening balance workbook upload")
+
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    imports_dir = os.path.join(base_dir, "data", "imports")
+    os.makedirs(imports_dir, exist_ok=True)
+    save_path = os.path.join(imports_dir, fileName or "opening.xlsx")
+    with open(save_path, "wb") as f:
+        f.write(body)
+
+    try:
+        res = db.import_opening_balances(save_path)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to import opening balances: {str(e)}")
+
+    persisted = db.load_all_persisted_state()
+    for k in ["debtors", "customers", "opening_balances"]:
+        if k in persisted:
+            STATE[k] = persisted[k]
+
+    return {
+        "status": "success",
+        "message": f"Successfully updated opening balances for {res['updatedCount']} accounts ({res['createdPartyCount']} new parties created).",
+        "details": res
+    }
 
 @app.post("/api/v1/accounting/resubmit-and-reconcile")
 def resubmit_and_reconcile_endpoint():

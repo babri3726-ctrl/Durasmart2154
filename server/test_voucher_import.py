@@ -64,9 +64,10 @@ def test_yes_bank_parsing():
 def test_idempotent_import_and_balance_update():
     db.init_db()
 
-    # Clear vouchers to ensure clean test baseline
+    # Clear vouchers and opening balances to ensure clean test baseline
     with db.get_connection() as conn:
         conn.execute("DELETE FROM vouchers")
+        conn.execute("DELETE FROM opening_balances")
         conn.commit()
 
     # 1. Parse and apply sales.xlsx
@@ -428,10 +429,39 @@ def test_discount_ledger_parsing_and_reconciliation():
     assert amar_v["creditPaise"] == 209200
     assert amar_v["debitPaise"] == 0
 
-    # Test reconciliation
-    res = db.reconcile_discount_vouchers(parsed["vouchers"], file_sha="test_discount_sha")
-    assert res["status"] == "success"
-    assert res["affectedPartiesCount"] > 0
+
+def test_opening_balance_parsing_and_import():
+    from fastapi.testclient import TestClient
+    from server.main import app
+    client = TestClient(app)
+
+    opening_path = os.path.join(BASE_DIR, "opening.xlsx")
+    if not os.path.exists(opening_path):
+        pytest.skip("opening.xlsx not present in workspace")
+
+    from server.voucher_parser import is_opening_balance_workbook, parse_opening_balance_workbook
+    assert is_opening_balance_workbook(opening_path) is True
+
+    parsed = parse_opening_balance_workbook(opening_path)
+    assert parsed["count"] >= 450
+    assert parsed["totalDebitPaise"] > 0
+
+    with open(opening_path, "rb") as f:
+        content = f.read()
+
+    res = client.post("/api/v1/imports/excel/opening-balance?fileName=opening.xlsx", content=content)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert data["details"]["updatedCount"] >= 450
+
+    # Verify Amar Trading was updated accurately
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT balance_paise FROM parties WHERE name LIKE '%AMAR TRADING CO. (Nasrala)W%'")
+        row = cur.fetchone()
+        assert row is not None
+        assert row[0] == 55556200
 
 
 

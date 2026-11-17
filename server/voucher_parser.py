@@ -322,3 +322,81 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
         "vouchers": vouchers,
         "fileSha256": file_sha256 or "",
     }
+
+
+def is_opening_balance_workbook(filepath: str) -> bool:
+    """Checks if a workbook is a Trial Balance / Opening Balance register."""
+    try:
+        wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
+        ws = wb.active
+        found_part = False
+        found_balance = False
+        for row in ws.iter_rows(max_row=12, values_only=True):
+            vals = [str(c).strip().upper() if c is not None else "" for c in row]
+            if "PARTICULARS" in vals:
+                found_part = True
+            if "DEBIT" in vals or "CREDIT" in vals or "CLOSING BALANCE" in vals or "TRIAL BALANCE" in vals:
+                found_balance = True
+        return found_part and found_balance
+    except Exception:
+        return False
+
+
+def parse_opening_balance_workbook(filepath: str) -> dict[str, Any]:
+    """Parses a Trial Balance / Opening Balance workbook (e.g. opening.xlsx)."""
+    wb = openpyxl.load_workbook(filepath, data_only=True)
+    ws = wb.active
+    part_col, debit_col, credit_col, data_start_row = None, None, None, None
+    period_text = ""
+
+    for r in range(1, 15):
+        for c in range(1, ws.max_column + 1):
+            val = str(ws.cell(r, c).value or "").strip().upper()
+            if "PARTICULARS" in val and part_col is None:
+                part_col = c
+            if val == "DEBIT" and debit_col is None:
+                debit_col = c
+            if val == "CREDIT" and credit_col is None:
+                credit_col = c
+        if part_col and debit_col and credit_col:
+            data_start_row = r + 1
+            break
+        for c in range(1, ws.max_column + 1):
+            c_val = str(ws.cell(r, c).value or "").strip()
+            if "TO" in c_val.upper() and ("-" in c_val or "/" in c_val) and not period_text:
+                period_text = c_val
+
+    if not part_col or not debit_col or not credit_col or not data_start_row:
+        raise ValueError("Could not find Particulars, Debit, and Credit columns in workbook")
+
+    entries = []
+    for r in range(data_start_row, ws.max_row + 1):
+        name_val = ws.cell(r, part_col).value
+        if not name_val:
+            continue
+        name_str = str(name_val).strip()
+        if not name_str or name_str.lower() in ("total", "grand total", "opening stock"):
+            continue
+        debit_amt, _ = parse_cell_amount(ws.cell(r, debit_col).value)
+        credit_amt, _ = parse_cell_amount(ws.cell(r, credit_col).value)
+        if debit_amt == 0.0 and credit_amt == 0.0:
+            continue
+        direction = "debit" if debit_amt > 0 else "credit"
+        amount = debit_amt if debit_amt > 0 else credit_amt
+        amount_paise = round(amount * 100)
+        entries.append({
+            "name": name_str,
+            "debit": debit_amt,
+            "credit": credit_amt,
+            "amount": amount,
+            "amountPaise": amount_paise,
+            "direction": direction,
+        })
+
+    return {
+        "periodText": period_text or "1-Dec-24 to 30-Nov-26",
+        "entries": entries,
+        "count": len(entries),
+        "totalDebitPaise": sum(e["amountPaise"] for e in entries if e["direction"] == "debit"),
+        "totalCreditPaise": sum(e["amountPaise"] for e in entries if e["direction"] == "credit"),
+    }
