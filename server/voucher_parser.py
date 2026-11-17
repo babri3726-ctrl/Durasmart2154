@@ -203,10 +203,18 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
             opening_balance_paise = round(dr_ob * 100) if dr_ob > 0 else -round(cr_ob * 100)
             continue
 
+        is_liquid = book_source in (
+            "Khan Cash Book", "Cash Book", "Cash GBD Book", "HDFC Bank Book", "Yes Bank Book"
+        )
+
         if is_customer_ledger:
             party_name = customer_name
             opposing_account = part_detail
             narration = f"{prefix} {opposing_account}".strip()
+        elif is_liquid:
+            party_name = part_detail
+            liquid_name = book_source.replace(" Book", "").strip()
+            narration = f"{prefix} {liquid_name}".strip() if prefix else liquid_name
         else:
             party_name = part_detail
             narration = ""
@@ -227,12 +235,26 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
             vch_no = ""
 
         # Debit and Credit amounts / unit quantities
-        debit, d_qty = parse_cell_amount(ws.cell(r, col_map.get("debit", 5)).value)
-        credit, c_qty = parse_cell_amount(ws.cell(r, col_map.get("credit", 6)).value)
+        raw_debit, d_qty = parse_cell_amount(ws.cell(r, col_map.get("debit", 5)).value)
+        raw_credit, c_qty = parse_cell_amount(ws.cell(r, col_map.get("credit", 6)).value)
         if d_qty:
             narration = f"{narration} (Inwards: {d_qty})".strip()
         if c_qty:
             narration = f"{narration} (Outwards: {c_qty})".strip()
+
+        # In a Liquid Cash/Bank book:
+        # Sheet Debit = Cash/Bank received from party -> Party's ledger is CREDITED (Receipt)
+        # Sheet Credit = Cash/Bank paid to party/expense -> Party's ledger is DEBITED (Payment)
+        if is_liquid:
+            debit = raw_credit
+            credit = raw_debit
+            if not vch_type:
+                vch_type = "Receipt" if credit > 0 else "Payment"
+        else:
+            debit = raw_debit
+            credit = raw_credit
+            if not vch_type:
+                vch_type = "Sales" if debit > 0 else "Receipt"
 
         debit_paise = round(debit * 100)
         credit_paise = round(credit * 100)
@@ -240,9 +262,6 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
         # Skip rows with no money and no inventory movements
         if debit_paise == 0 and credit_paise == 0 and not (d_qty or c_qty):
             continue
-
-        if not vch_type:
-            vch_type = "Sales" if debit_paise > 0 else "Receipt"
 
         if not vch_no and book_source == "Day Book":
             vch_no = f"DB-{r}"

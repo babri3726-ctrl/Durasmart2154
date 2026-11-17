@@ -36,16 +36,18 @@ def test_hdfc_bank_parsing():
     assert res["bookSource"] == "HDFC Bank Book"
     # 124 transaction vouchers (opening balance row excluded)
     assert res["voucherCount"] == 124
-    assert res["totalDebitPaise"] == 3141641800
-    # Total credit excluding Opening Balance (60271001.59 - 24104343.59 = 36166658.00)
-    assert res["totalCreditPaise"] == 3616665800
+    # Liquid book: sheet debit (receipts from parties) is party credit
+    assert res["totalCreditPaise"] == 3141641800
+    # Total credit excluding Opening Balance (60271001.59 - 24104343.59 = 36166658.00) is party debit (payments)
+    assert res["totalDebitPaise"] == 3616665800
 
     # Verify 'To' prefix was cleaned
     gagan_v = next((v for v in res["vouchers"] if "GAGAN" in v["partyName"]), None)
     assert gagan_v is not None
     assert gagan_v["partyName"] == "GAGAN EASTMAN CHOCK W"
     assert gagan_v["voucherType"] == "Receipt"
-    assert gagan_v["debitPaise"] == 20000000
+    assert gagan_v["creditPaise"] == 20000000
+    assert gagan_v["debitPaise"] == 0
 
 
 def test_yes_bank_parsing():
@@ -53,9 +55,10 @@ def test_yes_bank_parsing():
     assert res["bookSource"] == "Yes Bank Book"
     # 110 transaction vouchers (opening balance row excluded)
     assert res["voucherCount"] == 110
-    assert res["totalDebitPaise"] == 4598705600
-    # Total credit excluding Opening Balance (46443766.47 - 7490874.79 = 38952891.68)
-    assert res["totalCreditPaise"] == 3895289168
+    # Liquid book: sheet debit (receipts from parties) is party credit
+    assert res["totalCreditPaise"] == 4598705600
+    # Total credit excluding Opening Balance (46443766.47 - 7490874.79 = 38952891.68) is party debit (payments)
+    assert res["totalDebitPaise"] == 3895289168
 
 
 def test_idempotent_import_and_balance_update():

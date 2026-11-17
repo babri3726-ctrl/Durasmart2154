@@ -587,7 +587,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
                   <th className="py-2.5 px-3">Date</th>
                   <th className="py-2.5 px-3">Type</th>
                   <th className="py-2.5 px-3">Vch No</th>
-                  <th className="py-2.5 px-3">Source / Ledger</th>
+                  <th className="py-2.5 px-3">Particulars (Account)</th>
                   <th className="py-2.5 px-3 text-right">Debit (+)</th>
                   <th className="py-2.5 px-3 text-right">Credit (-)</th>
                   <th className="py-2.5 px-3 text-center no-print">Actions</th>

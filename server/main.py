@@ -56,6 +56,7 @@ def seed_all_accounting_books() -> dict[str, Any]:
     from .voucher_parser import parse_accounting_workbook
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     candidates = [
+        "daybook.xlsx",
         "sales.xlsx", "hdfc.xlsx", "yes.xlsx",
         "cash.xlsx", "khan cash.xlsx", "cash gbd.xlsx",
         "S S Kalra Zira.xlsx"

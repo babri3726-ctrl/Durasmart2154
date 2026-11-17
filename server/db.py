@@ -1074,7 +1074,7 @@ def recompute_party_balance(party_id: str, conn = None):
         # Receipts & Credit Notes (money in from customer or returns reduce debtor balance)
         cur.execute(
             """
-            SELECT COALESCE(SUM(CASE WHEN credit_paise > 0 THEN credit_paise ELSE debit_paise END), 0)
+            SELECT COALESCE(SUM(credit_paise), 0)
             FROM vouchers
             WHERE party_id = ? AND (LOWER(voucher_type) = 'receipt' OR LOWER(voucher_type) LIKE '%credit note%')
             """,
@@ -1171,8 +1171,15 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
                     (vch_date, vch_type, party_name, party_id, dr_paise, cr_paise)
                 )
 
-            if cur.fetchone():
+            existing_match = cur.fetchone()
+            if existing_match:
                 skipped += 1
+                incoming_narration = (v.get("narration") or "").strip()
+                if incoming_narration:
+                    cur.execute(
+                        "UPDATE vouchers SET narration = ? WHERE id = ? AND (narration IS NULL OR narration = '')",
+                        (incoming_narration, existing_match[0])
+                    )
                 continue
 
             cur.execute(
