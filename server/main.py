@@ -190,7 +190,7 @@ def health_check():
         "status": "healthy",
         "service": "durasmart-api",
         "version": "v1.0.2-unified",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "database": "connected"
     }
 

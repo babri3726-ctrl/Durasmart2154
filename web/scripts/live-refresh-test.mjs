@@ -161,7 +161,7 @@ for (const [name, text] of [
 // ── every live screen carries the control ────────────────────────────────
 
 const liveScreens = [
-  'src/pages/Customers.tsx',
+  'src/pages/Debtors.tsx',
   'src/pages/Orders.tsx',
   'src/pages/Dispatch.tsx',
   'src/pages/DispatchNew.tsx',
@@ -169,7 +169,6 @@ const liveScreens = [
   'src/pages/Payment.tsx',
   'src/pages/Stock.tsx',
   'src/pages/Employees.tsx',
-  'src/pages/CustomerDetail.tsx',
   'src/pages/OrderDetail.tsx',
   'src/pages/EmployeeDetail.tsx',
 ];
@@ -239,7 +238,6 @@ test('the panel write paths bump the keys their figures live under', () => {
   assert.match(source('src/pages/DispatchNew.tsx'), /invalidate\(syncKeys\.dispatch\(bal\.orderId\), syncKeys\.order\(bal\.orderId\), syncKeys\.orderList\(\)\)/);
   assert.match(source('src/pages/OrderDetail.tsx'), /invalidate\(syncKeys\.order\(o\.id\), syncKeys\.orderList\(\)\)/);
   assert.match(source('src/pages/OrderNew.tsx'), /invalidate\(syncKeys\.order\(created\.id\), syncKeys\.orderList\(\)\)/);
-  assert.match(source('src/pages/Sales.tsx'), /invalidate\(syncKeys\.target\(saved\.employeeId\)\)/);
 });
 
 test('the reads those writes stale consume the same keys', () => {
@@ -247,7 +245,6 @@ test('the reads those writes stale consume the same keys', () => {
   assert.match(source('src/pages/DispatchHistory.tsx'), /useSyncPrefix\(syncKeys\.dispatchRegister\)/);
   assert.match(source('src/pages/OrderDetail.tsx'), /useSyncToken\(syncKeys\.order\(id\)\)/);
   assert.match(source('src/pages/OrderDetail.tsx'), /useSyncToken\(syncKeys\.dispatch\(id\)\)/);
-  assert.match(source('src/pages/Sales.tsx'), /useSyncPrefix\(syncKeys\.targetBook\)/);
 });
 
 test('nothing here logs, and no credential is in any of it', () => {

@@ -437,7 +437,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
       await deleteVoucher(v.id);
       reloadVouchers();
       invalidate(syncKeys.debtors, syncKeys.customers);
-    } catch (err) {
+    } catch {
       alert('Failed to delete voucher');
     }
   };
@@ -1750,8 +1750,8 @@ class SectionErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('SectionErrorBoundary caught:', error, errorInfo);
+  componentDidCatch(_error: Error, _errorInfo: ErrorInfo) {
+    // Error trapped by section boundary
   }
 
   render() {

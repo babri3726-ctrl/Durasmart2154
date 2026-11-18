@@ -63,8 +63,9 @@ export default function Sales() {
       await syncHrPbTargets();
       toast.success('HR-PB targets synchronized successfully!');
       loadData();
-    } catch (err: any) {
-      toast.error(`Sync failed: ${err.message || 'Error'}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error';
+      toast.error(`Sync failed: ${msg}`);
     } finally {
       setSyncing(false);
     }

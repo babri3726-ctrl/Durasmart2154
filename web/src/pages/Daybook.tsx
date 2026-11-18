@@ -75,8 +75,9 @@ export default function Daybook() {
       const buffer = await file.arrayBuffer();
       const prev = await previewPaymentWorkbook(new Uint8Array(buffer), file.name);
       setPreview(prev);
-    } catch (err: any) {
-      toast.error(`Preview failed: ${err.message || 'Invalid Day Book file'}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Invalid Day Book file';
+      toast.error(`Preview failed: ${msg}`);
       setSelectedFile(null);
     } finally {
       setPreviewing(false);
@@ -108,8 +109,9 @@ export default function Daybook() {
       setPreview(null);
       invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.vouchers);
       loadData();
-    } catch (err: any) {
-      toast.error(`Failed to apply Day Book: ${err.message || 'Error'}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error';
+      toast.error(`Failed to apply Day Book: ${msg}`);
     } finally {
       setApplying(false);
     }
@@ -123,8 +125,9 @@ export default function Daybook() {
       toast.success('Voucher deleted successfully');
       invalidate(syncKeys.debtors, syncKeys.customers);
       loadData();
-    } catch (err: any) {
-      toast.error(`Failed to delete voucher: ${err.message || 'Error'}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error';
+      toast.error(`Failed to delete voucher: ${msg}`);
     } finally {
       setDeleteBusyId(null);
     }

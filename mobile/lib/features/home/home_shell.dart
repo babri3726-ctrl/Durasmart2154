@@ -6,7 +6,7 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock_repository.dart';
 import '../../data/models.dart';
-import 'placeholder_screen.dart';
+import 'more_screen.dart';
 
 /// Root shell shown after sign-in: app bar (notifications + profile avatar),
 /// a bottom navigation with Home + More tabs, and the home dashboard.

@@ -561,7 +561,7 @@ test('the navigation is untouched and the stock section follows the mockup order
   const labels = [...shell.matchAll(/label: '([^']+)'/g)].map((match) => match[1]);
   assert.equal(labels.length, 18);
   assert.deepEqual(labels, [
-    'Dashboard', 'Sales', 'Payment', 'Marketing', 'Dispatch', 'Stock', 'Account',
+    'Dashboard', 'Sales', 'Payment', 'Marketing', 'Dispatch', 'Stock', 'Day Book',
     'Vaccant Area', 'Tour Plan', 'Task Alarm', 'Customers', 'Debtor List',
     'Provisional Debtors', 'Orders', 'New Order', 'Employees', 'Reports', 'Settings',
   ]);

@@ -5,9 +5,22 @@ from server.voucher_parser import is_accounting_workbook, parse_accounting_workb
 from server import db
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SALES_PATH = os.path.join(BASE_DIR, "sales.xlsx")
-HDFC_PATH = os.path.join(BASE_DIR, "hdfc.xlsx")
-YES_PATH = os.path.join(BASE_DIR, "yes.xlsx")
+
+
+def find_test_file(name: str) -> str:
+    for p in [
+        os.path.join(BASE_DIR, "data", "imports", name),
+        os.path.join(BASE_DIR, "data", name),
+        os.path.join(BASE_DIR, name),
+    ]:
+        if os.path.exists(p):
+            return p
+    return os.path.join(BASE_DIR, "data", "imports", name)
+
+
+SALES_PATH = find_test_file("sales.xlsx")
+HDFC_PATH = find_test_file("hdfc.xlsx")
+YES_PATH = find_test_file("yes.xlsx")
 
 
 def test_accounting_workbook_detection():
@@ -325,7 +338,7 @@ def test_daybook_parsing_and_import():
     from server.main import app
     from server.voucher_parser import parse_accounting_workbook
 
-    daybook_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "daybook.xlsx")
+    daybook_path = find_test_file("daybook.xlsx")
     if not os.path.exists(daybook_path):
         return
 
@@ -411,7 +424,7 @@ def test_comprehensive_deduplication():
 
 
 def test_discount_ledger_parsing_and_reconciliation():
-    discount_path = os.path.join(BASE_DIR, "discount.xlsx")
+    discount_path = find_test_file("discount.xlsx")
     if not os.path.exists(discount_path):
         pytest.skip("discount.xlsx not present in workspace")
 
@@ -435,7 +448,7 @@ def test_opening_balance_parsing_and_import():
     from server.main import app
     client = TestClient(app)
 
-    opening_path = os.path.join(BASE_DIR, "opening.xlsx")
+    opening_path = find_test_file("opening.xlsx")
     if not os.path.exists(opening_path):
         pytest.skip("opening.xlsx not present in workspace")
 
@@ -465,7 +478,7 @@ def test_opening_balance_parsing_and_import():
 
 
 def test_roundoff_ledger_parsing_and_reconciliation():
-    roundoff_path = os.path.join(BASE_DIR, "rounoff.xlsx")
+    roundoff_path = find_test_file("rounoff.xlsx")
     if not os.path.exists(roundoff_path):
         pytest.skip("rounoff.xlsx not present in workspace")
 
@@ -488,8 +501,8 @@ def test_roundoff_ledger_parsing_and_reconciliation():
 def test_identical_vouchers_preservation_and_reconciliation():
     """Verify that multiple legitimate identical vouchers on same date & amount are never dropped or deleted."""
     from server.voucher_parser import parse_accounting_workbook
-    daybook_path = os.path.join(BASE_DIR, "daybook.xlsx")
-    discount_path = os.path.join(BASE_DIR, "discount.xlsx")
+    daybook_path = find_test_file("daybook.xlsx")
+    discount_path = find_test_file("discount.xlsx")
     if not os.path.exists(daybook_path) or not os.path.exists(discount_path):
         pytest.skip("daybook.xlsx or discount.xlsx not present")
 
