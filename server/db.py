@@ -711,12 +711,20 @@ def load_all_persisted_state() -> dict[str, Any]:
             signed_paise = amt if (ob["direction"] or "debit").lower() in ("debit", "owes") else -amt
             ob_by_customer[ob["customer_id"]] = (signed_paise, ob["direction"] or "debit")
 
+        non_debtor_pattern = re.compile(
+            r"^(purchage|purchase|opening stock|closing stock|advance income tax|gst|tds|tcs|discount|round ?off|shares? market|sales less|import bill)|(\b(land|plot|kothi|fac|fec|factory|show ?room|farm house|flat|complex|comlex|hdfc p\.o|yes bank|hdfc bank|cash book)\b)",
+            re.IGNORECASE
+        )
+
         cur.execute("SELECT * FROM parties ORDER BY name ASC")
         parties = cur.fetchall()
 
         debtors = []
         seen_debtor_names = set()
         for p in parties:
+            p_name = p["name"] or ""
+            if non_debtor_pattern.search(p_name):
+                continue
             bal_paise = p["balance_paise"] or 0
             bal_rupees = round(bal_paise / 100.0, 2)
             norm_name = (p["name"] or "").strip().lower()
@@ -1798,12 +1806,18 @@ def import_opening_balances(filepath: str, as_of: str = "") -> dict[str, Any]:
         cur.execute("SELECT id, name FROM parties")
         existing_parties = cur.fetchall()
         import re
+        non_debtor_pattern = re.compile(
+            r"^(purchage|purchase|opening stock|closing stock|advance income tax|gst|tds|tcs|discount|round ?off|shares? market|sales less|import bill)|(\b(land|plot|kothi|fac|fec|factory|show ?room|farm house|flat|complex|comlex|hdfc p\.o|yes bank|hdfc bank|cash book)\b)",
+            re.IGNORECASE
+        )
         norm = lambda s: re.sub(r'[^a-z0-9]', '', (s or "").lower())
         p_by_norm = {norm(p[1]): p[0] for p in existing_parties if p[1]}
         p_by_exact = {(p[1] or "").strip().lower(): p[0] for p in existing_parties if p[1]}
 
         for e in entries:
             name = e["name"]
+            if non_debtor_pattern.search(name or ""):
+                continue
             norm_name = norm(name)
             party_id = p_by_exact.get(name.lower()) or p_by_norm.get(norm_name)
 

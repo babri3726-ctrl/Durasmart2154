@@ -974,7 +974,26 @@ def get_dashboard_summary(from_date: str | None = Query(None, alias="from"), to_
         if to_date and p_date > to_date:
             continue
         in_window_payments.append(p)
-    collected_paise = sum(int(p.get("amountPaise", 0)) for p in in_window_payments)
+    # In-window receipts from vouchers table (Bank and Day Book receipts)
+    try:
+        with db.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(credit_paise), 0)
+                FROM vouchers
+                WHERE LOWER(voucher_type) = 'receipt'
+                  AND (? IS NULL OR voucher_date >= ?)
+                  AND (? IS NULL OR voucher_date <= ?)
+                """,
+                (from_date, from_date, to_date, to_date)
+            )
+            v_rec = cur.fetchone()
+            voucher_collected_paise = v_rec[0] if v_rec else 0
+    except Exception:
+        voucher_collected_paise = 0
+
+    collected_paise = sum(int(p.get("amountPaise", 0)) for p in in_window_payments) + voucher_collected_paise
 
     # Current Balances
     debtors = STATE.get("debtors", [])
@@ -4361,7 +4380,7 @@ async def preview_debtor_bytes(request: Request, fileName: str | None = "HR-PB.x
             if section == "payments" and book_src == "Sales Register":
                 raise HTTPException(
                     status_code=400,
-                    detail="This section accepts Bank or Cash statement workbooks (HDFC, Yes Bank, Cash Book, Khan Cash, Cash GBD) or Day Books. You uploaded Sales Register."
+                    detail="This section accepts Bank or Cash statement workbooks (HDFC, Yes Bank, Cash Book, Khan Cash, Cash GBD) or Day Books. You uploaded Sales Register. Please upload sales registers in the Debtor section."
                 )
             if section == "payments" and book_src not in ALLOWED_PAYMENT_BOOKS and book_src != "Day Book":
                 raise HTTPException(
@@ -4581,7 +4600,7 @@ async def apply_debtor_bytes(
             if section == "payments" and book_src == "Sales Register":
                 raise HTTPException(
                     status_code=400,
-                    detail="This section accepts Bank or Cash statement workbooks (HDFC, Yes Bank, Cash Book, Khan Cash, Cash GBD) or Day Books. You uploaded Sales Register."
+                    detail="This section accepts Bank or Cash statement workbooks (HDFC, Yes Bank, Cash Book, Khan Cash, Cash GBD) or Day Books. You uploaded Sales Register. Please upload sales registers in the Debtor section."
                 )
             if section == "payments" and book_src not in ALLOWED_PAYMENT_BOOKS and book_src != "Day Book":
                 raise HTTPException(

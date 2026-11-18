@@ -686,11 +686,16 @@ class TestServerApi(unittest.TestCase):
         names = [d["name"].strip().lower() for d in top_debtors_base]
         self.assertEqual(len(names), len(set(names)), "topDebtors must contain strictly unique dealer names")
 
-        # Find or use KALRA TRADERS
-        dealer_name = "TEST FIXTURE CUSTOMER"
-        cust_id = "TEST-CUST-FIXTURE-01"
-        base_dealer_entry = next((d for d in top_debtors_base if d["name"].strip().lower() == dealer_name.lower()), None)
-        base_bal = float(base_dealer_entry["balance"]) if base_dealer_entry else 0.0
+        # Use existing top dealer from topDebtors
+        if top_debtors_base:
+            base_dealer_entry = top_debtors_base[0]
+            dealer_name = base_dealer_entry["name"]
+            cust_id = base_dealer_entry["id"]
+            base_bal = float(base_dealer_entry["balance"])
+        else:
+            dealer_name = "KALRA TRADERS/ STEEL DERABASSI"
+            cust_id = "DEBTOR-HR-001"
+            base_bal = 0.0
 
         o_id = None
         p_id = None

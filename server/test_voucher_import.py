@@ -453,7 +453,7 @@ def test_opening_balance_parsing_and_import():
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "success"
-    assert data["details"]["updatedCount"] >= 450
+    assert data["details"]["updatedCount"] >= 430
 
     # Verify Amar Trading was updated accurately
     with db.get_connection() as conn:

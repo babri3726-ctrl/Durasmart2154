@@ -218,9 +218,10 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
     .filter((v) => v.voucher_type.toLowerCase() === 'journal')
     .reduce((sum, v) => sum + (v.debit_paise || 0), 0);
 
-  const currentOutstandingPaise = debtor.balance !== undefined
-    ? Math.round(Number(debtor.balance) * 100)
-    : Math.max(0, currentOpeningPaise + totalSalesDebit + totalJournalDebit - totalReceipts - totalJournalCredit);
+  const calculatedOutstandingPaise = Math.max(0, currentOpeningPaise + totalSalesDebit + totalJournalDebit - totalReceipts - totalJournalCredit);
+  const currentOutstandingPaise = vouchers.length > 0 || currentOpeningPaise !== 0
+    ? calculatedOutstandingPaise
+    : (debtor.balance !== undefined ? Math.round(Number(debtor.balance) * 100) : 0);
 
   // FIFO Aging Calculation
   const aging = useMemo(() => {

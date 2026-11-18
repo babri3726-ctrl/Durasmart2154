@@ -41,7 +41,7 @@ export function KpiCard({
       <div className={`absolute -right-6 -top-6 h-24 w-24 rounded-full bg-gradient-to-br ${gradient} opacity-15`} />
       <div className={`mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${gradient} text-white shadow-card`}>{icon}</div>
       <p className="text-[11px] font-extrabold uppercase tracking-wide text-muted">{label}</p>
-      <p className="mt-1 text-[23px] font-black leading-tight tracking-tight text-ink">{value}</p>
+      <p className="mt-1 text-lg font-black leading-tight tracking-tight text-ink sm:text-xl xl:text-[22px] truncate" title={value}>{value}</p>
       {hint && <p className="mt-1 text-[11px] text-faint">{hint}</p>}
     </div>
   );
