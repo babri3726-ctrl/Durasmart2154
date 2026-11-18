@@ -180,6 +180,29 @@ class CustomerDetailScreen extends StatelessWidget {
           const SizedBox(height: 14),
           SizedBox(
             width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () => Navigator.of(context).pushNamed(
+                '/ledger',
+                arguments: {'customerId': customer.id},
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.blue,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              icon: const Icon(Icons.receipt_long_rounded, size: 20),
+              label: const Text(
+                'View Ledger Statement & Vouchers',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
             child: OutlinedButton.icon(
               onPressed: () => _openWhatsAppSheet(
                 context,

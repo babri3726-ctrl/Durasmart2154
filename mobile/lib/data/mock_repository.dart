@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 
 import '../core/api_sync_service.dart';
@@ -11,6 +14,7 @@ import 'models.dart';
 class MockRepository extends ChangeNotifier {
   MockRepository() {
     _seed();
+    _loadDebtorsCache();
     ApiSyncService.resolveWorkingHost().then((host) {
       if (host != null) {
         syncWithBackend();
@@ -309,7 +313,42 @@ class MockRepository extends ChangeNotifier {
         }
       }
 
+      _saveDebtorsCache();
       notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<void> _saveDebtorsCache() async {
+    try {
+      final file = File('${Directory.systemTemp.path}/durasmart_debtors_cache.json');
+      final list = debtors.map((d) => d.toJson()).toList();
+      await file.writeAsString(jsonEncode(list));
+    } catch (_) {}
+  }
+
+  Future<void> _loadDebtorsCache() async {
+    try {
+      final file = File('${Directory.systemTemp.path}/durasmart_debtors_cache.json');
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        final list = jsonDecode(content);
+        if (list is List) {
+          final cached = list
+              .map((e) => DebtorItem.fromJson(e as Map<String, dynamic>))
+              .toList();
+          if (cached.isNotEmpty) {
+            for (final d in cached) {
+              final idx = debtors.indexWhere((x) => x.id == d.id);
+              if (idx != -1) {
+                debtors[idx] = d;
+              } else {
+                debtors.add(d);
+              }
+            }
+            notifyListeners();
+          }
+        }
+      }
     } catch (_) {}
   }
 

@@ -12,8 +12,6 @@
  *  reaches the components.
  */
 
-import { mockRequest } from './mock/router';
-
 const RAW_BASE = (
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
   'https://durasmart2154.onrender.com'
@@ -27,7 +25,8 @@ export const realBackendConfigured = (): boolean => API_BASE_URL !== '';
 /** What `serverHost()` shows when there is no backend: the name the built-in store answers to. */
 export const DATA_SOURCE_LABEL = 'demo.local';
 
-export function transportFetch(path: string, init: RequestInit): Promise<Response> {
+export async function transportFetch(path: string, init: RequestInit): Promise<Response> {
   if (realBackendConfigured()) return fetch(`${API_BASE_URL}/api/v1${path}`, init);
+  const { mockRequest } = await import('./mock/router');
   return mockRequest(path, init);
 }
