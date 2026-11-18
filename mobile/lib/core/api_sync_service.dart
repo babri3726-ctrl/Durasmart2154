@@ -53,9 +53,9 @@ class ApiSyncService {
     if (_cachedWorkingHost != null) {
       try {
         final client = HttpClient()
-          ..connectionTimeout = const Duration(milliseconds: 1000);
+          ..connectionTimeout = const Duration(milliseconds: 3000);
         final req = await client.getUrl(
-          Uri.parse('$_cachedWorkingHost/api/v1/stock/summary'),
+          Uri.parse('$_cachedWorkingHost/health'),
         );
         final resp = await req.close();
         if (resp.statusCode == 200) return _cachedWorkingHost;
@@ -65,9 +65,9 @@ class ApiSyncService {
     for (final host in candidateHosts) {
       try {
         final client = HttpClient()
-          ..connectionTimeout = const Duration(milliseconds: 1200);
+          ..connectionTimeout = const Duration(milliseconds: 4000);
         final req = await client.getUrl(
-          Uri.parse('$host/api/v1/stock/summary'),
+          Uri.parse('$host/health'),
         );
         final resp = await req.close();
         if (resp.statusCode == 200) {
@@ -474,11 +474,19 @@ class ApiSyncService {
       }
       params.add('pageSize=2000');
       final query = '?${params.join('&')}';
-      final req = await client.getUrl(Uri.parse('$host/api/v1/customers$query'));
+      // Query /api/v1/debtors first as authoritative master with live balances, fallback to /api/v1/customers
+      var req = await client.getUrl(Uri.parse('$host/api/v1/debtors$query'));
       if (authToken != null) {
         req.headers.set('Authorization', 'Bearer $authToken');
       }
-      final resp = await req.close();
+      var resp = await req.close();
+      if (resp.statusCode != 200) {
+        req = await client.getUrl(Uri.parse('$host/api/v1/customers$query'));
+        if (authToken != null) {
+          req.headers.set('Authorization', 'Bearer $authToken');
+        }
+        resp = await req.close();
+      }
       if (resp.statusCode == 200) {
         final body = await resp.transform(utf8.decoder).join();
         final data = jsonDecode(body);

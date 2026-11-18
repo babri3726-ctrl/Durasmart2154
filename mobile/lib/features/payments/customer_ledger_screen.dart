@@ -90,13 +90,15 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
     final collected = hasVouchers
         ? voucherReceiptsCredit
         : payments.fold(0.0, (sum, payment) => sum + payment.amount);
-    final outstanding = hasVouchers
-        ? (debtor?.balance ??
-            (openingBalance +
-                voucherSalesDebit +
-                voucherJournalDebit -
-                voucherReceiptsCredit))
-        : repo.customerOutstanding(customer.id);
+    final outstanding = (debtor != null && debtor.balance > 0)
+        ? debtor.balance
+        : (hasVouchers
+            ? (openingBalance +
+                    voucherSalesDebit +
+                    voucherJournalDebit -
+                    voucherReceiptsCredit)
+                .clamp(0.0, double.infinity)
+            : repo.customerOutstanding(customer.id));
     final overdue = repo.customerOverdue(customer.id);
 
     // FIFO Aging calculation

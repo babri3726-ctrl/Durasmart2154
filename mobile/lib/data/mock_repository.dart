@@ -207,14 +207,15 @@ class MockRepository extends ChangeNotifier {
         for (var i = 0; i < remoteCusts.length; i++) {
           final raw = remoteCusts[i];
           final c = parsed[i];
-          final idx = customers.indexWhere((existing) => existing.id == c.id);
+          final cName = c.name.toLowerCase().trim();
+          final idx = customers.indexWhere((existing) => existing.id == c.id || existing.name.toLowerCase().trim() == cName);
           if (idx != -1) {
             customers[idx] = c;
           } else {
             customers.add(c);
           }
           final debtorObj = DebtorItem.fromJson(raw);
-          final dIdx = debtors.indexWhere((existing) => existing.id == c.id);
+          final dIdx = debtors.indexWhere((existing) => existing.id == c.id || existing.name.toLowerCase().trim() == cName);
           if (dIdx != -1) {
             debtors[dIdx] = debtorObj;
           } else {

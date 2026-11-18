@@ -1405,7 +1405,21 @@ def get_customers(
     page: int = 1,
     pageSize: int = 50
 ):
+    try:
+        persisted = db.load_all_persisted_state()
+        if persisted.get("debtors"):
+            STATE["debtors"] = persisted["debtors"]
+            STATE["customers"] = persisted["debtors"]
+    except Exception:
+        pass
+
     items = STATE["customers"]
+    for c in items:
+        bal = float(c.get("balance", 0.0) or 0.0)
+        c["balance"] = bal
+        c["balance_formatted"] = f"{bal:.2f}"
+        c["outstandingPaise"] = int(round(bal * 100))
+        c["debitPaise"] = int(round(bal * 100))
     if q:
         q_l = q.lower().strip()
         items = [
