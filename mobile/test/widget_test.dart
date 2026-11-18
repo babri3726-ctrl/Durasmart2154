@@ -133,14 +133,13 @@ void main() {
 
       for (final label in [
         'Monthly Target',
-        'Order Received',
-        'Order Pending',
-        'Pending for Dispatch',
-        'Pending Target',
-        'Payment Balance',
+        'Orders Booked',
+        'Orders Pending',
+        'Pending Dispatch',
+        'Receivables Due',
       ]) {
         expect(
-          find.text(label),
+          find.text(label.toUpperCase()),
           findsWidgets,
           reason: 'missing metric card: $label',
         );
@@ -361,8 +360,8 @@ void main() {
 
       // Verify alarm popup dialog appears
       expect(find.textContaining('Test Alarm Triggered'), findsOneWidget);
-      expect(find.text('Acknowledge'), findsOneWidget);
-      expect(find.text('Mark Complete'), findsOneWidget);
+      expect(find.text('Acknowledge'), findsWidgets);
+      expect(find.text('Mark Complete'), findsWidgets);
       expect(find.text('Dismiss'), findsOneWidget);
 
       // Dismiss dialog

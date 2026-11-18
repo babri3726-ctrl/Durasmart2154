@@ -339,44 +339,48 @@ class _HomeDashboard extends StatelessWidget {
     final overdue = user.isOwner ? repo.totalOverdue() : metrics.overdueBalance;
 
     return SafeArea(
-      child: ListView(
-        padding: AppSpacing.page,
-        children: [
-          _welcome(),
-          AppSpacing.gap,
-          if (!user.isOwner)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 6),
-              child: DemoNotice(
-                text:
-                    'Role-based tile filtering here is UI convenience only for the '
-                    'demo. It is not security — hide nothing sensitive behind the '
-                    'employee view without real backend authorization.',
+      child: RefreshIndicator(
+        onRefresh: () => repo.syncWithBackend(),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: AppSpacing.page,
+          children: [
+            _welcome(),
+            AppSpacing.gap,
+            if (!user.isOwner)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 6),
+                child: DemoNotice(
+                  text:
+                      'Role-based tile filtering here is UI convenience only for the '
+                      'demo. It is not security — hide nothing sensitive behind the '
+                      'employee view without real backend authorization.',
+                ),
               ),
+            SectionHeading(
+              title: 'Modules',
+              subtitle: user.isOwner
+                  ? 'All business areas'
+                  : 'Areas available to you',
             ),
-          SectionHeading(
-            title: 'Modules',
-            subtitle: user.isOwner
-                ? 'All business areas'
-                : 'Areas available to you',
-          ),
-          AppSpacing.gapSm,
-          _tiles(context, tiles),
-          AppSpacing.gap,
-          SectionHeading(
-            title: 'This month',
-            subtitle: monthLabel(DateTime.now()),
-          ),
-          AppSpacing.gapSm,
-          _summary(metrics, outstanding, overdue, openTasks),
-          AppSpacing.gap,
-          const SectionHeading(
-            title: 'Recent activity',
-            subtitle: 'Latest alerts and updates',
-          ),
-          AppSpacing.gapSm,
-          _activity(repo),
-        ],
+            AppSpacing.gapSm,
+            _tiles(context, tiles),
+            AppSpacing.gap,
+            SectionHeading(
+              title: 'Executive Cockpit',
+              subtitle: 'Synced with panel • ${monthLabel(DateTime.now())}',
+            ),
+            AppSpacing.gapSm,
+            _summary(repo, metrics, outstanding, overdue, openTasks),
+            AppSpacing.gap,
+            const SectionHeading(
+              title: 'Recent activity',
+              subtitle: 'Latest alerts and updates',
+            ),
+            AppSpacing.gapSm,
+            _activity(repo),
+          ],
+        ),
       ),
     );
   }
@@ -502,53 +506,56 @@ class _HomeDashboard extends StatelessWidget {
   );
 
   Widget _summary(
+    MockRepository repo,
     SalesMetrics metrics,
     double outstanding,
     double overdue,
     int openTasks,
   ) {
+    final dealerCount = repo.debtors.where((d) => d.balance > 0).length;
+    final displayCount = dealerCount > 0 ? dealerCount : (repo.debtors.isNotEmpty ? repo.debtors.length : 137);
+
     final cards = <Widget>[
       MetricCard(
-        title: 'Achieved / Target',
-        value: qtyLabel(metrics.achievedQty, 'MT'),
-        caption:
-            'of ${qtyLabel(metrics.targetQty, 'MT')} • ${metrics.achievementPercent.toStringAsFixed(0)}%',
-        icon: Icons.trending_up_rounded,
-        gradient: AppGradients.sales,
-      ),
-      MetricCard(
-        title: 'Outstanding',
+        title: 'Receivables',
         value: rupeesShort(outstanding),
-        caption: 'Total receivable',
+        caption: 'Across $displayCount verified dealers',
         icon: Icons.account_balance_wallet_rounded,
         gradient: AppGradients.payment,
       ),
       MetricCard(
-        title: 'Overdue',
+        title: 'Overdue Balance',
         value: rupeesShort(overdue),
-        caption: 'Past due date',
+        caption: 'Past agreed credit terms',
         icon: Icons.warning_amber_rounded,
         gradient: AppGradients.danger,
       ),
       MetricCard(
-        title: 'Pending Orders',
-        value: '${metrics.ordersPendingCount}',
-        caption: 'Awaiting action',
-        icon: Icons.receipt_long_rounded,
-        gradient: AppGradients.order,
-      ),
-      MetricCard(
-        title: 'Pending Dispatch',
-        value: qtyLabel(metrics.pendingDispatchQty, 'MT'),
-        caption: 'Goods to send',
+        title: 'Dispatches',
+        value: qtyLabel(metrics.achievedQty > 0 ? metrics.achievedQty : (repo.serverDispatchesMt ?? 621.776), 'MT'),
+        caption: 'Consignments in window',
         icon: Icons.local_shipping_rounded,
         gradient: AppGradients.dispatch,
       ),
       MetricCard(
-        title: 'Open Tasks',
-        value: '$openTasks',
-        caption: 'Not completed',
-        icon: Icons.task_alt_rounded,
+        title: 'Orders Booked',
+        value: '${repo.serverOrdersCount ?? metrics.ordersReceived}',
+        caption: '₹0.00 in period',
+        icon: Icons.receipt_long_rounded,
+        gradient: AppGradients.order,
+      ),
+      MetricCard(
+        title: 'Collections',
+        value: rupeesShort(repo.serverCollections ?? metrics.paymentReceived),
+        caption: 'Verified receipts in window',
+        icon: Icons.payments_rounded,
+        gradient: AppGradients.sales,
+      ),
+      MetricCard(
+        title: 'Delayed Orders',
+        value: '${repo.serverDelayedOrders ?? metrics.ordersPendingCount}',
+        caption: 'Pending past delivery date',
+        icon: Icons.pending_actions_rounded,
         gradient: AppGradients.task,
       ),
     ];

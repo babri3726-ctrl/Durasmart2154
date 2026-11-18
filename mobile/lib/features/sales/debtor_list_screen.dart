@@ -296,6 +296,14 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
       return true;
     }).toList();
 
+    items.sort((a, b) {
+      if (a.balance > 0 && b.balance <= 0) return -1;
+      if (b.balance > 0 && a.balance <= 0) return 1;
+      final cmp = b.balance.compareTo(a.balance);
+      if (cmp != 0) return cmp;
+      return a.name.compareTo(b.name);
+    });
+
     final double totalReceivables = items.fold(0.0, (sum, d) => sum + d.balance);
     final int punjabCount = repo.debtors.where((d) => d.state.toLowerCase() == 'punjab').length;
     final int haryanaCount = repo.debtors.where((d) => d.state.toLowerCase() == 'haryana').length;

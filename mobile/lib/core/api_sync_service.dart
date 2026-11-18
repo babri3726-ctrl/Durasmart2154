@@ -64,8 +64,10 @@ class ApiSyncService {
 
     for (final host in candidateHosts) {
       try {
+        final isRender = host.contains('onrender.com');
+        final timeoutMs = isRender ? 8000 : 3000;
         final client = HttpClient()
-          ..connectionTimeout = const Duration(milliseconds: 4000);
+          ..connectionTimeout = Duration(milliseconds: timeoutMs);
         final req = await client.getUrl(
           Uri.parse('$host/health'),
         );
@@ -77,6 +79,30 @@ class ApiSyncService {
       } catch (_) {}
     }
     return null;
+  }
+
+  /// Fetches executive cockpit summary from /api/v1/dashboard/summary
+  static Future<Map<String, dynamic>?> fetchDashboardSummary() async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+      final req = await client.getUrl(Uri.parse('$host/api/v1/dashboard/summary'));
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data is Map<String, dynamic>) {
+          return data;
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Synchronizes an order to the backend /api/v1/orders

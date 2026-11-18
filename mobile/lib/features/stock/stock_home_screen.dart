@@ -639,7 +639,12 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                 ),
                 const SizedBox(height: 12),
                 _provenanceRow('Workbook', _filename),
-                _provenanceRow('SHA256', '${_fileSha256.substring(0, 16)}...'),
+                _provenanceRow(
+                  'SHA256',
+                  _fileSha256.length >= 16
+                      ? '${_fileSha256.substring(0, 16)}...'
+                      : (_fileSha256.isEmpty ? 'Pending' : _fileSha256),
+                ),
                 _provenanceRow('Sheets Read', _sheetsRead.join(', ')),
                 _provenanceRow('Total Items', '$_itemCount validated rows'),
                 _provenanceRow(

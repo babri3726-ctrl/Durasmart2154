@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -24,7 +26,9 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
   @override
   void initState() {
     super.initState();
-    _loadVouchers();
+    if (!Platform.environment.containsKey('FLUTTER_TEST')) {
+      _loadVouchers();
+    }
   }
 
   Future<void> _loadVouchers() async {
@@ -390,40 +394,36 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      SectionHeading(
-                        title: hasVouchers ? 'Day Book Vouchers' : 'Invoice Ledger',
-                        subtitle: hasVouchers
-                            ? '${filteredVouchers.length} vouchers recorded'
-                            : '${orders.length} order invoice(s)',
-                      ),
-                      if (hasVouchers)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.background,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: AppColors.line),
-                          ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<String>(
-                              value: _voucherFilter,
-                              isDense: true,
-                              style: AppText.caption.copyWith(fontWeight: FontWeight.bold),
-                              items: const [
-                                DropdownMenuItem(value: 'All', child: Text('All')),
-                                DropdownMenuItem(value: 'Sales', child: Text('Sales')),
-                                DropdownMenuItem(value: 'Receipts', child: Text('Credits')),
-                              ],
-                              onChanged: (v) {
-                                if (v != null) setState(() => _voucherFilter = v);
-                              },
+                  SectionHeading(
+                    title: hasVouchers ? 'Day Book Vouchers' : 'Invoice Ledger',
+                    subtitle: hasVouchers
+                        ? '${filteredVouchers.length} vouchers recorded'
+                        : '${orders.length} order invoice(s)',
+                    trailing: hasVouchers
+                        ? Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppColors.background,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: AppColors.line),
                             ),
-                          ),
-                        ),
-                    ],
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<String>(
+                                value: _voucherFilter,
+                                isDense: true,
+                                style: AppText.caption.copyWith(fontWeight: FontWeight.bold),
+                                items: const [
+                                  DropdownMenuItem(value: 'All', child: Text('All')),
+                                  DropdownMenuItem(value: 'Sales', child: Text('Sales')),
+                                  DropdownMenuItem(value: 'Receipts', child: Text('Credits')),
+                                ],
+                                onChanged: (v) {
+                                  if (v != null) setState(() => _voucherFilter = v);
+                                },
+                              ),
+                            ),
+                          )
+                        : null,
                   ),
                   const SizedBox(height: 10),
                   if (_loadingVouchers)
@@ -472,7 +472,12 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                                   ],
                                   strong: true,
                                 ),
-                                const Divider(height: 14),
+                                Container(
+                                  height: 1,
+                                  width: 700,
+                                  margin: const EdgeInsets.symmetric(vertical: 6),
+                                  color: AppColors.line,
+                                ),
                                 for (final order in orders)
                                   _LedgerRow(
                                     cells: _orderCells(order, repo),

@@ -690,6 +690,32 @@ class DebtorItem {
   String get balanceFormatted => '₹${balance.toStringAsFixed(2)}';
 
   factory DebtorItem.fromJson(Map<String, dynamic> json) {
+    double parsedBal = 0.0;
+    if (json['balance'] is num) {
+      parsedBal = (json['balance'] as num).toDouble();
+    } else if (json['balance'] != null) {
+      parsedBal = double.tryParse(json['balance'].toString().replaceAll(',', '').trim()) ?? 0.0;
+    }
+    if (parsedBal == 0.0) {
+      if (json['outstandingPaise'] is num) {
+        parsedBal = (json['outstandingPaise'] as num).toDouble() / 100.0;
+      } else if (json['debitPaise'] is num) {
+        parsedBal = (json['debitPaise'] as num).toDouble() / 100.0;
+      } else if (json['balance_paise'] is num) {
+        parsedBal = (json['balance_paise'] as num).toDouble() / 100.0;
+      }
+    }
+
+    double parsedOpenBal = 0.0;
+    if (json['openingBalance'] is num) {
+      parsedOpenBal = (json['openingBalance'] as num).toDouble();
+    } else if (json['openingBalance'] != null) {
+      parsedOpenBal = double.tryParse(json['openingBalance'].toString().replaceAll(',', '').trim()) ?? 0.0;
+    }
+    if (parsedOpenBal == 0.0 && json['openingPaise'] is num) {
+      parsedOpenBal = (json['openingPaise'] as num).toDouble() / 100.0;
+    }
+
     return DebtorItem(
       id: json['id']?.toString() ?? json['customerId']?.toString() ?? '',
       name: json['name']?.toString() ?? json['customerName']?.toString() ?? '',
@@ -697,12 +723,8 @@ class DebtorItem {
       city: json['city']?.toString() ?? '',
       district: json['district']?.toString() ?? '',
       salesperson: json['salesperson']?.toString() ?? 'Unassigned',
-      balance: (json['balance'] is num)
-          ? (json['balance'] as num).toDouble()
-          : (double.tryParse(json['balance']?.toString() ?? '0') ?? 0.0),
-      openingBalance: (json['openingBalance'] is num)
-          ? (json['openingBalance'] as num).toDouble()
-          : (double.tryParse(json['openingBalance']?.toString() ?? '0') ?? 0.0),
+      balance: parsedBal,
+      openingBalance: parsedOpenBal,
       status: json['status']?.toString() ?? 'active',
     );
   }

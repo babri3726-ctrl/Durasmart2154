@@ -28,7 +28,50 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
 
   List<PaymentDashboardRow> _scopeRows(MockRepository repo) {
     final rows = <PaymentDashboardRow>[];
+    final seen = <String>{};
+
+    // 1. Process all live debtors with balances from SQLite / HR-PB
+    for (final d in repo.debtors) {
+      if (d.balance <= 0) continue;
+      final sp = repo.employees.where(
+        (e) =>
+            e.name.toLowerCase().trim() == d.salesperson.toLowerCase().trim() ||
+            e.id.toLowerCase().trim() == d.salesperson.toLowerCase().trim(),
+      ).firstOrNull;
+      if (_salespersonId != null &&
+          sp?.id != _salespersonId &&
+          d.salesperson.toLowerCase().trim() !=
+              repo.salespersonName(_salespersonId!).toLowerCase().trim()) {
+        continue;
+      }
+      seen.add(d.id.toLowerCase().trim());
+      seen.add(d.name.toLowerCase().trim());
+      rows.add(
+        PaymentDashboardRow(
+          customer: repo.customerById(d.id) ??
+              Customer(
+                id: d.id,
+                name: d.name,
+                city: d.city.isNotEmpty ? d.city : (d.district.isNotEmpty ? d.district : d.state),
+                mobile: '919800000000',
+                salespersonId: sp?.id ?? 'EMP-SP-01',
+                type: 'Dealer',
+              ),
+          outstanding: d.balance,
+          overdue: d.balance,
+          overdueDays: 30,
+          salespersonName: d.salesperson.isNotEmpty ? d.salesperson : (sp?.name ?? 'Unassigned'),
+          lastPaymentDate: DateTime(2026, 10, 23),
+        ),
+      );
+    }
+
+    // 2. Process any remaining customers with order-based balances
     for (final customer in repo.customers) {
+      if (seen.contains(customer.id.toLowerCase().trim()) ||
+          seen.contains(customer.name.toLowerCase().trim())) {
+        continue;
+      }
       if (_salespersonId != null && customer.salespersonId != _salespersonId) {
         continue;
       }

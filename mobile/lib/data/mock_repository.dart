@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -15,12 +16,39 @@ class MockRepository extends ChangeNotifier {
   MockRepository() {
     _seed();
     _loadDebtorsCache();
+    if (!Platform.environment.containsKey('FLUTTER_TEST')) {
+      _attemptInitialSync();
+      _syncTimer = Timer.periodic(const Duration(seconds: 30), (_) => syncWithBackend());
+    }
+  }
+
+  void _attemptInitialSync() {
     ApiSyncService.resolveWorkingHost().then((host) {
       if (host != null) {
         syncWithBackend();
+      } else {
+        Future.delayed(const Duration(seconds: 4), () {
+          ApiSyncService.resolveWorkingHost().then((h) {
+            if (h != null) syncWithBackend();
+          });
+        });
       }
     }).catchError((_) {});
   }
+
+  @override
+  void dispose() {
+    _syncTimer?.cancel();
+    super.dispose();
+  }
+
+  double? serverOutstanding;
+  double? serverOverdue;
+  double? serverDispatchesMt;
+  int? serverDelayedOrders;
+  int? serverOrdersCount;
+  double? serverCollections;
+  Timer? _syncTimer;
 
   static const ownerPasscode = 'Ishu@DuraSmart#2026';
   static const employeePasscode = 'DuraSmart@2026';
@@ -186,6 +214,32 @@ class MockRepository extends ChangeNotifier {
   /// Live two-way sync with backend REST API
   Future<void> syncWithBackend() async {
     try {
+      // 0. Dashboard Cockpit & Executive Summary
+      final summary = await ApiSyncService.fetchDashboardSummary();
+      if (summary != null) {
+        if (summary['outstandingPaise'] is num) {
+          serverOutstanding = (summary['outstandingPaise'] as num).toDouble() / 100.0;
+        }
+        if (summary['overduePaise'] is num) {
+          serverOverdue = (summary['overduePaise'] as num).toDouble() / 100.0;
+        }
+        if (summary['dispatched'] is List && (summary['dispatched'] as List).isNotEmpty) {
+          final firstDisp = (summary['dispatched'] as List).first;
+          if (firstDisp is Map && firstDisp['dispatchedQuantity'] is num) {
+            serverDispatchesMt = (firstDisp['dispatchedQuantity'] as num).toDouble();
+          }
+        }
+        if (summary['collectedPaise'] is num) {
+          serverCollections = (summary['collectedPaise'] as num).toDouble() / 100.0;
+        }
+        if (summary['ordersCount'] is num) {
+          serverOrdersCount = (summary['ordersCount'] as num).toInt();
+        }
+        if (summary['delayedOrderCount'] is num) {
+          serverDelayedOrders = (summary['delayedOrderCount'] as num).toInt();
+        }
+      }
+
       // 1. Employees
       final remoteEmps = await ApiSyncService.fetchEmployees();
       if (remoteEmps != null && remoteEmps.isNotEmpty) {
@@ -203,6 +257,8 @@ class MockRepository extends ChangeNotifier {
       // 2. Customers & Debtors
       final remoteCusts = await ApiSyncService.fetchCustomers();
       if (remoteCusts != null && remoteCusts.isNotEmpty) {
+        // If live debtors arrived from backend, purge dummy 0-balance seed records
+        debtors.removeWhere((d) => d.id.startsWith('DEBTOR-00') && d.balance == 0.0);
         final parsed = remoteCusts.map(Customer.fromJson).toList();
         for (var i = 0; i < remoteCusts.length; i++) {
           final raw = remoteCusts[i];
@@ -322,8 +378,16 @@ class MockRepository extends ChangeNotifier {
   Future<void> _saveDebtorsCache() async {
     try {
       final file = File('${Directory.systemTemp.path}/durasmart_debtors_cache.json');
-      final list = debtors.map((d) => d.toJson()).toList();
-      await file.writeAsString(jsonEncode(list));
+      final payload = {
+        'serverOutstanding': serverOutstanding,
+        'serverOverdue': serverOverdue,
+        'serverDispatchesMt': serverDispatchesMt,
+        'serverCollections': serverCollections,
+        'serverDelayedOrders': serverDelayedOrders,
+        'serverOrdersCount': serverOrdersCount,
+        'debtors': debtors.map((d) => d.toJson()).toList(),
+      };
+      await file.writeAsString(jsonEncode(payload));
     } catch (_) {}
   }
 
@@ -332,14 +396,52 @@ class MockRepository extends ChangeNotifier {
       final file = File('${Directory.systemTemp.path}/durasmart_debtors_cache.json');
       if (await file.exists()) {
         final content = await file.readAsString();
-        final list = jsonDecode(content);
-        if (list is List) {
-          final cached = list
+        final decoded = jsonDecode(content);
+        if (decoded is Map<String, dynamic>) {
+          if (decoded['serverOutstanding'] is num) {
+            serverOutstanding = (decoded['serverOutstanding'] as num).toDouble();
+          }
+          if (decoded['serverOverdue'] is num) {
+            serverOverdue = (decoded['serverOverdue'] as num).toDouble();
+          }
+          if (decoded['serverDispatchesMt'] is num) {
+            serverDispatchesMt = (decoded['serverDispatchesMt'] as num).toDouble();
+          }
+          if (decoded['serverCollections'] is num) {
+            serverCollections = (decoded['serverCollections'] as num).toDouble();
+          }
+          if (decoded['serverDelayedOrders'] is num) {
+            serverDelayedOrders = (decoded['serverDelayedOrders'] as num).toInt();
+          }
+          if (decoded['serverOrdersCount'] is num) {
+            serverOrdersCount = (decoded['serverOrdersCount'] as num).toInt();
+          }
+          final list = decoded['debtors'];
+          if (list is List) {
+            final cached = list
+                .whereType<Map<String, dynamic>>()
+                .map(DebtorItem.fromJson)
+                .toList();
+            if (cached.isNotEmpty) {
+              debtors.removeWhere((d) => d.id.startsWith('DEBTOR-00') && d.balance == 0.0);
+              for (final d in cached) {
+                final idx = debtors.indexWhere((x) => x.id == d.id || x.name.toLowerCase().trim() == d.name.toLowerCase().trim());
+                if (idx != -1) {
+                  debtors[idx] = d;
+                } else {
+                  debtors.add(d);
+                }
+              }
+              notifyListeners();
+            }
+          }
+        } else if (decoded is List) {
+          final cached = decoded
               .map((e) => DebtorItem.fromJson(e as Map<String, dynamic>))
               .toList();
           if (cached.isNotEmpty) {
             for (final d in cached) {
-              final idx = debtors.indexWhere((x) => x.id == d.id);
+              final idx = debtors.indexWhere((x) => x.id == d.id || x.name.toLowerCase().trim() == d.name.toLowerCase().trim());
               if (idx != -1) {
                 debtors[idx] = d;
               } else {
@@ -409,6 +511,9 @@ class MockRepository extends ChangeNotifier {
   }
 
   Future<List<VoucherItem>> fetchVouchersFor(String customerId) async {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) {
+      return _vouchersByCustomer[customerId] ?? const [];
+    }
     final raw = await ApiSyncService.fetchVouchers(customerId);
     if (raw != null) {
       final items = raw.map(VoucherItem.fromJson).toList();
@@ -544,10 +649,27 @@ class MockRepository extends ChangeNotifier {
     return worst;
   }
 
-  double totalOutstanding() =>
-      customers.fold(0.0, (sum, c) => sum + customerOutstanding(c.id));
-  double totalOverdue() =>
-      customers.fold(0.0, (sum, c) => sum + customerOverdue(c.id));
+  double totalOutstanding() {
+    if (serverOutstanding != null && serverOutstanding! > 0) {
+      return serverOutstanding!;
+    }
+    if (debtors.isNotEmpty) {
+      final bal = debtors.fold(0.0, (sum, d) => sum + d.balance);
+      if (bal > 0) return bal;
+    }
+    return customers.fold(0.0, (sum, c) => sum + customerOutstanding(c.id));
+  }
+
+  double totalOverdue() {
+    if (serverOverdue != null && serverOverdue! > 0) {
+      return serverOverdue!;
+    }
+    if (debtors.isNotEmpty) {
+      final bal = debtors.where((d) => d.balance > 0).fold(0.0, (sum, d) => sum + d.balance);
+      if (bal > 0) return bal;
+    }
+    return customers.fold(0.0, (sum, c) => sum + customerOverdue(c.id));
+  }
 
   // ── derived dispatch progress ────────────────────────────────────────
   double dispatchedQtyForItem(String orderId, String product) {
@@ -597,7 +719,9 @@ class MockRepository extends ChangeNotifier {
     final target = salespersonId != null
         ? employeeById(salespersonId)?.monthlyTargetQty ?? 0
         : employees.fold(0.0, (sum, e) => sum + e.monthlyTargetQty);
-    final achieved = monthOrders.fold(0.0, (sum, o) => sum + o.totalQty);
+    final achieved = (serverDispatchesMt != null && serverDispatchesMt! > 0 && salespersonId == null)
+        ? serverDispatchesMt!
+        : monthOrders.fold(0.0, (sum, o) => sum + o.totalQty);
     final pendingDispatch = orders
         .where((o) => salespersonId == null || o.salespersonId == salespersonId)
         .where(
@@ -606,17 +730,58 @@ class MockRepository extends ChangeNotifier {
               o.status == OrderStatus.confirmed,
         )
         .fold(0.0, (sum, o) => sum + orderPendingDispatchQty(o.id));
-    final outstanding = customers
-        .where((c) => salespersonId == null || c.salespersonId == salespersonId)
-        .fold(0.0, (sum, c) => sum + customerOutstanding(c.id));
-    final pendingOrderCount = orders
-        .where((o) => salespersonId == null || o.salespersonId == salespersonId)
-        .where(
-          (o) =>
-              o.status == OrderStatus.pending ||
-              o.status == OrderStatus.confirmed,
-        )
-        .length;
+
+    final outstanding = (serverOutstanding != null && serverOutstanding! > 0 && salespersonId == null)
+        ? serverOutstanding!
+        : (debtors.isNotEmpty && salespersonId == null)
+            ? debtors.fold(0.0, (sum, d) => sum + d.balance)
+            : (debtors.isNotEmpty && salespersonId != null)
+                ? debtors
+                    .where((d) =>
+                        d.salesperson.toLowerCase().trim() ==
+                            employeeById(salespersonId)?.name.toLowerCase().trim() ||
+                        d.id == salespersonId)
+                    .fold(0.0, (sum, d) => sum + d.balance)
+                : customers
+                    .where((c) => salespersonId == null || c.salespersonId == salespersonId)
+                    .fold(0.0, (sum, c) => sum + customerOutstanding(c.id));
+
+    final overdueBalance = (serverOverdue != null && serverOverdue! > 0 && salespersonId == null)
+        ? serverOverdue!
+        : (debtors.isNotEmpty && salespersonId == null)
+            ? debtors.where((d) => d.balance > 0).fold(0.0, (sum, d) => sum + d.balance)
+            : (debtors.isNotEmpty && salespersonId != null)
+                ? debtors
+                    .where((d) =>
+                        (d.salesperson.toLowerCase().trim() ==
+                                employeeById(salespersonId)?.name.toLowerCase().trim() ||
+                            d.id == salespersonId) &&
+                        d.balance > 0)
+                    .fold(0.0, (sum, d) => sum + d.balance)
+                : customers
+                    .where(
+                      (c) => salespersonId == null || c.salespersonId == salespersonId,
+                    )
+                    .fold(0.0, (sum, c) => sum + customerOverdue(c.id));
+
+    final pendingOrderCount = serverDelayedOrders != null && salespersonId == null
+        ? serverDelayedOrders!
+        : orders
+            .where((o) => salespersonId == null || o.salespersonId == salespersonId)
+            .where(
+              (o) =>
+                  o.status == OrderStatus.pending ||
+                  o.status == OrderStatus.confirmed,
+            )
+            .length;
+
+    final collections = serverCollections != null && salespersonId == null
+        ? serverCollections!
+        : monthPayments.fold(0.0, (sum, p) => sum + p.amount);
+
+    final ordersCount = serverOrdersCount != null && salespersonId == null
+        ? serverOrdersCount!
+        : monthOrders.length;
 
     return SalesMetrics(
       targetQty: target,
@@ -624,16 +789,12 @@ class MockRepository extends ChangeNotifier {
       pendingTargetQty: (target - achieved)
           .clamp(0, double.infinity)
           .toDouble(),
-      ordersReceived: monthOrders.length,
+      ordersReceived: ordersCount,
       ordersPendingCount: pendingOrderCount,
       pendingDispatchQty: pendingDispatch,
-      paymentReceived: monthPayments.fold(0.0, (sum, p) => sum + p.amount),
+      paymentReceived: collections,
       paymentBalance: outstanding,
-      overdueBalance: customers
-          .where(
-            (c) => salespersonId == null || c.salespersonId == salespersonId,
-          )
-          .fold(0.0, (sum, c) => sum + customerOverdue(c.id)),
+      overdueBalance: overdueBalance,
       achievementPercent: target <= 0
           ? 0
           : (achieved / target * 100).clamp(0, 999),
@@ -973,6 +1134,10 @@ class MockRepository extends ChangeNotifier {
     final customer = customerById(customerId);
     if (customer != null) {
       customer.lastPaymentDate = payment.date;
+    }
+    final debtor = debtors.where((d) => d.id == customerId || (customer != null && d.name.toLowerCase().trim() == customer.name.toLowerCase().trim())).firstOrNull;
+    if (debtor != null) {
+      debtor.balance = (debtor.balance - amount).clamp(0.0, double.infinity);
     }
     _pushNotification(
       'Payment recorded',
@@ -1504,48 +1669,48 @@ class MockRepository extends ChangeNotifier {
     debtors.addAll([
       DebtorItem(
         id: 'DEBTOR-001',
+        name: 'N.K.TIMBER & PLYWOOD/ DERABASSI',
+        state: 'Punjab',
+        city: 'Dera Bassi',
+        district: 'Mohali',
+        salesperson: 'Mozi Ram',
+        balance: 1318583.55,
+      ),
+      DebtorItem(
+        id: 'DEBTOR-002',
         name: 'KALRA TRADERS/ STEEL DERABASSI',
         state: 'Haryana',
         city: 'Dera Bassi',
         district: 'Mohali',
         salesperson: 'Mozi Ram',
-        balance: 0.0,
-      ),
-      DebtorItem(
-        id: 'DEBTOR-002',
-        name: 'DOORKRM SIRSA ENTERPRISES SIRSA',
-        state: 'Haryana',
-        city: 'Sirsa',
-        district: 'SIRSA',
-        salesperson: 'AJAY JI',
-        balance: 0.0,
+        balance: 842100.00,
       ),
       DebtorItem(
         id: 'DEBTOR-003',
-        name: 'BANSAL POLES JHAJJAR',
-        state: 'Haryana',
-        city: 'Jhajjar',
-        district: 'JHAJJAR',
-        salesperson: 'PANKAJ JI',
-        balance: 0.0,
+        name: 'A.B STEEL ABHEY FAZILKA',
+        state: 'Punjab',
+        city: 'Fazilka',
+        district: 'Fazilka',
+        salesperson: 'Pankaj Goyal',
+        balance: 716404.00,
       ),
       DebtorItem(
         id: 'DEBTOR-004',
+        name: 'A.J. Group of Industries , Tarn Taran',
+        state: 'Punjab',
+        city: 'Tarn Taran',
+        district: 'Tarn Taran',
+        salesperson: 'Jagdeep Singh',
+        balance: 530292.00,
+      ),
+      DebtorItem(
+        id: 'DEBTOR-005',
         name: 'GURU KIRPA INDUSTRY BARNALA',
         state: 'Punjab',
         city: 'Barnala',
         district: 'Barnala',
         salesperson: 'Pankaj Goyal',
-        balance: 0.0,
-      ),
-      DebtorItem(
-        id: 'DEBTOR-005',
-        name: 'BHAGWATI INDUSTRIES TARB TARAN',
-        state: 'Punjab',
-        city: 'Tarn Taran',
-        district: 'Tarn Taran',
-        salesperson: 'Jagdeep Singh',
-        balance: 0.0,
+        balance: 485000.00,
       ),
       DebtorItem(
         id: 'DEBTOR-006',
@@ -1554,43 +1719,43 @@ class MockRepository extends ChangeNotifier {
         city: 'FEROZPUR',
         district: 'FEROZPUR',
         salesperson: 'Pankaj Goyal',
-        balance: 0.0,
+        balance: 320000.00,
       ),
       DebtorItem(
         id: 'DEBTOR-007',
+        name: 'BHAGWATI INDUSTRIES TARB TARAN',
+        state: 'Punjab',
+        city: 'Tarn Taran',
+        district: 'Tarn Taran',
+        salesperson: 'Jagdeep Singh',
+        balance: 290000.00,
+      ),
+      DebtorItem(
+        id: 'DEBTOR-008',
         name: 'J P INDUSTRIAL JAGRAON',
         state: 'Punjab',
         city: 'Jagraon',
         district: 'Ludhiana',
         salesperson: 'Sandeep Mahajan',
-        balance: 0.0,
-      ),
-      DebtorItem(
-        id: 'DEBTOR-008',
-        name: 'SANDEEP RAMPURA',
-        state: 'Punjab',
-        city: 'Rampura',
-        district: 'Bathinda',
-        salesperson: 'Suresh Jindal',
-        balance: 0.0,
+        balance: 215000.00,
       ),
       DebtorItem(
         id: 'DEBTOR-009',
-        name: 'SHIV IRON STORE PHAGWARA',
-        state: 'Punjab',
-        city: 'Phagwara',
-        district: 'Kapurthala',
-        salesperson: 'Sandeep Mahajan',
-        balance: 0.0,
+        name: 'DOORKRM SIRSA ENTERPRISES SIRSA',
+        state: 'Haryana',
+        city: 'Sirsa',
+        district: 'SIRSA',
+        salesperson: 'AJAY JI',
+        balance: 185000.00,
       ),
       DebtorItem(
         id: 'DEBTOR-010',
-        name: 'CHINTPURNI TRADING CO. HOSHIARPUR',
-        state: 'Punjab',
-        city: 'Hoshiarpur',
-        district: 'Hoshiarpur',
-        salesperson: 'JAGDEEP 2/ Aakash Kumar',
-        balance: 0.0,
+        name: 'BANSAL POLES JHAJJAR',
+        state: 'Haryana',
+        city: 'Jhajjar',
+        district: 'JHAJJAR',
+        salesperson: 'PANKAJ JI',
+        balance: 145000.00,
       ),
     ]);
 
@@ -1614,6 +1779,77 @@ class MockRepository extends ChangeNotifier {
         ),
       );
     }
+
+    final now = DateTime.now();
+    DateTime dDay(int day) => DateTime(now.year, now.month, day.clamp(1, 28));
+
+    orders.addAll([
+      SalesOrder(
+        id: 'ORD-101',
+        number: 'DS-2591',
+        customerId: 'DEBTOR-001',
+        salespersonId: 'EMP-SP-01',
+        orderDate: dDay(1),
+        items: [
+          OrderItem(product: 'Slit Coil JSW', quantity: 12, unit: 'MT', rate: 62000),
+        ],
+        dueDate: dDay(25),
+        status: OrderStatus.dispatched,
+        paymentTerms: '30 days credit',
+      ),
+      SalesOrder(
+        id: 'ORD-102',
+        number: 'DS-2596',
+        customerId: 'DEBTOR-002',
+        salespersonId: 'EMP-SP-02',
+        orderDate: dDay(3),
+        items: [
+          OrderItem(product: 'Slit Coil Kamdhenu', quantity: 8, unit: 'MT', rate: 58500),
+        ],
+        dueDate: dDay(28),
+        status: OrderStatus.pendingDispatch,
+      ),
+    ]);
+
+    payments.addAll([
+      Payment(
+        id: 'PAY-201',
+        orderId: 'ORD-101',
+        customerId: 'DEBTOR-001',
+        invoiceNumber: 'INV-101',
+        invoiceAmount: 744000,
+        amount: 250000,
+        date: dDay(2),
+        method: PaymentMethod.neft,
+        reference: 'CMS-99120',
+      ),
+    ]);
+
+    dispatches.addAll([
+      Dispatch(
+        id: 'DSP-301',
+        orderId: 'ORD-101',
+        orderNumber: 'DS-2591',
+        customerId: 'DEBTOR-001',
+        dispatchDate: dDay(2),
+        vehicle: 'PB 10 AB 1234',
+        driver: 'Gurpreet Singh',
+        lines: [
+          DispatchLine(product: 'Slit Coil JSW', quantity: 6, unit: 'MT'),
+        ],
+      ),
+    ]);
+
+    tasks.addAll([
+      WorkTask(
+        id: 'TSK-101',
+        title: 'Call Kalra Traders for payment follow-up',
+        description: 'Verify RTGS reference for invoice DS-2591',
+        assignedEmployeeId: 'EMP-SP-01',
+        dueAt: DateTime.now().add(const Duration(hours: 4)),
+        status: TaskStatus.open,
+      ),
+    ]);
   }
 }
 
