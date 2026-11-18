@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/api_sync_service.dart';
+import '../../core/formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock_repository.dart';
@@ -295,8 +296,12 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
       return true;
     }).toList();
 
+    final double totalReceivables = items.fold(0.0, (sum, d) => sum + d.balance);
+    final int punjabCount = repo.debtors.where((d) => d.state.toLowerCase() == 'punjab').length;
+    final int haryanaCount = repo.debtors.where((d) => d.state.toLowerCase() == 'haryana').length;
+
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: const Text('Debtor Master (HR-PB)'),
         actions: [
@@ -333,26 +338,127 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: const Color(0xFF059669),
+        foregroundColor: Colors.white,
         onPressed: () => _showAddDebtorDialog(context),
         icon: const Icon(Icons.add),
-        label: const Text('Add Debtor'),
+        label: const Text('Add Debtor', style: TextStyle(fontWeight: FontWeight.w800)),
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          // KPI Summary Row
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 SearchField(
-                  hint: 'Search party, city or salesperson',
+                  hint: 'Search by party, city or salesperson…',
                   onChanged: (v) => setState(() => _query = v),
                 ),
                 const SizedBox(height: 10),
-                FilterChipsRow(
-                  options: const ['All', 'Punjab', 'Haryana'],
-                  selected: _selectedTerritory,
-                  onSelected: (v) => setState(() => _selectedTerritory = v),
+                HybridPillFilter(
+                  options: [
+                    'All (${repo.debtors.length})',
+                    'Punjab ($punjabCount)',
+                    'Haryana ($haryanaCount)',
+                  ],
+                  selected: _selectedTerritory == 'All'
+                      ? 'All (${repo.debtors.length})'
+                      : _selectedTerritory == 'Punjab'
+                          ? 'Punjab ($punjabCount)'
+                          : 'Haryana ($haryanaCount)',
+                  onSelected: (v) {
+                    setState(() {
+                      if (v.startsWith('Punjab')) {
+                        _selectedTerritory = 'Punjab';
+                      } else if (v.startsWith('Haryana')) {
+                        _selectedTerritory = 'Haryana';
+                      } else {
+                        _selectedTerritory = 'All';
+                      }
+                    });
+                  },
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFFBEB),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFFDE68A)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'TOTAL RECEIVABLES',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF92400E),
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              rupees(totalReceivables),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFFB45309),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF0FDF4),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFBBF7D0)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'VERIFIED DEALERS',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF166534),
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${items.length} accounts',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF15803D),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -374,108 +480,133 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                     )
                   : ListView.separated(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 80),
                       itemCount: items.length,
                       separatorBuilder: (_, _) => const SizedBox(height: 8),
                       itemBuilder: (context, i) {
                         final item = items[i];
-                        return Material(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(12),
-                            onTap: () => Navigator.of(context).pushNamed(
-                              '/ledger',
-                              arguments: {'customerId': item.id},
-                            ),
-                            child: Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: AppColors.line),
+                        final hasBalance = item.balance > 0;
+
+                        return Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x060F172A),
+                                blurRadius: 8,
+                                offset: Offset(0, 2),
                               ),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          item.name,
-                                          style: AppText.body.copyWith(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          '${item.city.isNotEmpty ? item.city : item.district} (${item.state}) • Rep: ${item.salesperson}',
-                                          style: AppText.caption.copyWith(
-                                            color: AppColors.muted,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                            vertical: 2,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: item.balance == 0.0
-                                                ? AppColors.background
-                                                : const Color(0xFFFFEEEE),
-                                            borderRadius: BorderRadius.circular(6),
-                                            border: Border.all(color: AppColors.line),
-                                          ),
-                                          child: Text(
-                                            'Balance: ${item.balanceFormatted}',
-                                            style: AppText.caption.copyWith(
-                                              fontWeight: FontWeight.bold,
-                                              color: item.balance == 0.0
-                                                  ? AppColors.muted
-                                                  : AppColors.red,
+                            ],
+                          ),
+                          child: Material(
+                            color: Colors.transparent,
+                            borderRadius: BorderRadius.circular(14),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(14),
+                              onTap: () => Navigator.of(context).pushNamed(
+                                '/ledger',
+                                arguments: {'customerId': item.id},
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.all(14),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            item.name,
+                                            style: const TextStyle(
+                                              fontSize: 13.5,
+                                              fontWeight: FontWeight.w800,
+                                              color: Color(0xFF0F172A),
                                             ),
                                           ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            '${item.city.isNotEmpty ? item.city : item.district} (${item.state}) • Rep: ${item.salesperson}',
+                                            style: const TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w500,
+                                              color: Color(0xFF64748B),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 8),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 3,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: hasBalance
+                                                  ? const Color(0xFFFEF2F2)
+                                                  : const Color(0xFFF0FDF4),
+                                              borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(
+                                                color: hasBalance
+                                                    ? const Color(0xFFFECACA)
+                                                    : const Color(0xFFBBF7D0),
+                                              ),
+                                            ),
+                                            child: Text(
+                                              hasBalance
+                                                  ? 'Balance: ${item.balanceFormatted}'
+                                                  : 'Balance: ₹0.00 (Cleared)',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w800,
+                                                color: hasBalance
+                                                    ? const Color(0xFFDC2626)
+                                                    : const Color(0xFF166534),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.receipt_long_rounded,
+                                            size: 20,
+                                          ),
+                                          color: const Color(0xFF2563EB),
+                                          tooltip: 'View Statement',
+                                          onPressed: () => Navigator.of(context).pushNamed(
+                                            '/ledger',
+                                            arguments: {'customerId': item.id},
+                                          ),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.edit_outlined,
+                                            size: 19,
+                                          ),
+                                          color: const Color(0xFF64748B),
+                                          tooltip: 'Edit Debtor',
+                                          onPressed: () =>
+                                              _showEditDebtorDialog(context, item),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.delete_outline_rounded,
+                                            size: 19,
+                                          ),
+                                          color: const Color(0xFFEF4444),
+                                          tooltip: 'Delete',
+                                          onPressed: () =>
+                                              _showDeleteConfirmDialog(context, item),
                                         ),
                                       ],
                                     ),
-                                  ),
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        icon: const Icon(
-                                          Icons.receipt_long_rounded,
-                                          size: 20,
-                                        ),
-                                        color: AppColors.teal,
-                                        tooltip: 'View Statement',
-                                        onPressed: () => Navigator.of(context).pushNamed(
-                                          '/ledger',
-                                          arguments: {'customerId': item.id},
-                                        ),
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(
-                                          Icons.edit_outlined,
-                                          size: 20,
-                                        ),
-                                        color: AppColors.muted,
-                                        onPressed: () =>
-                                            _showEditDebtorDialog(context, item),
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(
-                                          Icons.delete_outline_rounded,
-                                          size: 20,
-                                        ),
-                                        color: AppColors.red,
-                                        onPressed: () =>
-                                            _showDeleteConfirmDialog(context, item),
-                                      ),
-                                    ],
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
                           ),

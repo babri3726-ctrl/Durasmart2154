@@ -10,7 +10,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { Card, PageHeader } from '../components/ui/Card';
+import { Card, KpiCard, PageHeader } from '../components/ui/Card';
 import { Pager } from '../components/ui/Pager';
 import { rupees } from '../lib/format';
 import { invalidate, syncKeys } from '../lib/syncStore';
@@ -179,29 +179,35 @@ export default function Daybook() {
       />
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card className="p-4 border-l-4 border-l-blue-500">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Total Entries</p>
-          <p className="mt-1 font-mono text-2xl font-black text-slate-900">{vouchers.length}</p>
-          <p className="mt-1 text-[11px] text-slate-400">Recorded vouchers</p>
-        </Card>
-        <Card className="p-4 border-l-4 border-l-blue-600">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Total Debits (+)</p>
-          <p className="mt-1 font-mono text-2xl font-black text-blue-700">{rupees(totalDebits)}</p>
-          <p className="mt-1 text-[11px] text-slate-400">Sales, vendor debits, outward flow</p>
-        </Card>
-        <Card className="p-4 border-l-4 border-l-emerald-500">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Total Credits (-)</p>
-          <p className="mt-1 font-mono text-2xl font-black text-emerald-700">{rupees(totalCredits)}</p>
-          <p className="mt-1 text-[11px] text-slate-400">Receipts, debtor payments received</p>
-        </Card>
-        <Card className="p-4 border-l-4 border-l-purple-500">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Net Movement</p>
-          <p className={`mt-1 font-mono text-2xl font-black ${netMovement >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>
-            {rupees(Math.abs(netMovement))} {netMovement >= 0 ? 'Dr' : 'Cr'}
-          </p>
-          <p className="mt-1 text-[11px] text-slate-400">Debit / Credit net difference</p>
-        </Card>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiCard
+          label="Total Entries"
+          value={String(vouchers.length)}
+          hint="Recorded vouchers"
+          gradient="from-blue-600 to-indigo-600"
+          icon={<FileText size={20} />}
+        />
+        <KpiCard
+          label="Total Debits (+)"
+          value={rupees(totalDebits)}
+          hint="Sales, vendor debits, outward"
+          gradient="from-blue-600 to-cyan-600"
+          icon={<FileSpreadsheet size={20} />}
+        />
+        <KpiCard
+          label="Total Credits (-)"
+          value={rupees(totalCredits)}
+          hint="Receipts, customer credits"
+          gradient="from-emerald-600 to-teal-600"
+          icon={<CheckCircle2 size={20} />}
+        />
+        <KpiCard
+          label="Net Movement"
+          value={`${rupees(Math.abs(netMovement))} ${netMovement >= 0 ? 'Dr' : 'Cr'}`}
+          hint="Debit / Credit net difference"
+          gradient="from-purple-600 to-pink-600"
+          icon={<Filter size={20} />}
+        />
       </div>
 
       {/* Filter and Search Bar */}

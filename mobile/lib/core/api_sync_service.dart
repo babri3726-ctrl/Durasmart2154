@@ -520,6 +520,48 @@ class ApiSyncService {
     }
   }
 
+  /// Fetches company-wide Day Book vouchers from backend /api/v1/vouchers
+  static Future<List<Map<String, dynamic>>?> fetchAllDaybookVouchers({
+    String? bookSource,
+    String? voucherType,
+    String? q,
+  }) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+      final query = <String>['limit=5000'];
+      if (bookSource != null && bookSource.isNotEmpty) {
+        query.add('bookSource=${Uri.encodeComponent(bookSource)}');
+      }
+      if (voucherType != null && voucherType.isNotEmpty) {
+        query.add('voucherType=${Uri.encodeComponent(voucherType)}');
+      }
+      if (q != null && q.isNotEmpty) {
+        query.add('q=${Uri.encodeComponent(q)}');
+      }
+      final req = await client.getUrl(
+        Uri.parse('$host/api/v1/vouchers?${query.join('&')}'),
+      );
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data is List) {
+          return data.map((e) => e as Map<String, dynamic>).toList();
+        } else if (data is Map && data['items'] is List) {
+          return (data['items'] as List).map((e) => e as Map<String, dynamic>).toList();
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Fetches payments from backend /api/v1/payments
   static Future<List<Map<String, dynamic>>?> fetchPayments({
     String? q,

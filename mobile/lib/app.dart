@@ -18,6 +18,7 @@ import 'features/payments/payment_dashboard_screen.dart';
 import 'features/payments/record_payment_screen.dart';
 import 'features/payments/customer_ledger_screen.dart';
 import 'features/payments/outstanding_screen.dart';
+import 'features/payments/daybook_screen.dart';
 import 'features/areas/vaccant_area_screen.dart';
 import 'features/tours/tour_plan_screen.dart';
 import 'features/tasks/task_dashboard_screen.dart';
@@ -55,6 +56,7 @@ class OperationsApp extends StatelessWidget {
       '/dispatch': (_) => const DispatchScreen(),
       '/dispatch-history': (_) => const DispatchHistoryScreen(),
       '/payments': (_) => const PaymentDashboardScreen(),
+      '/daybook': (_) => const DaybookScreen(),
       '/record-payment': (_) => const RecordPaymentScreen(),
       '/outstanding': (_) => const OutstandingScreen(),
       '/areas': (_) => const VaccantAreaScreen(),

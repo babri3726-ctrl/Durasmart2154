@@ -258,6 +258,22 @@ class _HomeDashboard extends StatelessWidget {
       showForEmployee: false,
     ),
     _MenuEntry(
+      'Day Book',
+      '/daybook',
+      Icons.menu_book_rounded,
+      'Bank, cash & sales vouchers',
+      AppGradients.sales,
+      showForEmployee: false,
+    ),
+    _MenuEntry(
+      'Debtor Master',
+      '/debtors',
+      Icons.account_balance_wallet_rounded,
+      'Dealer balances & statements',
+      AppGradients.customer,
+      showForEmployee: false,
+    ),
+    _MenuEntry(
       'Vaccant Area',
       '/areas',
       Icons.map_rounded,

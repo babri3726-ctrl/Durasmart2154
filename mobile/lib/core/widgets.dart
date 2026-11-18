@@ -286,6 +286,276 @@ class ActionPill extends StatelessWidget {
   );
 }
 
+/// Hybrid KPI Card mirroring the Web Panel Cockpit KpiCard design.
+/// Features rounded-2xl container, subtle background bubble, gradient icon badge,
+/// crisp uppercase tracking label, bold metric value, and hint text.
+class HybridKpiCard extends StatelessWidget {
+  const HybridKpiCard({
+    super.key,
+    required this.label,
+    required this.value,
+    this.hint,
+    required this.icon,
+    required this.gradient,
+    this.onTap,
+  });
+
+  final String label;
+  final String value;
+  final String? hint;
+  final IconData icon;
+  final Gradient gradient;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0A0F172A),
+            blurRadius: 18,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: Stack(
+          children: [
+            Positioned(
+              right: -16,
+              top: -16,
+              child: Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  gradient: gradient,
+                  shape: BoxShape.circle,
+                ),
+                foregroundDecoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.88),
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onTap,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              gradient: gradient,
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.1),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 3),
+                                ),
+                              ],
+                            ),
+                            child: Icon(icon, color: Colors.white, size: 20),
+                          ),
+                          if (onTap != null)
+                            const Icon(
+                              Icons.arrow_forward_ios_rounded,
+                              size: 13,
+                              color: AppColors.muted,
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        label.toUpperCase(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF64748B),
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        value,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                          color: Color(0xFF0F172A),
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      if (hint != null) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          hint!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w500,
+                            color: Color(0xFF94A3B8),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Voucher type badges matching Web Panel Day Book & Ledger badges.
+class HybridVoucherBadge extends StatelessWidget {
+  const HybridVoucherBadge({super.key, required this.voucherType});
+  final String voucherType;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = voucherType.toLowerCase().trim();
+    Color bg;
+    Color fg;
+    Color border;
+
+    if (t == 'sales') {
+      bg = const Color(0xFFDBEAFE);
+      fg = const Color(0xFF1E40AF);
+      border = const Color(0xFFBFDBFE);
+    } else if (t == 'receipt') {
+      bg = const Color(0xFFD1FAE5);
+      fg = const Color(0xFF065F46);
+      border = const Color(0xFFA7F3D0);
+    } else if (t.contains('credit note')) {
+      bg = const Color(0xFFE0E7FF);
+      fg = const Color(0xFF3730A3);
+      border = const Color(0xFFC7D2FE);
+    } else if (t == 'payment') {
+      bg = const Color(0xFFFEF3C7);
+      fg = const Color(0xFF92400E);
+      border = const Color(0xFFFDE68A);
+    } else if (t == 'contra') {
+      bg = const Color(0xFFF3E8FF);
+      fg = const Color(0xFF6B21A8);
+      border = const Color(0xFFE9D5FF);
+    } else if (t == 'journal') {
+      bg = const Color(0xFFF1F5F9);
+      fg = const Color(0xFF334155);
+      border = const Color(0xFFCBD5E1);
+    } else {
+      bg = const Color(0xFFF1F5F9);
+      fg = const Color(0xFF475569);
+      border = const Color(0xFFE2E8F0);
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: border),
+      ),
+      child: Text(
+        voucherType.toUpperCase(),
+        style: TextStyle(
+          color: fg,
+          fontSize: 9.5,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.3,
+        ),
+      ),
+    );
+  }
+}
+
+/// Horizontal pill filter row matching Web Panel Cockpit tabs and filters.
+class HybridPillFilter extends StatelessWidget {
+  const HybridPillFilter({
+    super.key,
+    required this.options,
+    required this.selected,
+    required this.onSelected,
+  });
+
+  final List<String> options;
+  final String selected;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
+      child: Row(
+        children: [
+          for (final opt in options) ...[
+            GestureDetector(
+              onTap: () => onSelected(opt),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                decoration: BoxDecoration(
+                  color: selected == opt
+                      ? const Color(0xFF0F172A)
+                      : Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: selected == opt
+                        ? const Color(0xFF0F172A)
+                        : const Color(0xFFE2E8F0),
+                  ),
+                  boxShadow: selected == opt
+                      ? [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.12),
+                            blurRadius: 6,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Text(
+                  opt,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: selected == opt
+                        ? Colors.white
+                        : const Color(0xFF475569),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class InfoRow extends StatelessWidget {
   const InfoRow({
     super.key,

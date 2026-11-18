@@ -50,8 +50,10 @@ import {
   ArrowRightLeft,
   Edit2,
   Upload,
+  AlertTriangle,
+  Users,
 } from 'lucide-react';
-import { Card, EmptyState, PageHeader, Spinner } from '../components/ui/Card';
+import { Card, EmptyState, KpiCard, PageHeader, Spinner } from '../components/ui/Card';
 import { LiveSyncBar } from '../components/ui/LiveSync';
 import { Pager } from '../components/ui/Pager';
 import { rupees } from '../lib/format';
@@ -1265,6 +1267,31 @@ function DebtorListCard() {
             <Plus size={13} /> Add Debtor
           </button>
         </div>
+      </div>
+
+      {/* Debtor Master Hybrid KPI Summary Grid */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 mb-5">
+        <KpiCard
+          label="Total Receivables"
+          value={rupees(rows.reduce((acc, r) => acc + Math.round((parseFloat(String(r.balance || 0)) || 0) * 100), 0))}
+          hint="Across verified dealers"
+          gradient="from-amber-600 to-orange-600"
+          icon={<AlertTriangle size={20} />}
+        />
+        <KpiCard
+          label="Active Debtors"
+          value={`${total} Accounts`}
+          hint="Master directory size"
+          gradient="from-emerald-600 to-teal-600"
+          icon={<Users size={20} />}
+        />
+        <KpiCard
+          label="With Outstanding"
+          value={`${rows.filter((r) => (parseFloat(String(r.balance || 0)) || 0) > 0).length} Parties`}
+          hint="Dues pending recovery"
+          gradient="from-red-600 to-rose-600"
+          icon={<ShieldAlert size={20} />}
+        />
       </div>
 
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">

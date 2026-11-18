@@ -728,6 +728,7 @@ class VoucherItem {
     required this.voucherDate,
     required this.debitPaise,
     required this.creditPaise,
+    this.partyName = '',
     this.narration = '',
     this.bookSource = '',
   });
@@ -738,9 +739,11 @@ class VoucherItem {
   final String voucherDate;
   final int debitPaise;
   final int creditPaise;
+  final String partyName;
   final String narration;
   final String bookSource;
 
+  String get voucherNumber => voucherNo;
   double get debit => debitPaise / 100.0;
   double get credit => creditPaise / 100.0;
   bool get isSales =>
@@ -768,6 +771,9 @@ class VoucherItem {
       creditPaise: (json['credit_paise'] as num?)?.toInt() ??
           (json['creditPaise'] as num?)?.toInt() ??
           0,
+      partyName: json['party_name']?.toString() ??
+          json['partyName']?.toString() ??
+          '',
       narration: json['narration']?.toString() ?? '',
       bookSource: json['book_source']?.toString() ??
           json['bookSource']?.toString() ??

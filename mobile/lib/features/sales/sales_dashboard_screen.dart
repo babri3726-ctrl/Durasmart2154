@@ -175,54 +175,52 @@ class _SalesDashboardScreenState extends State<SalesDashboardScreen> {
 
   Widget _metricGrid(MockRepository repo, SalesMetrics metrics) {
     final cards = <Widget>[
-      MetricCard(
-        title: 'Monthly Target',
+      HybridKpiCard(
+        label: 'Monthly Target',
         value: qtyLabel(metrics.targetQty, 'MT'),
-        caption: 'Quantity',
+        hint: 'Base sales target',
         icon: Icons.flag_rounded,
-        gradient: AppGradients.sales,
+        gradient: const LinearGradient(colors: [Color(0xFF2563EB), Color(0xFF4F46E5)]),
       ),
-      MetricCard(
-        title: 'Order Received',
+      HybridKpiCard(
+        label: 'Orders Booked',
         value: '${metrics.ordersReceived}',
-        caption: '${qtyLabel(metrics.achievedQty, 'MT')} ordered',
+        hint: '${qtyLabel(metrics.achievedQty, 'MT')} booked',
         icon: Icons.shopping_cart_rounded,
-        gradient: AppGradients.order,
+        gradient: const LinearGradient(colors: [Color(0xFFD97706), Color(0xFFEA580C)]),
+        onTap: () => Navigator.pushNamed(context, '/orders'),
       ),
-      MetricCard(
-        title: 'Order Pending',
+      HybridKpiCard(
+        label: 'Orders Pending',
         value: '${metrics.ordersPendingCount}',
-        caption: 'Awaiting action',
+        hint: 'Awaiting dispatch',
         icon: Icons.pending_actions_rounded,
-        gradient: AppGradients.area,
+        gradient: const LinearGradient(colors: [Color(0xFF9333EA), Color(0xFFDB2777)]),
+        onTap: () => Navigator.pushNamed(context, '/dispatch'),
       ),
-      MetricCard(
-        title: 'Pending for Dispatch',
+      HybridKpiCard(
+        label: 'Pending Dispatch',
         value: qtyLabel(metrics.pendingDispatchQty, 'MT'),
-        caption: 'To dispatch',
+        hint: 'In production yard',
         icon: Icons.local_shipping_rounded,
-        gradient: AppGradients.dispatch,
+        gradient: const LinearGradient(colors: [Color(0xFF0284C7), Color(0xFF0EA5E9)]),
+        onTap: () => Navigator.pushNamed(context, '/dispatch'),
       ),
-      MetricCard(
-        title: 'Pending Target',
-        value: qtyLabel(metrics.pendingTargetQty, 'MT'),
-        caption: 'Remaining',
-        icon: Icons.track_changes_rounded,
-        gradient: AppGradients.tour,
-      ),
-      MetricCard(
-        title: 'Payment Received',
-        value: rupeesShort(metrics.paymentReceived),
-        caption: rupees(metrics.paymentReceived),
-        icon: Icons.payments_rounded,
-        gradient: AppGradients.payment,
-      ),
-      MetricCard(
-        title: 'Payment Balance',
+      HybridKpiCard(
+        label: 'Receivables Due',
         value: rupeesShort(metrics.paymentBalance),
-        caption: rupees(metrics.paymentBalance),
+        hint: rupees(metrics.paymentBalance),
         icon: Icons.account_balance_wallet_rounded,
-        gradient: AppGradients.danger,
+        gradient: const LinearGradient(colors: [Color(0xFFDC2626), Color(0xFFE11D48)]),
+        onTap: () => Navigator.pushNamed(context, '/debtors'),
+      ),
+      HybridKpiCard(
+        label: 'Collections Recd',
+        value: rupeesShort(metrics.paymentReceived),
+        hint: rupees(metrics.paymentReceived),
+        icon: Icons.payments_rounded,
+        gradient: const LinearGradient(colors: [Color(0xFF059669), Color(0xFF0D9488)]),
+        onTap: () => Navigator.pushNamed(context, '/payments'),
       ),
     ];
     return LayoutBuilder(
@@ -234,9 +232,9 @@ class _SalesDashboardScreenState extends State<SalesDashboardScreen> {
           crossAxisCount: columns,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          childAspectRatio: 1.28,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
+          childAspectRatio: 1.15,
+          crossAxisSpacing: 10,
+          mainAxisSpacing: 10,
           children: cards,
         );
       },

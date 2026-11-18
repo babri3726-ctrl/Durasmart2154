@@ -386,9 +386,26 @@ class MockRepository extends ChangeNotifier {
   TourPlan? tourById(String id) => tours.where((t) => t.id == id).firstOrNull;
 
   final Map<String, List<VoucherItem>> _vouchersByCustomer = {};
+  List<VoucherItem> _daybookVouchers = [];
 
   List<VoucherItem> vouchersFor(String customerId) =>
       _vouchersByCustomer[customerId] ?? const [];
+
+  List<VoucherItem> get daybookVouchers => _daybookVouchers;
+
+  Future<List<VoucherItem>> fetchDaybookVouchers({String? bookSource, String? voucherType, String? q}) async {
+    final raw = await ApiSyncService.fetchAllDaybookVouchers(
+      bookSource: bookSource,
+      voucherType: voucherType,
+      q: q,
+    );
+    if (raw != null) {
+      _daybookVouchers = raw.map(VoucherItem.fromJson).toList();
+      notifyListeners();
+      return _daybookVouchers;
+    }
+    return _daybookVouchers;
+  }
 
   Future<List<VoucherItem>> fetchVouchersFor(String customerId) async {
     final raw = await ApiSyncService.fetchVouchers(customerId);
