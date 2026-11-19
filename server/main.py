@@ -2157,6 +2157,46 @@ def resubmit_and_reconcile_endpoint():
         "discountReconciliation": res
     }
 
+@app.get("/api/v1/app/version")
+def get_app_version():
+    return {
+        "version_code": 2,
+        "version_name": "1.0.2",
+        "download_url": "/api/v1/app/latest-apk",
+        "release_notes": "Live two-way Sales Command Cockpit sync with Web Panel.",
+        "mandatory": False,
+        "published_at": "2026-11-19T10:04:46+05:30"
+    }
+
+@app.get("/api/v1/app/latest-apk")
+@app.head("/api/v1/app/latest-apk")
+def download_latest_apk():
+    # 1. Local flutter build path
+    local_build_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "mobile", "build", "app", "outputs", "flutter-apk", "app-release.apk"
+    )
+    # 2. Server static asset path
+    server_static_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "static", "DuraSmart-latest.apk"
+    )
+    # 3. Web public static path
+    web_public_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "web", "public", "DuraSmart-latest.apk"
+    )
+
+    for p in [local_build_path, server_static_path, web_public_path]:
+        if os.path.exists(p) and os.path.getsize(p) > 1000000:
+            return FileResponse(
+                p,
+                media_type="application/vnd.android.package-archive",
+                filename="DuraSmart-v1.0.2.apk"
+            )
+
+    raise HTTPException(status_code=404, detail="Release APK not found on server.")
+
 @app.get("/api/v1/sales/targets")
 def get_sales_targets(
     state: str | None = None,

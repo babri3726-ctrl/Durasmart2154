@@ -22,6 +22,8 @@ tsconfig.node.tsbuildinfo
 .packages
 build/
 *.apk
+!server/static/*.apk
+!web/public/*.apk
 android/.gradle/
 
 # IDE / OS

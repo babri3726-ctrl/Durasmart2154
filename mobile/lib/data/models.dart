@@ -894,3 +894,31 @@ class SalespersonSummary {
     'achievement_percent': achievementPercent.toStringAsFixed(1),
   };
 }
+
+class AppUpdateInfo {
+  AppUpdateInfo({
+    required this.versionCode,
+    required this.versionName,
+    required this.downloadUrl,
+    required this.releaseNotes,
+    this.mandatory = false,
+  });
+
+  final int versionCode;
+  final String versionName;
+  final String downloadUrl;
+  final String releaseNotes;
+  final bool mandatory;
+
+  factory AppUpdateInfo.fromJson(Map<String, dynamic> json) {
+    return AppUpdateInfo(
+      versionCode: json['version_code'] is num
+          ? (json['version_code'] as num).toInt()
+          : int.tryParse(json['version_code']?.toString() ?? '1') ?? 1,
+      versionName: json['version_name']?.toString() ?? '1.0.0',
+      downloadUrl: json['download_url']?.toString() ?? '/api/v1/app/latest-apk',
+      releaseNotes: json['release_notes']?.toString() ?? 'General improvements and fixes.',
+      mandatory: json['mandatory'] == true,
+    );
+  }
+}

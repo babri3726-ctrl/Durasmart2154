@@ -685,6 +685,29 @@ class ApiSyncService {
     return null;
   }
 
+  /// Fetches latest app version info from /api/v1/app/version
+  static Future<Map<String, dynamic>?> fetchAppVersion() async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.getUrl(Uri.parse('$host/api/v1/app/version'));
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data is Map<String, dynamic>) {
+          return data;
+        } else if (data is Map) {
+          return Map<String, dynamic>.from(data);
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Fetches employees from backend /api/v1/employees
   static Future<List<Map<String, dynamic>>?> fetchEmployees() async {
     final host = await resolveWorkingHost();

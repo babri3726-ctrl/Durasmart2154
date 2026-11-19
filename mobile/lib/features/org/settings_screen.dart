@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../core/api_sync_service.dart';
 import '../../data/mock_repository.dart';
+import '../../data/models.dart';
 
 /// Settings: theme/app info, server endpoint, demo notification switches,
 /// role/permission overview and department assignment.
@@ -66,7 +68,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               subtitle: 'Option 3 colourful gradient',
             ),
             AppSpacing.gapSm,
-            _themeCard(),
+            _themeCard(repo),
             AppSpacing.gap,
             const SectionHeading(
               title: 'Server Connection',
@@ -115,7 +117,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _themeCard() => WhitePanel(
+  Widget _themeCard(MockRepository repo) => WhitePanel(
     padding: const EdgeInsets.all(16),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -135,15 +137,114 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        const InfoRow(label: 'App version', value: 'v0.1.0 demo'),
+        const InfoRow(label: 'App version', value: 'v${MockRepository.currentVersionName} (Build ${MockRepository.currentVersionCode})'),
         const InfoRow(label: 'Theme', value: 'Option 3 • colourful gradient'),
         const InfoRow(
           label: 'Surfaces',
           value: 'Blue, purple, orange, teal, pink',
         ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Color(0xFFE2E8F0)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            icon: const Icon(Icons.sync_rounded, size: 16, color: AppColors.purple),
+            label: const Text(
+              'Check for Online Updates',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.purple),
+            ),
+            onPressed: () async {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Checking server for updates...'), duration: Duration(seconds: 1)),
+              );
+              final update = await repo.checkForUpdate();
+              if (!mounted) return;
+              if (update != null) {
+                _showUpdateDialog(context, update);
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('DuraSmart is up to date (v1.0.2).'),
+                    backgroundColor: Color(0xFF059669),
+                  ),
+                );
+              }
+            },
+          ),
+        ),
       ],
     ),
   );
+
+  void _showUpdateDialog(BuildContext context, AppUpdateInfo info) {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: !info.mandatory,
+      builder: (dlgContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEFF6FF),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.system_update_rounded, color: Color(0xFF2563EB)),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Update Available',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'A new version (${info.versionName}) of DuraSmart is ready.',
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              info.releaseNotes,
+              style: const TextStyle(fontSize: 13, color: AppColors.muted),
+            ),
+          ],
+        ),
+        actions: [
+          if (!info.mandatory)
+            TextButton(
+              onPressed: () => Navigator.pop(dlgContext),
+              child: const Text('Later', style: TextStyle(color: AppColors.muted)),
+            ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2563EB),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () async {
+              Navigator.pop(dlgContext);
+              final host = await ApiSyncService.resolveWorkingHost() ?? 'https://durasmart2154.onrender.com';
+              final fullUrl = info.downloadUrl.startsWith('http')
+                  ? info.downloadUrl
+                  : '$host${info.downloadUrl.startsWith('/') ? '' : '/'}${info.downloadUrl}';
+              final uri = Uri.parse(fullUrl);
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            },
+            child: const Text('Update Now', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _serverConnectionCard() {
     final current = ApiSyncService.currentHost ?? 'Auto (LAN / Localhost)';

@@ -54,6 +54,9 @@ class MockRepository extends ChangeNotifier {
   int? serverActiveDealers;
   int? serverSalesTeamCount;
   List<SalespersonSummary> salespersonSummaries = [];
+  static const int currentVersionCode = 2;
+  static const String currentVersionName = '1.0.2';
+  AppUpdateInfo? availableUpdate;
   Timer? _syncTimer;
 
   static const ownerPasscode = 'Ishu@DuraSmart#2026';
@@ -437,9 +440,30 @@ class MockRepository extends ChangeNotifier {
         }
       }
 
+      // 11. App Update Check
+      await checkForUpdate();
+
       _saveDebtorsCache();
       notifyListeners();
     } catch (_) {}
+  }
+
+  Future<AppUpdateInfo?> checkForUpdate() async {
+    try {
+      final data = await ApiSyncService.fetchAppVersion();
+      if (data != null) {
+        final info = AppUpdateInfo.fromJson(data);
+        if (info.versionCode > currentVersionCode) {
+          availableUpdate = info;
+          notifyListeners();
+          return info;
+        } else {
+          availableUpdate = null;
+          notifyListeners();
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 
   Future<void> _saveDebtorsCache() async {
