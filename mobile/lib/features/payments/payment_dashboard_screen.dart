@@ -50,8 +50,7 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
       ).firstOrNull;
       if (_salespersonId != null &&
           sp?.id != _salespersonId &&
-          d.salesperson.toLowerCase().trim() !=
-              repo.salespersonName(_salespersonId!).toLowerCase().trim()) {
+          !repo.matchesSalesperson(d.salesperson, _salespersonId)) {
         continue;
       }
       seen.add(d.id.toLowerCase().trim());
@@ -64,7 +63,7 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
                 name: d.name,
                 city: d.city.isNotEmpty ? d.city : (d.district.isNotEmpty ? d.district : d.state),
                 mobile: '919800000000',
-                salespersonId: sp?.id ?? 'EMP-SP-01',
+                salespersonId: sp?.id ?? (d.salesperson.isNotEmpty ? d.salesperson : ''),
                 type: 'Dealer',
               ),
           outstanding: d.balance,
@@ -82,7 +81,9 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
           seen.contains(customer.name.toLowerCase().trim())) {
         continue;
       }
-      if (_salespersonId != null && customer.salespersonId != _salespersonId) {
+      if (_salespersonId != null &&
+          !repo.matchesSalesperson(customer.salespersonId, _salespersonId) &&
+          customer.salespersonId != _salespersonId) {
         continue;
       }
       final outstanding = repo.customerOutstanding(customer.id);
@@ -256,11 +257,9 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
     final scopeName = _salespersonId == null
         ? 'Full team'
         : repo.salespersonName(_salespersonId!);
-    final salespeople = <String, String>{
-      for (final customer in repo.customers)
-        if (customer.salespersonId.isNotEmpty)
-          customer.salespersonId: repo.salespersonName(customer.salespersonId),
-    };
+    final salesTeam = repo.employees
+        .where((e) => e.department == 'Sales')
+        .toList();
     final summary = _summaryText(scopeRows, metrics, repo);
 
     return Scaffold(
@@ -311,25 +310,28 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
                   ],
                 ),
                 const SizedBox(height: 6),
-                DropdownButtonFormField<String>(
+                DropdownButtonFormField<String?>(
                   key: ValueKey<String?>(
                     'payment-dashboard-sp-$_salespersonId',
                   ),
                   initialValue: _salespersonId,
                   isExpanded: true,
-                  hint: const Text('Full team'),
                   items: [
-                    for (final entry in salespeople.entries)
-                      DropdownMenuItem<String>(
-                        value: entry.key,
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('All Debtors (Full team)'),
+                    ),
+                    for (final emp in salesTeam)
+                      DropdownMenuItem<String?>(
+                        value: emp.id,
                         child: Text(
-                          entry.value,
+                          emp.name,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
                   ],
                   onChanged: (id) => setState(() => _salespersonId = id),
-                  decoration: const InputDecoration(labelText: 'Salesperson'),
+                  decoration: const InputDecoration(labelText: 'Salesperson Scope'),
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,

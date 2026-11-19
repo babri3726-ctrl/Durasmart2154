@@ -2174,12 +2174,12 @@ def resubmit_and_reconcile_endpoint():
 @app.get("/api/v1/app/version")
 def get_app_version():
     return {
-        "version_code": 5,
-        "version_name": "1.0.5",
+        "version_code": 6,
+        "version_name": "1.0.6",
         "download_url": "/api/v1/app/latest-apk",
-        "release_notes": "Real-time payment deduction on total outstanding, on-account debtor balance display, and live sales rep assignment.",
+        "release_notes": "Payment tower: All Debtors (Full team) switcher, isolated sales rep debtor scoping, and month-filtered collection tracking.",
         "mandatory": False,
-        "published_at": "2026-11-19T12:15:00+05:30"
+        "published_at": "2026-11-19T12:45:00+05:30"
     }
 
 @app.get("/api/v1/app/latest-apk")

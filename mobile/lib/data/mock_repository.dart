@@ -54,8 +54,8 @@ class MockRepository extends ChangeNotifier {
   int? serverActiveDealers;
   int? serverSalesTeamCount;
   List<SalespersonSummary> salespersonSummaries = [];
-  static const int currentVersionCode = 5;
-  static const String currentVersionName = '1.0.5';
+  static const int currentVersionCode = 6;
+  static const String currentVersionName = '1.0.6';
   AppUpdateInfo? availableUpdate;
   Timer? _syncTimer;
 
@@ -872,6 +872,7 @@ class MockRepository extends ChangeNotifier {
   SalesMetrics salesMetrics({String? salespersonId, DateTime? month}) {
     final m = month ?? DateTime.now();
     final now = DateTime.now();
+    final isCurrentMonth = m.year == now.year && m.month == now.month;
     final monthOrders = orders.where(
       (o) =>
           o.orderDate.year == m.year &&
@@ -898,20 +899,24 @@ class MockRepository extends ChangeNotifier {
                 : 1609.0));
 
     final double achieved = salespersonId != null
-        ? (spSummary != null
+        ? (spSummary != null && isCurrentMonth
             ? spSummary.totalDispatchedMt
             : monthOrders.fold<double>(0.0, (sum, o) => sum + o.totalQty))
-        : (serverDispatchesMt ??
-            (salespersonSummaries.isNotEmpty
-                ? salespersonSummaries.fold<double>(0.0, (sum, s) => sum + s.totalDispatchedMt)
-                : 621.776));
+        : (isCurrentMonth
+            ? (serverDispatchesMt ??
+                (salespersonSummaries.isNotEmpty
+                    ? salespersonSummaries.fold<double>(0.0, (sum, s) => sum + s.totalDispatchedMt)
+                    : 621.776))
+            : monthOrders.fold<double>(0.0, (sum, o) => sum + o.totalQty));
 
     final double pendingDispatch = salespersonId != null
-        ? (spSummary != null
+        ? (spSummary != null && isCurrentMonth
             ? spSummary.totalPendingMt
             : ((target - achieved) > 0 ? (target - achieved) : 0.0))
-        : (serverPendingMt ??
-            ((target - achieved) > 0 ? (target - achieved) : 987.224));
+        : (isCurrentMonth
+            ? (serverPendingMt ??
+                ((target - achieved) > 0 ? (target - achieved) : 987.224))
+            : ((target - achieved) > 0 ? (target - achieved) : 0.0));
 
     final outstanding = (serverOutstanding != null && serverOutstanding! > 0 && salespersonId == null)
         ? serverOutstanding!
@@ -955,11 +960,11 @@ class MockRepository extends ChangeNotifier {
             )
             .length;
 
-    final collections = serverCollections != null && salespersonId == null
+    final collections = (serverCollections != null && salespersonId == null && isCurrentMonth)
         ? serverCollections!
         : monthPayments.fold(0.0, (sum, p) => sum + p.amount);
 
-    final ordersCount = serverOrdersCount != null && salespersonId == null
+    final ordersCount = (serverOrdersCount != null && salespersonId == null && isCurrentMonth)
         ? serverOrdersCount!
         : monthOrders.length;
 
@@ -985,7 +990,17 @@ class MockRepository extends ChangeNotifier {
 
   bool customerBelongsTo(String customerId, String? salespersonId) {
     if (salespersonId == null) return true;
-    return customerById(customerId)?.salespersonId == salespersonId;
+    final cust = customerById(customerId);
+    if (cust != null &&
+        (matchesSalesperson(cust.salespersonId, salespersonId) ||
+            cust.salespersonId == salespersonId)) {
+      return true;
+    }
+    final debtor = debtorById(customerId);
+    if (debtor != null && matchesSalesperson(debtor.salesperson, salespersonId)) {
+      return true;
+    }
+    return false;
   }
 
   // ── monthly series for charts ────────────────────────────────────────

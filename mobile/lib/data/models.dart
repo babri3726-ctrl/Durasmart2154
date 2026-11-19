@@ -124,12 +124,19 @@ class Customer {
   DateTime? lastPaymentDate;
 
   factory Customer.fromJson(Map<String, dynamic> json) {
+    final rawSpId = json['salespersonId']?.toString() ?? json['salesperson_id']?.toString();
+    final rawSpName = json['salesperson']?.toString();
+    final spId = (rawSpId != null && rawSpId.isNotEmpty)
+        ? rawSpId
+        : ((rawSpName != null && rawSpName.isNotEmpty && rawSpName.toLowerCase() != 'unassigned')
+            ? rawSpName
+            : '');
     return Customer(
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? 'Dealer',
       city: json['city']?.toString() ?? (json['district']?.toString() ?? 'Punjab'),
       mobile: json['mobile']?.toString() ?? json['phone']?.toString() ?? '919800000000',
-      salespersonId: json['salespersonId']?.toString() ?? json['salesperson_id']?.toString() ?? 'EMP-SP-01',
+      salespersonId: spId,
       contactPerson: json['contactPerson']?.toString() ?? json['name']?.toString() ?? '',
       address: json['address']?.toString() ?? json['state']?.toString() ?? '',
       type: json['type']?.toString() ?? 'Dealer',
