@@ -190,7 +190,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "durasmart-api",
-        "version": "v1.0.7",
+        "version": "v1.0.8",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "database": "connected"
     }
@@ -2407,12 +2407,12 @@ def resubmit_and_reconcile_endpoint():
 @app.get("/api/v1/app/version")
 def get_app_version():
     return {
-        "version_code": 7,
-        "version_name": "1.0.7",
+        "version_code": 8,
+        "version_name": "1.0.8",
         "download_url": "/api/v1/app/latest-apk",
-        "release_notes": "Live monthly payment collections, 64 real Tally accounts mapped to sales reps, and zero-balance phantom debtor purge.",
+        "release_notes": "Clean type parsing for all employees and full sync of 902 debtors and live sales metrics.",
         "mandatory": False,
-        "published_at": "2026-11-19T15:25:00+05:30"
+        "published_at": "2026-11-19T16:15:00+05:30"
     }
 
 @app.get("/api/v1/app/latest-apk")
@@ -3742,7 +3742,15 @@ def get_dispatch_detail(dispatch_id: str):
 # ----------------- Employees & Products -----------------
 @app.get("/api/v1/employees")
 def get_employees(page: int = 1, pageSize: int = 200):
-    items = STATE["employees"]
+    items = STATE.get("employees", [])
+    for e in items:
+        try:
+            if "monthlyTargetQty" in e and not isinstance(e["monthlyTargetQty"], (int, float)):
+                e["monthlyTargetQty"] = float(str(e["monthlyTargetQty"]).replace(",", "").strip())
+            if "dispatchedQty" in e and not isinstance(e["dispatchedQty"], (int, float)):
+                e["dispatchedQty"] = float(str(e["dispatchedQty"]).replace(",", "").strip())
+        except Exception:
+            pass
     return {
         "items": items,
         "page": page,

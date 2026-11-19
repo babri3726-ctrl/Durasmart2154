@@ -1,5 +1,19 @@
 import 'dart:typed_data';
 
+double parseDoubleSafe(dynamic val, [double fallback = 0.0]) {
+  if (val == null) return fallback;
+  if (val is num) return val.toDouble();
+  final s = val.toString().replaceAll(',', '').trim();
+  return double.tryParse(s) ?? fallback;
+}
+
+int parseIntSafe(dynamic val, [int fallback = 0]) {
+  if (val == null) return fallback;
+  if (val is num) return val.toInt();
+  final s = val.toString().replaceAll(',', '').trim();
+  return int.tryParse(s) ?? fallback;
+}
+
 /// Demo photo kept in memory for the session (path + bytes so previews work
 /// even after the picker screen closes).
 class DemoPhoto {
@@ -89,7 +103,7 @@ class Employee {
       phone: json['phone']?.toString() ?? '',
       email: json['email']?.toString() ?? '',
       city: json['city']?.toString() ?? '',
-      monthlyTargetQty: (json['monthlyTargetQty'] as num?)?.toDouble() ?? 0.0,
+      monthlyTargetQty: parseDoubleSafe(json['monthlyTargetQty']),
       active: json['active'] == null || json['active'] == true,
     );
   }
@@ -281,7 +295,7 @@ class DispatchLine {
   factory DispatchLine.fromJson(Map<String, dynamic> json) {
     return DispatchLine(
       product: json['product']?.toString() ?? '',
-      quantity: (json['quantity'] as num?)?.toDouble() ?? 0.0,
+      quantity: parseDoubleSafe(json['quantity']),
       unit: json['unit']?.toString() ?? 'MT',
     );
   }
@@ -377,14 +391,16 @@ class Payment {
             : methStr == 'upi'
                 ? PaymentMethod.upi
                 : PaymentMethod.neft;
-    final amt = (json['amount'] as num?)?.toDouble() ??
-        ((json['amountPaise'] as num?)?.toDouble() ?? 0.0) / 100.0;
+    final amt = parseDoubleSafe(
+      json['amount'],
+      parseDoubleSafe(json['amountPaise']) / 100.0,
+    );
     return Payment(
       id: json['id']?.toString() ?? '',
       customerId: json['customerId']?.toString() ?? '',
       orderId: json['orderId']?.toString() ?? '',
       invoiceNumber: json['invoiceNumber']?.toString() ?? '',
-      invoiceAmount: (json['invoiceAmount'] as num?)?.toDouble() ?? amt,
+      invoiceAmount: parseDoubleSafe(json['invoiceAmount'], amt),
       amount: amt,
       date: json['paymentDate'] != null
           ? DateTime.tryParse(json['paymentDate'].toString()) ?? DateTime.now()
@@ -560,7 +576,7 @@ class TourVisit {
       customerName: json['customerName']?.toString() ?? '',
       city: json['city']?.toString() ?? '',
       purpose: json['purpose']?.toString() ?? '',
-      sequence: (json['sequence'] as num?)?.toInt() ?? 1,
+      sequence: parseIntSafe(json['sequence'], 1),
       status: st,
       notes: json['notes']?.toString() ?? '',
     );
@@ -649,7 +665,7 @@ class AreaInfo {
       district: district,
       state: (json['state'] ?? 'Punjab').toString(),
       salespersonId: json['salespersonId']?.toString(),
-      potentialCustomers: (json['totalShops'] as num?)?.toInt() ?? 0,
+      potentialCustomers: parseIntSafe(json['totalShops'], 0),
       status: status,
       notes: json['notes']?.toString() ?? '',
     );
@@ -697,30 +713,20 @@ class DebtorItem {
   String get balanceFormatted => '₹${balance.toStringAsFixed(2)}';
 
   factory DebtorItem.fromJson(Map<String, dynamic> json) {
-    double parsedBal = 0.0;
-    if (json['balance'] is num) {
-      parsedBal = (json['balance'] as num).toDouble();
-    } else if (json['balance'] != null) {
-      parsedBal = double.tryParse(json['balance'].toString().replaceAll(',', '').trim()) ?? 0.0;
-    }
+    double parsedBal = parseDoubleSafe(json['balance']);
     if (parsedBal == 0.0) {
-      if (json['outstandingPaise'] is num) {
-        parsedBal = (json['outstandingPaise'] as num).toDouble() / 100.0;
-      } else if (json['debitPaise'] is num) {
-        parsedBal = (json['debitPaise'] as num).toDouble() / 100.0;
-      } else if (json['balance_paise'] is num) {
-        parsedBal = (json['balance_paise'] as num).toDouble() / 100.0;
+      if (json['outstandingPaise'] != null) {
+        parsedBal = parseDoubleSafe(json['outstandingPaise']) / 100.0;
+      } else if (json['debitPaise'] != null) {
+        parsedBal = parseDoubleSafe(json['debitPaise']) / 100.0;
+      } else if (json['balance_paise'] != null) {
+        parsedBal = parseDoubleSafe(json['balance_paise']) / 100.0;
       }
     }
 
-    double parsedOpenBal = 0.0;
-    if (json['openingBalance'] is num) {
-      parsedOpenBal = (json['openingBalance'] as num).toDouble();
-    } else if (json['openingBalance'] != null) {
-      parsedOpenBal = double.tryParse(json['openingBalance'].toString().replaceAll(',', '').trim()) ?? 0.0;
-    }
-    if (parsedOpenBal == 0.0 && json['openingPaise'] is num) {
-      parsedOpenBal = (json['openingPaise'] as num).toDouble() / 100.0;
+    double parsedOpenBal = parseDoubleSafe(json['openingBalance']);
+    if (parsedOpenBal == 0.0 && json['openingPaise'] != null) {
+      parsedOpenBal = parseDoubleSafe(json['openingPaise']) / 100.0;
     }
 
     return DebtorItem(

@@ -86,8 +86,8 @@ class MockRepository extends ChangeNotifier {
   int? serverActiveDealers;
   int? serverSalesTeamCount;
   List<SalespersonSummary> salespersonSummaries = [];
-  static const int currentVersionCode = 7;
-  static const String currentVersionName = '1.0.7';
+  static const int currentVersionCode = 8;
+  static const String currentVersionName = '1.0.8';
   AppUpdateInfo? availableUpdate;
   Timer? _syncTimer;
 
@@ -595,7 +595,7 @@ class MockRepository extends ChangeNotifier {
                 .map(DebtorItem.fromJson)
                 .toList();
             if (cached.isNotEmpty) {
-              debtors.removeWhere((d) => d.id.startsWith('DEBTOR-00') && d.balance == 0.0);
+              debtors.removeWhere((d) => d.id.startsWith('DEBTOR-00') || d.id == 'DEBTOR-010');
               for (final d in cached) {
                 final idx = debtors.indexWhere((x) => x.id == d.id || x.name.toLowerCase().trim() == d.name.toLowerCase().trim());
                 if (idx != -1) {
