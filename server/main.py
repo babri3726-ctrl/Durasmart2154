@@ -1006,43 +1006,53 @@ def get_dashboard_summary(
         with db.get_connection() as conn:
             cur = conn.cursor()
             if target_sp or target_sp_id:
+                p_conds = []
+                p_args = []
+                if target_sp:
+                    p_conds.append("LOWER(p.salesperson) = LOWER(?)")
+                    p_args.append(target_sp)
+                if target_sp_id:
+                    p_conds.append("p.salesperson_id = ?")
+                    p_args.append(target_sp_id)
+                p_where = " OR ".join(p_conds)
+
                 cur.execute(
-                    """
+                    f"""
                     SELECT COALESCE(SUM(v.credit_paise), 0)
                     FROM vouchers v
                     JOIN parties p ON (v.party_id = p.id OR LOWER(TRIM(v.party_name)) = LOWER(TRIM(p.name)))
                     WHERE LOWER(v.voucher_type) = 'receipt'
                       AND (? IS NULL OR v.voucher_date >= ?)
                       AND (? IS NULL OR v.voucher_date <= ?)
-                      AND (LOWER(p.salesperson) = LOWER(?) OR p.salesperson_id = ? OR LOWER(?) IN (LOWER(p.salesperson), p.salesperson_id))
+                      AND ({p_where})
                     """,
-                    (from_date, from_date, to_date, to_date, target_sp, target_sp_id, target_sp or target_sp_id)
+                    [from_date, from_date, to_date, to_date] + p_args
                 )
                 v_rec = cur.fetchone()
                 voucher_collected_paise = v_rec[0] if v_rec else 0
 
                 cur.execute(
-                    """
+                    f"""
                     SELECT COALESCE(SUM(v.credit_paise), 0)
                     FROM vouchers v
                     JOIN parties p ON (v.party_id = p.id OR LOWER(TRIM(v.party_name)) = LOWER(TRIM(p.name)))
                     WHERE LOWER(v.voucher_type) = 'receipt'
-                      AND (LOWER(p.salesperson) = LOWER(?) OR p.salesperson_id = ? OR LOWER(?) IN (LOWER(p.salesperson), p.salesperson_id))
+                      AND ({p_where})
                     """,
-                    (target_sp, target_sp_id, target_sp or target_sp_id)
+                    p_args
                 )
                 all_time_voucher_paise = cur.fetchone()[0] or 0
 
                 cur.execute(
-                    """
+                    f"""
                     SELECT COALESCE(SUM(v.credit_paise), 0)
                     FROM vouchers v
                     JOIN parties p ON (v.party_id = p.id OR LOWER(TRIM(v.party_name)) = LOWER(TRIM(p.name)))
                     WHERE LOWER(v.voucher_type) = 'receipt'
                       AND v.voucher_date >= ? AND v.voucher_date <= ?
-                      AND (LOWER(p.salesperson) = LOWER(?) OR p.salesperson_id = ? OR LOWER(?) IN (LOWER(p.salesperson), p.salesperson_id))
+                      AND ({p_where})
                     """,
-                    (curr_m_start, curr_m_end, target_sp, target_sp_id, target_sp or target_sp_id)
+                    [curr_m_start, curr_m_end] + p_args
                 )
                 curr_month_voucher_paise = cur.fetchone()[0] or 0
             else:
@@ -1217,50 +1227,70 @@ def get_payments_monthly_summary(
     with db.get_connection() as conn:
         cur = conn.cursor()
         if target_sp or target_sp_id:
+            p_conds = []
+            p_args = []
+            if target_sp:
+                p_conds.append("LOWER(p.salesperson) = LOWER(?)")
+                p_args.append(target_sp)
+            if target_sp_id:
+                p_conds.append("p.salesperson_id = ?")
+                p_args.append(target_sp_id)
+            p_where = " OR ".join(p_conds)
+
+            parties_conds = []
+            parties_args = []
+            if target_sp:
+                parties_conds.append("LOWER(salesperson) = LOWER(?)")
+                parties_args.append(target_sp)
+            if target_sp_id:
+                parties_conds.append("salesperson_id = ?")
+                parties_args.append(target_sp_id)
+            parties_where = " OR ".join(parties_conds)
+
             cur.execute(
-                """
+                f"""
                 SELECT COALESCE(SUM(v.credit_paise), 0)
                 FROM vouchers v
                 JOIN parties p ON (v.party_id = p.id OR LOWER(TRIM(v.party_name)) = LOWER(TRIM(p.name)))
                 WHERE LOWER(v.voucher_type) = 'receipt'
                   AND v.voucher_date >= ?
                   AND v.voucher_date <= ?
-                  AND (LOWER(p.salesperson) = LOWER(?) OR p.salesperson_id = ? OR LOWER(?) IN (LOWER(p.salesperson), p.salesperson_id))
+                  AND ({p_where})
                 """,
-                (from_date, to_date, target_sp, target_sp_id, target_sp or target_sp_id)
+                [from_date, to_date] + p_args
             )
             month_col = cur.fetchone()[0] or 0
 
             cur.execute(
-                """
+                f"""
                 SELECT COALESCE(SUM(v.credit_paise), 0)
                 FROM vouchers v
                 JOIN parties p ON (v.party_id = p.id OR LOWER(TRIM(v.party_name)) = LOWER(TRIM(p.name)))
                 WHERE LOWER(v.voucher_type) = 'receipt'
-                  AND (LOWER(p.salesperson) = LOWER(?) OR p.salesperson_id = ? OR LOWER(?) IN (LOWER(p.salesperson), p.salesperson_id))
+                  AND ({p_where})
                 """,
-                (target_sp, target_sp_id, target_sp or target_sp_id)
+                p_args
             )
             all_time_col = cur.fetchone()[0] or 0
 
             cur.execute(
-                """
+                f"""
                 SELECT COUNT(*), COALESCE(SUM(balance_paise), 0)
                 FROM parties
-                WHERE (LOWER(salesperson) = LOWER(?) OR salesperson_id = ? OR LOWER(?) IN (LOWER(salesperson), salesperson_id))
+                WHERE ({parties_where})
                   AND balance_paise > 0
                 """,
-                (target_sp, target_sp_id, target_sp or target_sp_id)
+                parties_args
             )
             dealers_with_bal, out_paise = cur.fetchone()
 
             cur.execute(
-                """
+                f"""
                 SELECT COUNT(*)
                 FROM parties
-                WHERE (LOWER(salesperson) = LOWER(?) OR salesperson_id = ? OR LOWER(?) IN (LOWER(salesperson), salesperson_id))
+                WHERE ({parties_where})
                 """,
-                (target_sp, target_sp_id, target_sp or target_sp_id)
+                parties_args
             )
             total_dealers = cur.fetchone()[0]
         else:
