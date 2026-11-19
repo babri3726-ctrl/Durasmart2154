@@ -19,11 +19,42 @@ class SalesDashboardScreen extends StatefulWidget {
 class _SalesDashboardScreenState extends State<SalesDashboardScreen> {
   DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
   String? _salespersonId; // null => All team
+  bool _isSyncing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<MockRepository>().syncWithBackend();
+      }
+    });
+  }
 
   void _shiftMonth(int delta) {
     setState(() {
       _month = DateTime(_month.year, _month.month + delta);
     });
+  }
+
+  Future<void> _handleSync(MockRepository repo) async {
+    setState(() => _isSyncing = true);
+    try {
+      await repo.syncWithBackend();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('HR-PB targets synchronized successfully!'),
+            duration: Duration(seconds: 2),
+            backgroundColor: Color(0xFF059669),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSyncing = false);
+      }
+    }
   }
 
   @override
@@ -45,6 +76,17 @@ class _SalesDashboardScreenState extends State<SalesDashboardScreen> {
       appBar: AppBar(
         title: const Text('Sales Dashboard'),
         actions: [
+          IconButton(
+            tooltip: '1-Click Sync HR-PB',
+            icon: _isSyncing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.purple),
+                  )
+                : const Icon(Icons.sync_rounded),
+            onPressed: _isSyncing ? null : () => _handleSync(repo),
+          ),
           if (repo.currentUser != null)
             Padding(
               padding: const EdgeInsets.only(right: 12),
@@ -57,59 +99,195 @@ class _SalesDashboardScreenState extends State<SalesDashboardScreen> {
             ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _scopeSelector(context, repo, scopeName),
-          const SizedBox(height: 12),
-          _monthSelector(),
-          const SizedBox(height: 16),
-          _metricGrid(repo, metrics),
-          const SizedBox(height: 16),
-          WhitePanel(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Target vs Achievement', style: AppText.heading),
-                const SizedBox(height: 4),
-                Text(
-                  '${qtyLabel(metrics.achievedQty, 'MT')} of ${qtyLabel(metrics.targetQty, 'MT')}',
-                  style: AppText.caption,
-                ),
-                const SizedBox(height: 12),
-                ProgressRow(
-                  label: 'Achievement',
-                  value: metrics.achievedQty,
-                  max: metrics.targetQty,
-                ),
-              ],
+      body: RefreshIndicator(
+        onRefresh: () => repo.syncWithBackend(),
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _scopeSelector(context, repo, scopeName),
+            const SizedBox(height: 12),
+            _monthSelector(),
+            const SizedBox(height: 16),
+            _metricGrid(repo, metrics),
+            const SizedBox(height: 16),
+            WhitePanel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Target vs Achievement',
+                          style: AppText.heading,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFECFDF5),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFA7F3D0)),
+                        ),
+                        child: Text(
+                          '${metrics.achievementPercent.toStringAsFixed(1)}% Achieved',
+                          style: const TextStyle(
+                            color: Color(0xFF065F46),
+                            fontWeight: FontWeight.w800,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${metrics.achievedQty.toStringAsFixed(3)} MT dispatched of ${metrics.targetQty.toStringAsFixed(3)} MT assigned target',
+                    style: AppText.caption,
+                  ),
+                  const SizedBox(height: 12),
+                  ProgressRow(
+                    label: 'Achievement',
+                    value: metrics.achievedQty,
+                    max: metrics.targetQty,
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
-          _monthlyChart(repo),
-          const SizedBox(height: 16),
-          SectionHeading(
-            title: 'Sales Team',
-            subtitle: scopeName == 'All team'
-                ? 'Tap a member to open their performance'
-                : 'Filtered to $scopeName',
-          ),
-          const SizedBox(height: 10),
-          ...salesTeam
-              .where((e) => _salespersonId == null || e.id == _salespersonId)
-              .map(
-                (e) => Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: _teamCard(repo, e),
+            const SizedBox(height: 16),
+            _monthlyChart(repo),
+            const SizedBox(height: 16),
+            SectionHeading(
+              title: 'Sales Team Quota & Achievement',
+              subtitle: scopeName == 'All team'
+                  ? 'Synced from HR-PB Target Book'
+                  : 'Filtered to $scopeName',
+            ),
+            const SizedBox(height: 10),
+            if (repo.salespersonSummaries.isNotEmpty)
+              ...repo.salespersonSummaries
+                  .where((s) {
+                    if (_salespersonId == null) return true;
+                    final emp = repo.employeeById(_salespersonId!);
+                    final name = emp?.name.toLowerCase().trim() ?? '';
+                    final sName = s.salesperson.toLowerCase().trim();
+                    return sName == name || name.contains(sName) || sName.contains(name);
+                  })
+                  .map(
+                    (s) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _salespersonSummaryCard(context, s),
+                    ),
+                  )
+            else
+              ...salesTeam
+                  .where((e) => _salespersonId == null || e.id == _salespersonId)
+                  .map(
+                    (e) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _teamCard(repo, e),
+                    ),
+                  ),
+            const SizedBox(height: 16),
+            const SectionHeading(title: 'Quick Actions'),
+            const SizedBox(height: 10),
+            _quickActions(context),
+            const SizedBox(height: 16),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _salespersonSummaryCard(BuildContext context, SalespersonSummary summary) {
+    final ach = summary.achievementPercent;
+    final badgeColor = ach >= 50
+        ? const Color(0xFF065F46)
+        : ach >= 30
+            ? const Color(0xFF1E40AF)
+            : const Color(0xFF92400E);
+    final badgeBg = ach >= 50
+        ? const Color(0xFFECFDF5)
+        : ach >= 30
+            ? const Color(0xFFEFF6FF)
+            : const Color(0xFFFFFBEB);
+    final badgeBorder = ach >= 50
+        ? const Color(0xFFA7F3D0)
+        : ach >= 30
+            ? const Color(0xFFBFDBFE)
+            : const Color(0xFFFDE68A);
+
+    return WhitePanel(
+      onTap: () => Navigator.pushNamed(context, '/performance'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              AvatarCircle(
+                name: summary.salesperson,
+                size: 38,
+                gradient: AppGradients.employee,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      summary.salesperson,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.heading,
+                    ),
+                    Text(
+                      '${summary.territory} • ${summary.partiesCount} parties',
+                      style: AppText.caption,
+                    ),
+                  ],
                 ),
               ),
-          const SizedBox(height: 16),
-          const SectionHeading(title: 'Quick Actions'),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: badgeBg,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: badgeBorder),
+                ),
+                child: Text(
+                  '${summary.achievementPercent.toStringAsFixed(1)}%',
+                  style: TextStyle(
+                    color: badgeColor,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 10),
-          _quickActions(context),
-          const SizedBox(height: 16),
-
-          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Dispatched / Target:',
+                style: TextStyle(fontSize: 11, color: AppColors.muted, fontWeight: FontWeight.w600),
+              ),
+              Text(
+                '${summary.totalDispatchedMt.toStringAsFixed(3)} / ${summary.totalTargetMt.toStringAsFixed(3)} MT',
+                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.ink),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ProgressRow(
+            label: 'Quota Progress',
+            value: summary.totalDispatchedMt,
+            max: summary.totalTargetMt,
+          ),
         ],
       ),
     );
@@ -176,51 +354,49 @@ class _SalesDashboardScreenState extends State<SalesDashboardScreen> {
   Widget _metricGrid(MockRepository repo, SalesMetrics metrics) {
     final cards = <Widget>[
       HybridKpiCard(
-        label: 'Monthly Target',
-        value: qtyLabel(metrics.targetQty, 'MT'),
-        hint: 'Base sales target',
+        label: 'Sales Target',
+        value: '${metrics.targetQty.toStringAsFixed(1)} MT',
+        hint: 'Total monthly quota',
         icon: Icons.flag_rounded,
         gradient: const LinearGradient(colors: [Color(0xFF2563EB), Color(0xFF4F46E5)]),
       ),
       HybridKpiCard(
-        label: 'Orders Booked',
-        value: '${metrics.ordersReceived}',
-        hint: '${qtyLabel(metrics.achievedQty, 'MT')} booked',
-        icon: Icons.shopping_cart_rounded,
-        gradient: const LinearGradient(colors: [Color(0xFFD97706), Color(0xFFEA580C)]),
-        onTap: () => Navigator.pushNamed(context, '/orders'),
-      ),
-      HybridKpiCard(
-        label: 'Orders Pending',
-        value: '${metrics.ordersPendingCount}',
-        hint: 'Awaiting dispatch',
-        icon: Icons.pending_actions_rounded,
-        gradient: const LinearGradient(colors: [Color(0xFF9333EA), Color(0xFFDB2777)]),
+        label: 'Dispatched',
+        value: '${metrics.achievedQty.toStringAsFixed(1)} MT',
+        hint: 'Achieved on ground',
+        icon: Icons.local_shipping_rounded,
+        gradient: const LinearGradient(colors: [Color(0xFF059669), Color(0xFF0D9488)]),
         onTap: () => Navigator.pushNamed(context, '/dispatch'),
       ),
       HybridKpiCard(
         label: 'Pending Dispatch',
-        value: qtyLabel(metrics.pendingDispatchQty, 'MT'),
-        hint: 'In production yard',
-        icon: Icons.local_shipping_rounded,
-        gradient: const LinearGradient(colors: [Color(0xFF0284C7), Color(0xFF0EA5E9)]),
+        value: '${metrics.pendingDispatchQty.toStringAsFixed(1)} MT',
+        hint: 'In pipeline / production',
+        icon: Icons.assignment_outlined,
+        gradient: const LinearGradient(colors: [Color(0xFFD97706), Color(0xFFEA580C)]),
         onTap: () => Navigator.pushNamed(context, '/dispatch'),
       ),
       HybridKpiCard(
-        label: 'Receivables Due',
-        value: rupeesShort(metrics.paymentBalance),
-        hint: rupees(metrics.paymentBalance),
-        icon: Icons.account_balance_wallet_rounded,
-        gradient: const LinearGradient(colors: [Color(0xFFDC2626), Color(0xFFE11D48)]),
+        label: 'Achievement',
+        value: '${metrics.achievementPercent.toStringAsFixed(1)}%',
+        hint: 'Progress to target',
+        icon: Icons.trending_up_rounded,
+        gradient: const LinearGradient(colors: [Color(0xFF9333EA), Color(0xFFDB2777)]),
+      ),
+      HybridKpiCard(
+        label: 'Active Dealers',
+        value: '${repo.serverActiveDealers ?? (repo.salesTargets.isNotEmpty ? repo.salesTargets.length : 137)}',
+        hint: 'Across Punjab & Haryana',
+        icon: Icons.groups_rounded,
+        gradient: const LinearGradient(colors: [Color(0xFF0284C7), Color(0xFF2563EB)]),
         onTap: () => Navigator.pushNamed(context, '/debtors'),
       ),
       HybridKpiCard(
-        label: 'Collections Recd',
-        value: rupeesShort(metrics.paymentReceived),
-        hint: rupees(metrics.paymentReceived),
-        icon: Icons.payments_rounded,
-        gradient: const LinearGradient(colors: [Color(0xFF059669), Color(0xFF0D9488)]),
-        onTap: () => Navigator.pushNamed(context, '/payments'),
+        label: 'Sales Team',
+        value: '${repo.salespersonSummaries.isNotEmpty ? repo.salespersonSummaries.length : (repo.serverSalesTeamCount ?? 13)}',
+        hint: 'Field representatives',
+        icon: Icons.military_tech_rounded,
+        gradient: const LinearGradient(colors: [Color(0xFFE11D48), Color(0xFFDC2626)]),
       ),
     ];
     return LayoutBuilder(

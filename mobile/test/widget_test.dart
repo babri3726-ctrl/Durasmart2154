@@ -132,11 +132,12 @@ void main() {
       await tester.pumpAndSettle();
 
       for (final label in [
-        'Monthly Target',
-        'Orders Booked',
-        'Orders Pending',
+        'Sales Target',
+        'Dispatched',
         'Pending Dispatch',
-        'Receivables Due',
+        'Achievement',
+        'Active Dealers',
+        'Sales Team',
       ]) {
         expect(
           find.text(label.toUpperCase()),

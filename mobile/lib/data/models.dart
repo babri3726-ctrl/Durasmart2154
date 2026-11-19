@@ -842,3 +842,55 @@ class SalesTargetItem {
     );
   }
 }
+
+class SalespersonSummary {
+  SalespersonSummary({
+    required this.salesperson,
+    required this.territory,
+    required this.partiesCount,
+    required this.totalTargetMt,
+    required this.totalDispatchedMt,
+    required this.totalPendingMt,
+    required this.achievementPercent,
+  });
+
+  final String salesperson;
+  final String territory;
+  final int partiesCount;
+  final double totalTargetMt;
+  final double totalDispatchedMt;
+  final double totalPendingMt;
+  final double achievementPercent;
+
+  factory SalespersonSummary.fromJson(Map<String, dynamic> json) {
+    return SalespersonSummary(
+      salesperson: json['salesperson']?.toString() ?? 'Unassigned',
+      territory: json['territory']?.toString() ?? 'Punjab/Haryana',
+      partiesCount: json['parties_count'] is num
+          ? (json['parties_count'] as num).toInt()
+          : int.tryParse(json['parties_count']?.toString() ?? '0') ?? 0,
+      totalTargetMt: json['total_target_mt'] is num
+          ? (json['total_target_mt'] as num).toDouble()
+          : double.tryParse(json['total_target_mt']?.toString() ?? '0') ?? 0.0,
+      totalDispatchedMt: json['total_dispatched_mt'] is num
+          ? (json['total_dispatched_mt'] as num).toDouble()
+          : double.tryParse(json['total_dispatched_mt']?.toString() ?? '0') ?? 0.0,
+      totalPendingMt: json['total_pending_mt'] is num
+          ? (json['total_pending_mt'] as num).toDouble()
+          : double.tryParse(json['total_pending_mt']?.toString() ?? '0') ?? 0.0,
+      achievementPercent: json['achievement_percent'] is num
+          ? (json['achievement_percent'] as num).toDouble()
+          : double.tryParse(json['achievement_percent']?.toString() ?? '0') ?? 0.0,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'salesperson': salesperson,
+    'territory': territory,
+    'parties_count': partiesCount,
+    'total_target_mt': totalTargetMt.toStringAsFixed(3),
+    'total_dispatched_mt': totalDispatchedMt.toStringAsFixed(3),
+    'total_pending_mt': totalPendingMt.toStringAsFixed(3),
+    'achievement_percent': achievementPercent.toStringAsFixed(1),
+  };
+}

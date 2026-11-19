@@ -650,8 +650,8 @@ class ApiSyncService {
     }
   }
 
-  /// Fetches sales targets from backend /api/v1/sales/targets
-  static Future<List<Map<String, dynamic>>?> fetchSalesTargets() async {
+  /// Fetches complete sales targets payload (items, salesperson_summary, total)
+  static Future<Map<String, dynamic>?> fetchSalesTargetsFull() async {
     final host = await resolveWorkingHost();
     if (host == null) return null;
     try {
@@ -664,14 +664,25 @@ class ApiSyncService {
       if (resp.statusCode == 200) {
         final body = await resp.transform(utf8.decoder).join();
         final data = jsonDecode(body);
-        if (data is Map && data['items'] is List) {
-          return (data['items'] as List).map((e) => e as Map<String, dynamic>).toList();
+        if (data is Map<String, dynamic>) {
+          return data;
+        } else if (data is Map) {
+          return Map<String, dynamic>.from(data);
         }
       }
       return null;
     } catch (_) {
       return null;
     }
+  }
+
+  /// Fetches sales targets from backend /api/v1/sales/targets
+  static Future<List<Map<String, dynamic>>?> fetchSalesTargets() async {
+    final data = await fetchSalesTargetsFull();
+    if (data != null && data['items'] is List) {
+      return (data['items'] as List).whereType<Map<String, dynamic>>().toList();
+    }
+    return null;
   }
 
   /// Fetches employees from backend /api/v1/employees

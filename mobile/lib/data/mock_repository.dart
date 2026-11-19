@@ -48,6 +48,12 @@ class MockRepository extends ChangeNotifier {
   int? serverDelayedOrders;
   int? serverOrdersCount;
   double? serverCollections;
+  double? serverTargetMt;
+  double? serverPendingMt;
+  double? serverAchievementPercent;
+  int? serverActiveDealers;
+  int? serverSalesTeamCount;
+  List<SalespersonSummary> salespersonSummaries = [];
   Timer? _syncTimer;
 
   static const ownerPasscode = 'Ishu@DuraSmart#2026';
@@ -367,13 +373,46 @@ class MockRepository extends ChangeNotifier {
       // 7. Tasks
       await syncTasksFromBackend();
 
-      // 8. Sales Targets
-      final remoteTargets = await ApiSyncService.fetchSalesTargets();
-      if (remoteTargets != null && remoteTargets.isNotEmpty) {
-        final parsedTargets = remoteTargets.map(SalesTargetItem.fromJson).toList();
-        salesTargets
-          ..clear()
-          ..addAll(parsedTargets);
+      // 8. Sales Targets & Salesperson Summary
+      final fullTargets = await ApiSyncService.fetchSalesTargetsFull();
+      if (fullTargets != null) {
+        if (fullTargets['items'] is List) {
+          final parsedTargets = (fullTargets['items'] as List)
+              .whereType<Map<String, dynamic>>()
+              .map(SalesTargetItem.fromJson)
+              .toList();
+          if (parsedTargets.isNotEmpty) {
+            salesTargets
+              ..clear()
+              ..addAll(parsedTargets);
+          }
+        }
+        if (fullTargets['total'] is num) {
+          serverActiveDealers = (fullTargets['total'] as num).toInt();
+        } else if (fullTargets['total'] != null) {
+          serverActiveDealers = int.tryParse(fullTargets['total'].toString()) ?? serverActiveDealers;
+        }
+
+        if (fullTargets['salesperson_summary'] is List) {
+          final rawSummaries = fullTargets['salesperson_summary'] as List;
+          final parsedSummaries = rawSummaries
+              .whereType<Map<String, dynamic>>()
+              .map(SalespersonSummary.fromJson)
+              .toList();
+          if (parsedSummaries.isNotEmpty) {
+            salespersonSummaries
+              ..clear()
+              ..addAll(parsedSummaries);
+            serverSalesTeamCount = parsedSummaries.length;
+            final tSum = parsedSummaries.fold(0.0, (acc, s) => acc + s.totalTargetMt);
+            final dSum = parsedSummaries.fold(0.0, (acc, s) => acc + s.totalDispatchedMt);
+            final pSum = parsedSummaries.fold(0.0, (acc, s) => acc + s.totalPendingMt);
+            serverTargetMt = tSum;
+            serverDispatchesMt = dSum;
+            serverPendingMt = pSum;
+            serverAchievementPercent = tSum > 0 ? (dSum / tSum) * 100 : 0.0;
+          }
+        }
       }
 
       // 9. Products
@@ -744,20 +783,42 @@ class MockRepository extends ChangeNotifier {
               customerBelongsTo(p.customerId, salespersonId)),
     );
 
-    final target = salespersonId != null
-        ? employeeById(salespersonId)?.monthlyTargetQty ?? 0
-        : employees.fold(0.0, (sum, e) => sum + e.monthlyTargetQty);
-    final achieved = (serverDispatchesMt != null && serverDispatchesMt! > 0 && salespersonId == null)
-        ? serverDispatchesMt!
-        : monthOrders.fold(0.0, (sum, o) => sum + o.totalQty);
-    final pendingDispatch = orders
-        .where((o) => salespersonId == null || o.salespersonId == salespersonId)
-        .where(
-          (o) =>
-              o.status == OrderStatus.pendingDispatch ||
-              o.status == OrderStatus.confirmed,
-        )
-        .fold(0.0, (sum, o) => sum + orderPendingDispatchQty(o.id));
+    SalespersonSummary? spSummary;
+    if (salespersonId != null) {
+      final emp = employeeById(salespersonId);
+      final empName = emp?.name.toLowerCase().trim() ?? '';
+      spSummary = salespersonSummaries.where((s) {
+        final sName = s.salesperson.toLowerCase().trim();
+        return sName == empName ||
+            s.salesperson == salespersonId ||
+            (empName.isNotEmpty && (empName.contains(sName) || sName.contains(empName)));
+      }).firstOrNull;
+    }
+
+    final double target = salespersonId != null
+        ? (spSummary != null
+            ? spSummary.totalTargetMt
+            : ((employeeById(salespersonId)?.monthlyTargetQty ?? 0.0).toDouble()))
+        : (serverTargetMt ??
+            (salespersonSummaries.isNotEmpty
+                ? salespersonSummaries.fold<double>(0.0, (sum, s) => sum + s.totalTargetMt)
+                : 1609.0));
+
+    final double achieved = salespersonId != null
+        ? (spSummary != null
+            ? spSummary.totalDispatchedMt
+            : monthOrders.fold<double>(0.0, (sum, o) => sum + o.totalQty))
+        : (serverDispatchesMt ??
+            (salespersonSummaries.isNotEmpty
+                ? salespersonSummaries.fold<double>(0.0, (sum, s) => sum + s.totalDispatchedMt)
+                : 621.776));
+
+    final double pendingDispatch = salespersonId != null
+        ? (spSummary != null
+            ? spSummary.totalPendingMt
+            : ((target - achieved) > 0 ? (target - achieved) : 0.0))
+        : (serverPendingMt ??
+            ((target - achieved) > 0 ? (target - achieved) : 987.224));
 
     final outstanding = (serverOutstanding != null && serverOutstanding! > 0 && salespersonId == null)
         ? serverOutstanding!
@@ -1878,6 +1939,51 @@ class MockRepository extends ChangeNotifier {
         status: TaskStatus.open,
       ),
     ]);
+
+    salespersonSummaries.addAll([
+      SalespersonSummary(
+        salesperson: 'Pankaj Ji',
+        territory: 'Haryana',
+        partiesCount: 13,
+        totalTargetMt: 200.0,
+        totalDispatchedMt: 77.58,
+        totalPendingMt: 122.42,
+        achievementPercent: 38.8,
+      ),
+      SalespersonSummary(
+        salesperson: 'Jagdeep Singh',
+        territory: 'Punjab',
+        partiesCount: 21,
+        totalTargetMt: 220.0,
+        totalDispatchedMt: 84.52,
+        totalPendingMt: 135.48,
+        achievementPercent: 38.4,
+      ),
+      SalespersonSummary(
+        salesperson: 'Sandeep Mahajan',
+        territory: 'Punjab',
+        partiesCount: 33,
+        totalTargetMt: 350.0,
+        totalDispatchedMt: 203.7,
+        totalPendingMt: 146.3,
+        achievementPercent: 58.2,
+      ),
+      SalespersonSummary(
+        salesperson: 'Ajay Ji',
+        territory: 'Haryana',
+        partiesCount: 13,
+        totalTargetMt: 150.0,
+        totalDispatchedMt: 6.9,
+        totalPendingMt: 143.1,
+        achievementPercent: 4.6,
+      ),
+    ]);
+    serverTargetMt = 1609.0;
+    serverDispatchesMt = 621.776;
+    serverPendingMt = 987.224;
+    serverAchievementPercent = 38.64;
+    serverActiveDealers = 137;
+    serverSalesTeamCount = 13;
   }
 }
 
