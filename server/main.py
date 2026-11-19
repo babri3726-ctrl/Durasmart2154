@@ -189,7 +189,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "durasmart-api",
-        "version": "v1.0.2-unified",
+        "version": "v1.0.6",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "database": "connected"
     }
@@ -2206,7 +2206,7 @@ def download_latest_apk():
             return FileResponse(
                 p,
                 media_type="application/vnd.android.package-archive",
-                filename="DuraSmart-v1.0.2.apk"
+                filename="DuraSmart-latest.apk"
             )
 
     raise HTTPException(status_code=404, detail="Release APK not found on server.")

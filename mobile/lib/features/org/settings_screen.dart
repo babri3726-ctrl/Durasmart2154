@@ -166,9 +166,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _showUpdateDialog(context, update);
               } else {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('DuraSmart is up to date (v1.0.2).'),
-                    backgroundColor: Color(0xFF059669),
+                  SnackBar(
+                    content: Text('DuraSmart is up to date (${MockRepository.currentVersionName}).'),
+                    backgroundColor: const Color(0xFF059669),
                   ),
                 );
               }
