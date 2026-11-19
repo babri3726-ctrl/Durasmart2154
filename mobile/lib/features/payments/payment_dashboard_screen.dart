@@ -28,13 +28,26 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        context.read<MockRepository>().syncWithBackend();
+        final repo = context.read<MockRepository>();
+        repo.syncWithBackend();
+        repo.fetchMonthlyPaymentSummary(
+          _month.year,
+          _month.month,
+          salespersonId: _salespersonId,
+        );
       }
     });
   }
 
-  void _shiftMonth(int delta) =>
-      setState(() => _month = DateTime(_month.year, _month.month + delta));
+  void _shiftMonth(int delta) {
+    final nextM = DateTime(_month.year, _month.month + delta);
+    setState(() => _month = nextM);
+    context.read<MockRepository>().fetchMonthlyPaymentSummary(
+      nextM.year,
+      nextM.month,
+      salespersonId: _salespersonId,
+    );
+  }
 
   List<PaymentDashboardRow> _scopeRows(MockRepository repo) {
     final rows = <PaymentDashboardRow>[];
@@ -231,6 +244,11 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final repo = context.watch<MockRepository>();
+    final monthlyData = repo.getMonthlyPaymentCached(
+      _month.year,
+      _month.month,
+      salespersonId: _salespersonId,
+    );
     final scopeRows = _scopeRows(repo);
     final visibleRows = _overdueOnly
         ? scopeRows.where((row) => row.overdue > 0).toList()
@@ -244,16 +262,33 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
       (sum, row) => sum + row.outstanding,
     );
     final rawOverdue = scopeRows.fold(0.0, (sum, row) => sum + row.overdue);
-    final totalOutstanding = _salespersonId == null
-        ? (repo.serverOutstanding != null && repo.serverOutstanding! > 0
-            ? repo.serverOutstanding!
-            : rawOutstanding)
-        : rawOutstanding;
-    final totalOverdue = _salespersonId == null
-        ? (repo.serverOverdue != null && repo.serverOverdue! > 0
-            ? repo.serverOverdue!
-            : rawOverdue)
-        : rawOverdue;
+    final totalOutstanding = monthlyData != null && monthlyData['outstanding'] is num
+        ? (monthlyData['outstanding'] as num).toDouble()
+        : (_salespersonId == null
+            ? (repo.serverOutstanding != null && repo.serverOutstanding! > 0
+                ? repo.serverOutstanding!
+                : rawOutstanding)
+            : rawOutstanding);
+    final totalOverdue = monthlyData != null && monthlyData['overdue'] is num
+        ? (monthlyData['overdue'] as num).toDouble()
+        : (_salespersonId == null
+            ? (repo.serverOverdue != null && repo.serverOverdue! > 0
+                ? repo.serverOverdue!
+                : rawOverdue)
+            : rawOverdue);
+    final monthCollected = monthlyData != null && monthlyData['monthCollected'] is num
+        ? (monthlyData['monthCollected'] as num).toDouble()
+        : metrics.paymentReceived;
+    final dealersWithBal = monthlyData != null && monthlyData['dealersWithBalance'] is num
+        ? (monthlyData['dealersWithBalance'] as num).toInt()
+        : visibleRows.length;
+    final totalDealersInScope = monthlyData != null && monthlyData['totalDealers'] is num
+        ? (monthlyData['totalDealers'] as num).toInt()
+        : (_salespersonId == null
+            ? (repo.serverActiveDealers ?? repo.customers.length)
+            : (repo.salesTargets.where((t) => repo.matchesSalesperson(t.salesperson, _salespersonId)).isNotEmpty
+                ? repo.salesTargets.where((t) => repo.matchesSalesperson(t.salesperson, _salespersonId)).length
+                : scopeRows.length));
     final scopeName = _salespersonId == null
         ? 'Full team'
         : repo.salespersonName(_salespersonId!);
@@ -330,7 +365,14 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
                         ),
                       ),
                   ],
-                  onChanged: (id) => setState(() => _salespersonId = id),
+                  onChanged: (id) {
+                    setState(() => _salespersonId = id);
+                    context.read<MockRepository>().fetchMonthlyPaymentSummary(
+                          _month.year,
+                          _month.month,
+                          salespersonId: id,
+                        );
+                  },
                   decoration: const InputDecoration(labelText: 'Salesperson Scope'),
                 ),
                 SwitchListTile(
@@ -363,7 +405,7 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
                   title: 'Overdue',
                   value: rupeesShort(totalOverdue),
                   caption:
-                      '${scopeRows.where((row) => row.overdue > 0).length} customer(s) past due date',
+                      '$dealersWithBal customer(s) past due date',
                   icon: Icons.warning_amber_rounded,
                   gradient: AppGradients.danger,
                 ),
@@ -376,7 +418,7 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
               Expanded(
                 child: MetricCard(
                   title: 'Collected • ${monthLabel(_month)}',
-                  value: rupeesShort(metrics.paymentReceived),
+                  value: rupeesShort(monthCollected),
                   caption: 'Payments booked this month in scope',
                   icon: Icons.payments_rounded,
                   gradient: AppGradients.success,
@@ -386,12 +428,10 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
               Expanded(
                 child: MetricCard(
                   title: 'Customers with balance',
-                  value: _salespersonId == null && repo.serverActiveDealers != null
-                      ? '${repo.serverActiveDealers}'
-                      : '${visibleRows.length}',
+                  value: '$dealersWithBal',
                   caption: _overdueOnly
-                      ? 'Overdue only • scope has ${scopeRows.length}'
-                      : 'of ${repo.serverActiveDealers ?? repo.customers.length} customers on record',
+                      ? 'Overdue only • scope has $dealersWithBal'
+                      : 'of $totalDealersInScope customers on record',
                   icon: Icons.groups_rounded,
                   gradient: AppGradients.customer,
                 ),

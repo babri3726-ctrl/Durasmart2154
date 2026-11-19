@@ -105,6 +105,42 @@ class ApiSyncService {
     }
   }
 
+  /// Fetches monthly collections, outstanding, overdue, and dealer counts from /api/v1/payments/monthly-summary
+  static Future<Map<String, dynamic>?> fetchMonthlyPaymentSummary(
+    int year,
+    int month, {
+    String? salesperson,
+    String? salespersonId,
+  }) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+      final params = <String>['year=$year', 'month=$month'];
+      if (salesperson != null && salesperson.isNotEmpty) {
+        params.add('salesperson=${Uri.encodeComponent(salesperson)}');
+      }
+      if (salespersonId != null && salespersonId.isNotEmpty) {
+        params.add('salespersonId=${Uri.encodeComponent(salespersonId)}');
+      }
+      final req = await client.getUrl(Uri.parse('$host/api/v1/payments/monthly-summary?${params.join('&')}'));
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data is Map<String, dynamic>) {
+          return data;
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Synchronizes an order to the backend /api/v1/orders
   static Future<bool> postOrder(Map<String, dynamic> orderPayload) async {
     try {

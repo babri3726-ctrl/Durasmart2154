@@ -5,6 +5,7 @@ Links React Web Owner Cockpit & Mobile App with:
 - Real Punjab & Haryana HR-PB dealers and target synchronization
 - Full wire contract (Dashboard, Customers, Orders, Dispatches, Stock, Debtors, Employees, Payments)
 """
+import calendar
 import hashlib
 import os
 import re
@@ -189,7 +190,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "durasmart-api",
-        "version": "v1.0.6",
+        "version": "v1.0.7",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "database": "connected"
     }
@@ -946,11 +947,19 @@ def get_current_user(authorization: str | None = Header(None)):
 
 # ----------------- Dashboard Summary Contract -----------------
 @app.get("/api/v1/dashboard/summary")
-def get_dashboard_summary(from_date: str | None = Query(None, alias="from"), to_date: str | None = Query(None, alias="to")):
+def get_dashboard_summary(
+    from_date: str | None = Query(None, alias="from"),
+    to_date: str | None = Query(None, alias="to"),
+    salesperson: str | None = None,
+    salespersonId: str | None = None,
+):
     if not isinstance(from_date, str):
         from_date = None
     if not isinstance(to_date, str):
         to_date = None
+
+    target_sp = (salesperson or "").strip()
+    target_sp_id = (salespersonId or "").strip()
 
     ensure_latest_stock_snapshot()
 
@@ -959,6 +968,10 @@ def get_dashboard_summary(from_date: str | None = Query(None, alias="from"), to_
     in_window_orders = []
     for o in orders:
         if o.get("status") == "draft":
+            continue
+        if target_sp and (o.get("salespersonName") or "").strip().lower() != target_sp.lower():
+            continue
+        if target_sp_id and (o.get("salespersonId") or "").strip().lower() != target_sp_id.lower():
             continue
         order_date = o.get("date") or o.get("orderDate") or o.get("createdAt", "")[:10]
         if from_date and order_date < from_date:
@@ -981,22 +994,84 @@ def get_dashboard_summary(from_date: str | None = Query(None, alias="from"), to_
         if to_date and p_date > to_date:
             continue
         in_window_payments.append(p)
+
+    all_time_voucher_paise = 0
+    curr_month_voucher_paise = 0
+    now = datetime.now()
+    curr_m_start = f"{now.year:04d}-{now.month:02d}-01"
+    curr_m_end = f"{now.year:04d}-{now.month:02d}-{calendar.monthrange(now.year, now.month)[1]:02d}"
+
     # In-window receipts from vouchers table (Bank and Day Book receipts)
     try:
         with db.get_connection() as conn:
             cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT COALESCE(SUM(credit_paise), 0)
-                FROM vouchers
-                WHERE LOWER(voucher_type) = 'receipt'
-                  AND (? IS NULL OR voucher_date >= ?)
-                  AND (? IS NULL OR voucher_date <= ?)
-                """,
-                (from_date, from_date, to_date, to_date)
-            )
-            v_rec = cur.fetchone()
-            voucher_collected_paise = v_rec[0] if v_rec else 0
+            if target_sp or target_sp_id:
+                cur.execute(
+                    """
+                    SELECT COALESCE(SUM(v.credit_paise), 0)
+                    FROM vouchers v
+                    JOIN parties p ON (v.party_id = p.id OR LOWER(TRIM(v.party_name)) = LOWER(TRIM(p.name)))
+                    WHERE LOWER(v.voucher_type) = 'receipt'
+                      AND (? IS NULL OR v.voucher_date >= ?)
+                      AND (? IS NULL OR v.voucher_date <= ?)
+                      AND (LOWER(p.salesperson) = LOWER(?) OR p.salesperson_id = ? OR LOWER(?) IN (LOWER(p.salesperson), p.salesperson_id))
+                    """,
+                    (from_date, from_date, to_date, to_date, target_sp, target_sp_id, target_sp or target_sp_id)
+                )
+                v_rec = cur.fetchone()
+                voucher_collected_paise = v_rec[0] if v_rec else 0
+
+                cur.execute(
+                    """
+                    SELECT COALESCE(SUM(v.credit_paise), 0)
+                    FROM vouchers v
+                    JOIN parties p ON (v.party_id = p.id OR LOWER(TRIM(v.party_name)) = LOWER(TRIM(p.name)))
+                    WHERE LOWER(v.voucher_type) = 'receipt'
+                      AND (LOWER(p.salesperson) = LOWER(?) OR p.salesperson_id = ? OR LOWER(?) IN (LOWER(p.salesperson), p.salesperson_id))
+                    """,
+                    (target_sp, target_sp_id, target_sp or target_sp_id)
+                )
+                all_time_voucher_paise = cur.fetchone()[0] or 0
+
+                cur.execute(
+                    """
+                    SELECT COALESCE(SUM(v.credit_paise), 0)
+                    FROM vouchers v
+                    JOIN parties p ON (v.party_id = p.id OR LOWER(TRIM(v.party_name)) = LOWER(TRIM(p.name)))
+                    WHERE LOWER(v.voucher_type) = 'receipt'
+                      AND v.voucher_date >= ? AND v.voucher_date <= ?
+                      AND (LOWER(p.salesperson) = LOWER(?) OR p.salesperson_id = ? OR LOWER(?) IN (LOWER(p.salesperson), p.salesperson_id))
+                    """,
+                    (curr_m_start, curr_m_end, target_sp, target_sp_id, target_sp or target_sp_id)
+                )
+                curr_month_voucher_paise = cur.fetchone()[0] or 0
+            else:
+                cur.execute(
+                    """
+                    SELECT COALESCE(SUM(credit_paise), 0)
+                    FROM vouchers
+                    WHERE LOWER(voucher_type) = 'receipt'
+                      AND (? IS NULL OR voucher_date >= ?)
+                      AND (? IS NULL OR voucher_date <= ?)
+                    """,
+                    (from_date, from_date, to_date, to_date)
+                )
+                v_rec = cur.fetchone()
+                voucher_collected_paise = v_rec[0] if v_rec else 0
+
+                cur.execute("SELECT COALESCE(SUM(credit_paise), 0) FROM vouchers WHERE LOWER(voucher_type) = 'receipt'")
+                all_time_voucher_paise = cur.fetchone()[0] or 0
+
+                cur.execute(
+                    """
+                    SELECT COALESCE(SUM(credit_paise), 0)
+                    FROM vouchers
+                    WHERE LOWER(voucher_type) = 'receipt'
+                      AND voucher_date >= ? AND voucher_date <= ?
+                    """,
+                    (curr_m_start, curr_m_end)
+                )
+                curr_month_voucher_paise = cur.fetchone()[0] or 0
     except Exception:
         voucher_collected_paise = 0
 
@@ -1005,6 +1080,14 @@ def get_dashboard_summary(from_date: str | None = Query(None, alias="from"), to_
     # Current Balances
     debtors = STATE.get("debtors", [])
     customers = STATE.get("customers", [])
+
+    if target_sp or target_sp_id:
+        debtors = [
+            d for d in debtors
+            if (target_sp and (d.get("salesperson") or "").strip().lower() == target_sp.lower())
+            or (target_sp_id and (d.get("salespersonId") or "").strip().lower() == target_sp_id.lower())
+        ]
+        customers = debtors
     
     tot_debtor_bal = sum(round(float(d.get("balance", 0.0)) * 100) for d in debtors)
     tot_cust_bal = sum(int(c.get("outstandingPaise", 0)) for c in customers)
@@ -1085,8 +1168,12 @@ def get_dashboard_summary(from_date: str | None = Query(None, alias="from"), to_
         "orderCount": len(in_window_orders),
         "ordersValuePaise": orders_value,
         "collectedPaise": collected_paise,
+        "allTimeCollectedPaise": all_time_voucher_paise + sum(int(p.get("amountPaise", 0)) for p in payments if not p.get("voidedAt")),
+        "monthCollectedPaise": curr_month_voucher_paise,
         "outstandingPaise": outstanding_paise,
         "overduePaise": overdue_paise,
+        "dealersCount": len(debtors),
+        "activeDealers": len([d for d in debtors if float(d.get("balance", 0.0) or 0.0) > 0 or int(d.get("outstandingPaise", 0) or 0) > 0]),
         "pendingApprovalCustomers": pending_cust,
         "delayedOrderCount": delayed_orders,
         "dispatched": [
@@ -1103,6 +1190,122 @@ def get_dashboard_summary(from_date: str | None = Query(None, alias="from"), to_
                 "mismatchedDispatchLines": 0
             }
         ]
+    }
+
+@app.get("/api/v1/payments/monthly-summary")
+def get_payments_monthly_summary(
+    year: int = Query(default_factory=lambda: datetime.now().year),
+    month: int = Query(default_factory=lambda: datetime.now().month),
+    salesperson: str | None = None,
+    salespersonId: str | None = None,
+):
+    try:
+        persisted = db.load_all_persisted_state()
+        if persisted.get("debtors"):
+            STATE["debtors"] = persisted["debtors"]
+            STATE["customers"] = persisted["debtors"]
+    except Exception:
+        pass
+
+    last_day = calendar.monthrange(year, month)[1]
+    from_date = f"{year:04d}-{month:02d}-01"
+    to_date = f"{year:04d}-{month:02d}-{last_day:02d}"
+
+    target_sp = (salesperson or "").strip()
+    target_sp_id = (salespersonId or "").strip()
+
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        if target_sp or target_sp_id:
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(v.credit_paise), 0)
+                FROM vouchers v
+                JOIN parties p ON (v.party_id = p.id OR LOWER(TRIM(v.party_name)) = LOWER(TRIM(p.name)))
+                WHERE LOWER(v.voucher_type) = 'receipt'
+                  AND v.voucher_date >= ?
+                  AND v.voucher_date <= ?
+                  AND (LOWER(p.salesperson) = LOWER(?) OR p.salesperson_id = ? OR LOWER(?) IN (LOWER(p.salesperson), p.salesperson_id))
+                """,
+                (from_date, to_date, target_sp, target_sp_id, target_sp or target_sp_id)
+            )
+            month_col = cur.fetchone()[0] or 0
+
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(v.credit_paise), 0)
+                FROM vouchers v
+                JOIN parties p ON (v.party_id = p.id OR LOWER(TRIM(v.party_name)) = LOWER(TRIM(p.name)))
+                WHERE LOWER(v.voucher_type) = 'receipt'
+                  AND (LOWER(p.salesperson) = LOWER(?) OR p.salesperson_id = ? OR LOWER(?) IN (LOWER(p.salesperson), p.salesperson_id))
+                """,
+                (target_sp, target_sp_id, target_sp or target_sp_id)
+            )
+            all_time_col = cur.fetchone()[0] or 0
+
+            cur.execute(
+                """
+                SELECT COUNT(*), COALESCE(SUM(balance_paise), 0)
+                FROM parties
+                WHERE (LOWER(salesperson) = LOWER(?) OR salesperson_id = ? OR LOWER(?) IN (LOWER(salesperson), salesperson_id))
+                  AND balance_paise > 0
+                """,
+                (target_sp, target_sp_id, target_sp or target_sp_id)
+            )
+            dealers_with_bal, out_paise = cur.fetchone()
+
+            cur.execute(
+                """
+                SELECT COUNT(*)
+                FROM parties
+                WHERE (LOWER(salesperson) = LOWER(?) OR salesperson_id = ? OR LOWER(?) IN (LOWER(salesperson), salesperson_id))
+                """,
+                (target_sp, target_sp_id, target_sp or target_sp_id)
+            )
+            total_dealers = cur.fetchone()[0]
+        else:
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(credit_paise), 0)
+                FROM vouchers
+                WHERE LOWER(voucher_type) = 'receipt'
+                  AND voucher_date >= ?
+                  AND voucher_date <= ?
+                """,
+                (from_date, to_date)
+            )
+            month_col = cur.fetchone()[0] or 0
+
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(credit_paise), 0)
+                FROM vouchers
+                WHERE LOWER(voucher_type) = 'receipt'
+                """
+            )
+            all_time_col = cur.fetchone()[0] or 0
+
+            cur.execute("SELECT COUNT(*), COALESCE(SUM(balance_paise), 0) FROM parties WHERE balance_paise > 0")
+            dealers_with_bal, out_paise = cur.fetchone()
+
+            cur.execute("SELECT COUNT(*) FROM parties")
+            total_dealers = cur.fetchone()[0]
+
+    return {
+        "year": year,
+        "month": month,
+        "salesperson": target_sp or None,
+        "salespersonId": target_sp_id or None,
+        "monthCollectedPaise": month_col,
+        "monthCollected": round(month_col / 100.0, 2),
+        "allTimeCollectedPaise": all_time_col,
+        "allTimeCollected": round(all_time_col / 100.0, 2),
+        "outstandingPaise": out_paise,
+        "outstanding": round(out_paise / 100.0, 2),
+        "overduePaise": out_paise,
+        "overdue": round(out_paise / 100.0, 2),
+        "dealersWithBalance": dealers_with_bal,
+        "totalDealers": total_dealers,
     }
 
 def get_unified_party_receivables() -> list[dict[str, Any]]:
@@ -1185,7 +1388,7 @@ def get_unified_party_receivables() -> list[dict[str, Any]]:
                 "city": o.get("state") or "",
                 "state": o.get("state") or "",
                 "salesperson": o.get("salespersonName") or "Unassigned",
-                "salespersonId": o.get("salespersonId") or "EMP-SP-01",
+                "salespersonId": (o.get("salespersonId") or "") if (o.get("salespersonName") and o.get("salespersonName").lower() != "unassigned") else "",
                 "balance_paise": 0,
                 "order_paise": order_val,
             }
@@ -2174,12 +2377,12 @@ def resubmit_and_reconcile_endpoint():
 @app.get("/api/v1/app/version")
 def get_app_version():
     return {
-        "version_code": 6,
-        "version_name": "1.0.6",
+        "version_code": 7,
+        "version_name": "1.0.7",
         "download_url": "/api/v1/app/latest-apk",
-        "release_notes": "Payment tower: All Debtors (Full team) switcher, isolated sales rep debtor scoping, and month-filtered collection tracking.",
+        "release_notes": "Live monthly payment collections, 64 real Tally accounts mapped to sales reps, and zero-balance phantom debtor purge.",
         "mandatory": False,
-        "published_at": "2026-11-19T12:45:00+05:30"
+        "published_at": "2026-11-19T15:25:00+05:30"
     }
 
 @app.get("/api/v1/app/latest-apk")

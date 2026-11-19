@@ -48,14 +48,46 @@ class MockRepository extends ChangeNotifier {
   int? serverDelayedOrders;
   int? serverOrdersCount;
   double? serverCollections;
+  double? serverMonthCollections;
+  final Map<String, Map<String, dynamic>> _monthlyPaymentCache = {};
+
+  Future<Map<String, dynamic>?> fetchMonthlyPaymentSummary(
+    int year,
+    int month, {
+    String? salespersonId,
+  }) async {
+    final spName = salespersonId != null ? salespersonName(salespersonId) : null;
+    final cacheKey = '$year-$month-$salespersonId';
+    final remote = await ApiSyncService.fetchMonthlyPaymentSummary(
+      year,
+      month,
+      salesperson: spName,
+      salespersonId: salespersonId,
+    );
+    if (remote != null) {
+      _monthlyPaymentCache[cacheKey] = remote;
+      notifyListeners();
+      return remote;
+    }
+    return _monthlyPaymentCache[cacheKey];
+  }
+
+  Map<String, dynamic>? getMonthlyPaymentCached(
+    int year,
+    int month, {
+    String? salespersonId,
+  }) {
+    final cacheKey = '$year-$month-$salespersonId';
+    return _monthlyPaymentCache[cacheKey];
+  }
   double? serverTargetMt;
   double? serverPendingMt;
   double? serverAchievementPercent;
   int? serverActiveDealers;
   int? serverSalesTeamCount;
   List<SalespersonSummary> salespersonSummaries = [];
-  static const int currentVersionCode = 6;
-  static const String currentVersionName = '1.0.6';
+  static const int currentVersionCode = 7;
+  static const String currentVersionName = '1.0.7';
   AppUpdateInfo? availableUpdate;
   Timer? _syncTimer;
 
@@ -261,7 +293,15 @@ class MockRepository extends ChangeNotifier {
           }
         }
 
-        final colRaw = summary['collectedPaise'];
+        final colMonthRaw = summary['monthCollectedPaise'];
+        if (colMonthRaw is num) {
+          serverMonthCollections = colMonthRaw.toDouble() / 100.0;
+        } else if (colMonthRaw != null) {
+          final parsed = double.tryParse(colMonthRaw.toString());
+          if (parsed != null) serverMonthCollections = parsed / 100.0;
+        }
+
+        final colRaw = summary['allTimeCollectedPaise'] ?? summary['collectedPaise'];
         if (colRaw is num) {
           serverCollections = colRaw.toDouble() / 100.0;
         } else if (colRaw != null) {
@@ -301,8 +341,9 @@ class MockRepository extends ChangeNotifier {
       // 2. Customers & Debtors
       final remoteCusts = await ApiSyncService.fetchCustomers();
       if (remoteCusts != null && remoteCusts.isNotEmpty) {
-        // If live debtors arrived from backend, purge dummy 0-balance seed records
-        debtors.removeWhere((d) => d.id.startsWith('DEBTOR-00') && d.balance == 0.0);
+        // If live debtors arrived from backend, purge dummy seed records
+        debtors.removeWhere((d) => d.id.startsWith('DEBTOR-00') || d.id == 'DEBTOR-010');
+        customers.removeWhere((c) => c.id.startsWith('DEBTOR-00') || c.id == 'DEBTOR-010');
         final parsed = remoteCusts.map(Customer.fromJson).toList();
         for (var i = 0; i < remoteCusts.length; i++) {
           final raw = remoteCusts[i];
@@ -960,9 +1001,12 @@ class MockRepository extends ChangeNotifier {
             )
             .length;
 
-    final collections = (serverCollections != null && salespersonId == null && isCurrentMonth)
-        ? serverCollections!
-        : monthPayments.fold(0.0, (sum, p) => sum + p.amount);
+    final cachedPay = getMonthlyPaymentCached(m.year, m.month, salespersonId: salespersonId);
+    final collections = cachedPay != null && cachedPay['monthCollected'] is num
+        ? (cachedPay['monthCollected'] as num).toDouble()
+        : (isCurrentMonth && salespersonId == null)
+            ? (serverMonthCollections ?? serverCollections ?? 0.0)
+            : monthPayments.fold(0.0, (sum, p) => sum + p.amount);
 
     final ordersCount = (serverOrdersCount != null && salespersonId == null && isCurrentMonth)
         ? serverOrdersCount!
@@ -1886,7 +1930,7 @@ class MockRepository extends ChangeNotifier {
         city: 'Dera Bassi',
         district: 'Mohali',
         salesperson: 'Mozi Ram',
-        balance: 1318583.55,
+        balance: 0.0,
       ),
       DebtorItem(
         id: 'DEBTOR-002',
@@ -1895,7 +1939,7 @@ class MockRepository extends ChangeNotifier {
         city: 'Dera Bassi',
         district: 'Mohali',
         salesperson: 'Mozi Ram',
-        balance: 842100.00,
+        balance: 0.0,
       ),
       DebtorItem(
         id: 'DEBTOR-003',
@@ -1904,7 +1948,7 @@ class MockRepository extends ChangeNotifier {
         city: 'Fazilka',
         district: 'Fazilka',
         salesperson: 'Pankaj Goyal',
-        balance: 716404.00,
+        balance: 0.0,
       ),
       DebtorItem(
         id: 'DEBTOR-004',
@@ -1913,7 +1957,7 @@ class MockRepository extends ChangeNotifier {
         city: 'Tarn Taran',
         district: 'Tarn Taran',
         salesperson: 'Jagdeep Singh',
-        balance: 530292.00,
+        balance: 0.0,
       ),
       DebtorItem(
         id: 'DEBTOR-005',
@@ -1922,7 +1966,7 @@ class MockRepository extends ChangeNotifier {
         city: 'Barnala',
         district: 'Barnala',
         salesperson: 'Pankaj Goyal',
-        balance: 485000.00,
+        balance: 0.0,
       ),
       DebtorItem(
         id: 'DEBTOR-006',
@@ -1931,7 +1975,7 @@ class MockRepository extends ChangeNotifier {
         city: 'FEROZPUR',
         district: 'FEROZPUR',
         salesperson: 'Pankaj Goyal',
-        balance: 320000.00,
+        balance: 0.0,
       ),
       DebtorItem(
         id: 'DEBTOR-007',
@@ -1940,7 +1984,7 @@ class MockRepository extends ChangeNotifier {
         city: 'Tarn Taran',
         district: 'Tarn Taran',
         salesperson: 'Jagdeep Singh',
-        balance: 290000.00,
+        balance: 0.0,
       ),
       DebtorItem(
         id: 'DEBTOR-008',
@@ -1949,7 +1993,7 @@ class MockRepository extends ChangeNotifier {
         city: 'Jagraon',
         district: 'Ludhiana',
         salesperson: 'Sandeep Mahajan',
-        balance: 215000.00,
+        balance: 0.0,
       ),
       DebtorItem(
         id: 'DEBTOR-009',
@@ -1958,7 +2002,7 @@ class MockRepository extends ChangeNotifier {
         city: 'Sirsa',
         district: 'SIRSA',
         salesperson: 'AJAY JI',
-        balance: 185000.00,
+        balance: 0.0,
       ),
       DebtorItem(
         id: 'DEBTOR-010',
@@ -1967,7 +2011,7 @@ class MockRepository extends ChangeNotifier {
         city: 'Jhajjar',
         district: 'JHAJJAR',
         salesperson: 'PANKAJ JI',
-        balance: 145000.00,
+        balance: 0.0,
       ),
     ]);
 
