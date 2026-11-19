@@ -54,8 +54,8 @@ class MockRepository extends ChangeNotifier {
   int? serverActiveDealers;
   int? serverSalesTeamCount;
   List<SalespersonSummary> salespersonSummaries = [];
-  static const int currentVersionCode = 2;
-  static const String currentVersionName = '1.0.2';
+  static const int currentVersionCode = 3;
+  static const String currentVersionName = '1.0.3';
   AppUpdateInfo? availableUpdate;
   Timer? _syncTimer;
 
@@ -476,6 +476,12 @@ class MockRepository extends ChangeNotifier {
         'serverCollections': serverCollections,
         'serverDelayedOrders': serverDelayedOrders,
         'serverOrdersCount': serverOrdersCount,
+        'serverTargetMt': serverTargetMt,
+        'serverPendingMt': serverPendingMt,
+        'serverAchievementPercent': serverAchievementPercent,
+        'serverActiveDealers': serverActiveDealers,
+        'serverSalesTeamCount': serverSalesTeamCount,
+        'salespersonSummaries': salespersonSummaries.map((s) => s.toJson()).toList(),
         'debtors': debtors.map((d) => d.toJson()).toList(),
       };
       await file.writeAsString(jsonEncode(payload));
@@ -506,6 +512,33 @@ class MockRepository extends ChangeNotifier {
           }
           if (decoded['serverOrdersCount'] is num) {
             serverOrdersCount = (decoded['serverOrdersCount'] as num).toInt();
+          }
+          if (decoded['serverTargetMt'] is num) {
+            serverTargetMt = (decoded['serverTargetMt'] as num).toDouble();
+          }
+          if (decoded['serverPendingMt'] is num) {
+            serverPendingMt = (decoded['serverPendingMt'] as num).toDouble();
+          }
+          if (decoded['serverAchievementPercent'] is num) {
+            serverAchievementPercent = (decoded['serverAchievementPercent'] as num).toDouble();
+          }
+          if (decoded['serverActiveDealers'] is num) {
+            serverActiveDealers = (decoded['serverActiveDealers'] as num).toInt();
+          }
+          if (decoded['serverSalesTeamCount'] is num) {
+            serverSalesTeamCount = (decoded['serverSalesTeamCount'] as num).toInt();
+          }
+          final spList = decoded['salespersonSummaries'];
+          if (spList is List) {
+            final cachedSp = spList
+                .whereType<Map<String, dynamic>>()
+                .map(SalespersonSummary.fromJson)
+                .toList();
+            if (cachedSp.isNotEmpty) {
+              salespersonSummaries
+                ..clear()
+                ..addAll(cachedSp);
+            }
           }
           final list = decoded['debtors'];
           if (list is List) {
@@ -789,6 +822,46 @@ class MockRepository extends ChangeNotifier {
     return order.totalQty - orderDispatchedQty(orderId);
   }
 
+  String _cleanSp(String s) => s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+
+  bool matchesSalesperson(String? candidate, String? salespersonId) {
+    if (candidate == null || salespersonId == null) return false;
+    final emp = employeeById(salespersonId);
+    final targetName = emp != null ? emp.name : salespersonId;
+
+    final c1 = _cleanSp(candidate);
+    final c2 = _cleanSp(targetName);
+    if (c1.isNotEmpty && c1 == c2) return true;
+    if (candidate == salespersonId) return true;
+
+    final t1 = candidate.toLowerCase().split(RegExp(r'[\s/_\-]+')).where((t) => t.isNotEmpty).toSet();
+    final t2 = targetName.toLowerCase().split(RegExp(r'[\s/_\-]+')).where((t) => t.isNotEmpty).toSet();
+    return t1.isNotEmpty && t2.isNotEmpty && (t1.containsAll(t2) && t2.containsAll(t1));
+  }
+
+  SalespersonSummary? salespersonSummaryFor(String? salespersonId) {
+    if (salespersonId == null) return null;
+    final emp = employeeById(salespersonId);
+    final targetName = emp != null ? emp.name : salespersonId;
+    final cleanTarget = _cleanSp(targetName);
+
+    // 1. Exact clean match (e.g. "PANKAJ JI" -> "pankajji", "Mozi Ram" -> "moziram")
+    for (final s in salespersonSummaries) {
+      if (_cleanSp(s.salesperson) == cleanTarget || s.salesperson == salespersonId) {
+        return s;
+      }
+    }
+    // 2. Exact word token equality (avoid partial substring collisions)
+    final targetTokens = targetName.toLowerCase().split(RegExp(r'[\s/_\-]+')).where((t) => t.isNotEmpty).toSet();
+    for (final s in salespersonSummaries) {
+      final sTokens = s.salesperson.toLowerCase().split(RegExp(r'[\s/_\-]+')).where((t) => t.isNotEmpty).toSet();
+      if (sTokens.isNotEmpty && targetTokens.isNotEmpty && sTokens.containsAll(targetTokens) && targetTokens.containsAll(sTokens)) {
+        return s;
+      }
+    }
+    return null;
+  }
+
   // ── derived sales metrics ────────────────────────────────────────────
   SalesMetrics salesMetrics({String? salespersonId, DateTime? month}) {
     final m = month ?? DateTime.now();
@@ -807,17 +880,7 @@ class MockRepository extends ChangeNotifier {
               customerBelongsTo(p.customerId, salespersonId)),
     );
 
-    SalespersonSummary? spSummary;
-    if (salespersonId != null) {
-      final emp = employeeById(salespersonId);
-      final empName = emp?.name.toLowerCase().trim() ?? '';
-      spSummary = salespersonSummaries.where((s) {
-        final sName = s.salesperson.toLowerCase().trim();
-        return sName == empName ||
-            s.salesperson == salespersonId ||
-            (empName.isNotEmpty && (empName.contains(sName) || sName.contains(empName)));
-      }).firstOrNull;
-    }
+    final spSummary = salespersonSummaryFor(salespersonId);
 
     final double target = salespersonId != null
         ? (spSummary != null
@@ -851,8 +914,7 @@ class MockRepository extends ChangeNotifier {
             : (debtors.isNotEmpty && salespersonId != null)
                 ? debtors
                     .where((d) =>
-                        d.salesperson.toLowerCase().trim() ==
-                            employeeById(salespersonId)?.name.toLowerCase().trim() ||
+                        matchesSalesperson(d.salesperson, salespersonId) ||
                         d.id == salespersonId)
                     .fold(0.0, (sum, d) => sum + d.balance)
                 : customers
@@ -866,8 +928,7 @@ class MockRepository extends ChangeNotifier {
             : (debtors.isNotEmpty && salespersonId != null)
                 ? debtors
                     .where((d) =>
-                        (d.salesperson.toLowerCase().trim() ==
-                                employeeById(salespersonId)?.name.toLowerCase().trim() ||
+                        (matchesSalesperson(d.salesperson, salespersonId) ||
                             d.id == salespersonId) &&
                         d.balance > 0)
                     .fold(0.0, (sum, d) => sum + d.balance)
@@ -925,6 +986,14 @@ class MockRepository extends ChangeNotifier {
   List<double> lastSixMonthsAchievement({String? salespersonId}) {
     final now = DateTime.now();
     return List.generate(6, (i) {
+      if (i == 5) {
+        if (salespersonId != null) {
+          final sp = salespersonSummaryFor(salespersonId);
+          if (sp != null) return sp.totalDispatchedMt;
+        } else if (serverDispatchesMt != null) {
+          return serverDispatchesMt!;
+        }
+      }
       final m = DateTime(now.year, now.month - (5 - i));
       return orders
           .where(
@@ -1653,8 +1722,8 @@ class MockRepository extends ChangeNotifier {
         department: 'Sales',
         phone: '9814010000',
         email: 'ajay.ji@durasmart.com',
-        city: 'Punjab/Haryana',
-        monthlyTargetQty: 100,
+        city: 'Haryana',
+        monthlyTargetQty: 185,
       ),
       Employee(
         id: 'EMP-SP-02',
@@ -1663,8 +1732,8 @@ class MockRepository extends ChangeNotifier {
         department: 'Sales',
         phone: '9814010001',
         email: 'aksit@durasmart.com',
-        city: 'Punjab/Haryana',
-        monthlyTargetQty: 100,
+        city: 'Punjab',
+        monthlyTargetQty: 23,
       ),
       Employee(
         id: 'EMP-SP-03',
@@ -1673,8 +1742,8 @@ class MockRepository extends ChangeNotifier {
         department: 'Sales',
         phone: '9814010002',
         email: 'gaurav.ji@durasmart.com',
-        city: 'Punjab/Haryana',
-        monthlyTargetQty: 100,
+        city: 'Haryana',
+        monthlyTargetQty: 50,
       ),
       Employee(
         id: 'EMP-SP-04',
@@ -1683,8 +1752,8 @@ class MockRepository extends ChangeNotifier {
         department: 'Sales',
         phone: '9814010003',
         email: 'aakash.kumar@durasmart.com',
-        city: 'Punjab/Haryana',
-        monthlyTargetQty: 100,
+        city: 'Punjab',
+        monthlyTargetQty: 78,
       ),
       Employee(
         id: 'EMP-SP-05',
@@ -1693,8 +1762,8 @@ class MockRepository extends ChangeNotifier {
         department: 'Sales',
         phone: '9814010004',
         email: 'dalip.kumar@durasmart.com',
-        city: 'Punjab/Haryana',
-        monthlyTargetQty: 100,
+        city: 'Punjab',
+        monthlyTargetQty: 50,
       ),
       Employee(
         id: 'EMP-SP-06',
@@ -1703,8 +1772,8 @@ class MockRepository extends ChangeNotifier {
         department: 'Sales',
         phone: '9814010005',
         email: 'jagdeep.singh@durasmart.com',
-        city: 'Punjab/Haryana',
-        monthlyTargetQty: 100,
+        city: 'Punjab',
+        monthlyTargetQty: 271,
       ),
       Employee(
         id: 'EMP-SP-07',
@@ -1713,8 +1782,8 @@ class MockRepository extends ChangeNotifier {
         department: 'Sales',
         phone: '9814010006',
         email: 'mozi.ram@durasmart.com',
-        city: 'Punjab/Haryana',
-        monthlyTargetQty: 100,
+        city: 'Haryana',
+        monthlyTargetQty: 50,
       ),
       Employee(
         id: 'EMP-SP-08',
@@ -1723,8 +1792,8 @@ class MockRepository extends ChangeNotifier {
         department: 'Sales',
         phone: '9814010007',
         email: 'pankaj.ji@durasmart.com',
-        city: 'Punjab/Haryana',
-        monthlyTargetQty: 100,
+        city: 'Haryana',
+        monthlyTargetQty: 280,
       ),
       Employee(
         id: 'EMP-SP-09',
@@ -1733,8 +1802,8 @@ class MockRepository extends ChangeNotifier {
         department: 'Sales',
         phone: '9814010008',
         email: 'pankaj.goyal@durasmart.com',
-        city: 'Punjab/Haryana',
-        monthlyTargetQty: 100,
+        city: 'Punjab',
+        monthlyTargetQty: 127,
       ),
       Employee(
         id: 'EMP-SP-10',
@@ -1743,8 +1812,8 @@ class MockRepository extends ChangeNotifier {
         department: 'Sales',
         phone: '9814010009',
         email: 'sandeep2@durasmart.com',
-        city: 'Punjab/Haryana',
-        monthlyTargetQty: 100,
+        city: 'Punjab',
+        monthlyTargetQty: 87,
       ),
       Employee(
         id: 'EMP-SP-11',
@@ -1753,8 +1822,8 @@ class MockRepository extends ChangeNotifier {
         department: 'Sales',
         phone: '9814010010',
         email: 'sandeep.mahajan@durasmart.com',
-        city: 'Punjab/Haryana',
-        monthlyTargetQty: 100,
+        city: 'Punjab',
+        monthlyTargetQty: 239,
       ),
       Employee(
         id: 'EMP-SP-12',
@@ -1763,8 +1832,8 @@ class MockRepository extends ChangeNotifier {
         department: 'Sales',
         phone: '9814010011',
         email: 'suresh.jindal@durasmart.com',
-        city: 'Punjab/Haryana',
-        monthlyTargetQty: 100,
+        city: 'Punjab',
+        monthlyTargetQty: 99,
       ),
       Employee(
         id: 'EMP-SP-13',
@@ -1773,8 +1842,8 @@ class MockRepository extends ChangeNotifier {
         department: 'Sales',
         phone: '9814010012',
         email: 'vijay.ji@durasmart.com',
-        city: 'Punjab/Haryana',
-        monthlyTargetQty: 100,
+        city: 'Haryana',
+        monthlyTargetQty: 70,
       ),
     ]);
 
@@ -1966,40 +2035,121 @@ class MockRepository extends ChangeNotifier {
 
     salespersonSummaries.addAll([
       SalespersonSummary(
-        salesperson: 'Pankaj Ji',
+        salesperson: 'PANKAJ JI',
         territory: 'Haryana',
         partiesCount: 13,
-        totalTargetMt: 200.0,
-        totalDispatchedMt: 77.58,
-        totalPendingMt: 122.42,
+        totalTargetMt: 280.0,
+        totalDispatchedMt: 108.505,
+        totalPendingMt: 171.495,
         achievementPercent: 38.8,
       ),
       SalespersonSummary(
         salesperson: 'Jagdeep Singh',
         territory: 'Punjab',
         partiesCount: 21,
-        totalTargetMt: 220.0,
-        totalDispatchedMt: 84.52,
-        totalPendingMt: 135.48,
+        totalTargetMt: 271.0,
+        totalDispatchedMt: 104.178,
+        totalPendingMt: 166.822,
         achievementPercent: 38.4,
       ),
       SalespersonSummary(
         salesperson: 'Sandeep Mahajan',
         territory: 'Punjab',
         partiesCount: 33,
-        totalTargetMt: 350.0,
-        totalDispatchedMt: 203.7,
-        totalPendingMt: 146.3,
+        totalTargetMt: 239.0,
+        totalDispatchedMt: 139.036,
+        totalPendingMt: 99.964,
         achievementPercent: 58.2,
       ),
       SalespersonSummary(
-        salesperson: 'Ajay Ji',
+        salesperson: 'AJAY JI',
         territory: 'Haryana',
         partiesCount: 13,
-        totalTargetMt: 150.0,
-        totalDispatchedMt: 6.9,
-        totalPendingMt: 143.1,
+        totalTargetMt: 185.0,
+        totalDispatchedMt: 8.585,
+        totalPendingMt: 176.415,
         achievementPercent: 4.6,
+      ),
+      SalespersonSummary(
+        salesperson: 'Pankaj Goyal',
+        territory: 'Punjab',
+        partiesCount: 7,
+        totalTargetMt: 127.0,
+        totalDispatchedMt: 43.780,
+        totalPendingMt: 83.220,
+        achievementPercent: 34.5,
+      ),
+      SalespersonSummary(
+        salesperson: 'Suresh Jindal',
+        territory: 'Punjab',
+        partiesCount: 7,
+        totalTargetMt: 99.0,
+        totalDispatchedMt: 49.189,
+        totalPendingMt: 49.811,
+        achievementPercent: 49.7,
+      ),
+      SalespersonSummary(
+        salesperson: 'SANDEEP2/Mozi Ram',
+        territory: 'Punjab',
+        partiesCount: 6,
+        totalTargetMt: 87.0,
+        totalDispatchedMt: 28.236,
+        totalPendingMt: 58.764,
+        achievementPercent: 32.5,
+      ),
+      SalespersonSummary(
+        salesperson: 'JAGDEEP 2/ Aakash Kumar',
+        territory: 'Punjab',
+        partiesCount: 16,
+        totalTargetMt: 78.0,
+        totalDispatchedMt: 36.358,
+        totalPendingMt: 41.642,
+        achievementPercent: 46.6,
+      ),
+      SalespersonSummary(
+        salesperson: 'VIJAY JI',
+        territory: 'Haryana',
+        partiesCount: 5,
+        totalTargetMt: 70.0,
+        totalDispatchedMt: 29.145,
+        totalPendingMt: 40.855,
+        achievementPercent: 41.6,
+      ),
+      SalespersonSummary(
+        salesperson: 'Mozi Ram',
+        territory: 'Haryana',
+        partiesCount: 1,
+        totalTargetMt: 50.0,
+        totalDispatchedMt: 28.395,
+        totalPendingMt: 21.605,
+        achievementPercent: 56.8,
+      ),
+      SalespersonSummary(
+        salesperson: 'GAURAV JI',
+        territory: 'Haryana',
+        partiesCount: 5,
+        totalTargetMt: 50.0,
+        totalDispatchedMt: 28.310,
+        totalPendingMt: 21.690,
+        achievementPercent: 56.6,
+      ),
+      SalespersonSummary(
+        salesperson: 'JAGDEEP 3/ Dalip Kumar',
+        territory: 'Punjab',
+        partiesCount: 4,
+        totalTargetMt: 50.0,
+        totalDispatchedMt: 18.059,
+        totalPendingMt: 31.941,
+        achievementPercent: 36.1,
+      ),
+      SalespersonSummary(
+        salesperson: 'Aksit',
+        territory: 'Punjab',
+        partiesCount: 6,
+        totalTargetMt: 23.0,
+        totalDispatchedMt: 0.0,
+        totalPendingMt: 23.0,
+        achievementPercent: 0.0,
       ),
     ]);
     serverTargetMt = 1609.0;

@@ -170,10 +170,7 @@ class _SalesDashboardScreenState extends State<SalesDashboardScreen> {
               ...repo.salespersonSummaries
                   .where((s) {
                     if (_salespersonId == null) return true;
-                    final emp = repo.employeeById(_salespersonId!);
-                    final name = emp?.name.toLowerCase().trim() ?? '';
-                    final sName = s.salesperson.toLowerCase().trim();
-                    return sName == name || name.contains(sName) || sName.contains(name);
+                    return repo.matchesSalesperson(s.salesperson, _salespersonId);
                   })
                   .map(
                     (s) => Padding(
@@ -352,11 +349,12 @@ class _SalesDashboardScreenState extends State<SalesDashboardScreen> {
   }
 
   Widget _metricGrid(MockRepository repo, SalesMetrics metrics) {
+    final sp = _salespersonId != null ? repo.salespersonSummaryFor(_salespersonId) : null;
     final cards = <Widget>[
       HybridKpiCard(
         label: 'Sales Target',
         value: '${metrics.targetQty.toStringAsFixed(1)} MT',
-        hint: 'Total monthly quota',
+        hint: _salespersonId == null ? 'Total monthly quota' : 'Assigned quota',
         icon: Icons.flag_rounded,
         gradient: const LinearGradient(colors: [Color(0xFF2563EB), Color(0xFF4F46E5)]),
       ),
@@ -385,16 +383,22 @@ class _SalesDashboardScreenState extends State<SalesDashboardScreen> {
       ),
       HybridKpiCard(
         label: 'Active Dealers',
-        value: '${repo.serverActiveDealers ?? (repo.salesTargets.isNotEmpty ? repo.salesTargets.length : 137)}',
-        hint: 'Across Punjab & Haryana',
+        value: _salespersonId == null
+            ? '${repo.serverActiveDealers ?? (repo.salesTargets.isNotEmpty ? repo.salesTargets.length : 137)}'
+            : '${sp?.partiesCount ?? repo.salesTargets.where((t) => repo.matchesSalesperson(t.salesperson, _salespersonId)).length}',
+        hint: _salespersonId == null
+            ? 'Across Punjab & Haryana'
+            : 'Parties in ${sp?.territory ?? "Territory"}',
         icon: Icons.groups_rounded,
         gradient: const LinearGradient(colors: [Color(0xFF0284C7), Color(0xFF2563EB)]),
         onTap: () => Navigator.pushNamed(context, '/debtors'),
       ),
       HybridKpiCard(
-        label: 'Sales Team',
-        value: '${repo.salespersonSummaries.isNotEmpty ? repo.salespersonSummaries.length : (repo.serverSalesTeamCount ?? 13)}',
-        hint: 'Field representatives',
+        label: _salespersonId == null ? 'Sales Team' : 'Territory',
+        value: _salespersonId == null
+            ? '${repo.salespersonSummaries.isNotEmpty ? repo.salespersonSummaries.length : (repo.serverSalesTeamCount ?? 13)}'
+            : (sp?.territory ?? 'Assigned'),
+        hint: _salespersonId == null ? 'Field representatives' : 'Assigned Territory',
         icon: Icons.military_tech_rounded,
         gradient: const LinearGradient(colors: [Color(0xFFE11D48), Color(0xFFDC2626)]),
       ),

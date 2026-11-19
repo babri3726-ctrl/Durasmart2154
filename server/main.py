@@ -286,11 +286,16 @@ try:
         STATE["debtors"] = _hrpb["dealers_master"]
         sp_set = sorted({t.get("salesperson") for t in _hrpb["all_targets"] if t.get("salesperson")})
         sp_territory = {}
+        sp_target = {}
+        sp_dispatched = {}
         for t in _hrpb["all_targets"]:
             sp = t.get("salesperson")
             st = t.get("state")
             if sp and st:
                 sp_territory.setdefault(sp, set()).add(st)
+            if sp:
+                sp_target[sp] = sp_target.get(sp, 0.0) + float(t.get("target_mt", 0.0))
+                sp_dispatched[sp] = sp_dispatched.get(sp, 0.0) + float(t.get("dispatched_mt", 0.0))
 
         sp_employees = [
             {
@@ -301,7 +306,9 @@ try:
                 "phone": f"98140{10000+i}",
                 "city": "/".join(sorted(sp_territory.get(sp_name, ["Punjab/Haryana"]))),
                 "salesTerritory": "/".join(sorted(sp_territory.get(sp_name, ["Punjab/Haryana"]))),
-                "monthlyTargetQty": "100.000",
+                "monthlyTargetQty": f"{sp_target.get(sp_name, 100.0):.3f}",
+                "dispatchedQty": f"{sp_dispatched.get(sp_name, 0.0):.3f}",
+                "pendingQty": f"{max(0.0, sp_target.get(sp_name, 100.0) - sp_dispatched.get(sp_name, 0.0)):.3f}",
                 "targetUnit": "MT",
                 "active": True,
                 "mayDispatch": True
@@ -2065,11 +2072,16 @@ def sync_hr_pb_excel():
 
         sp_set = sorted({t.get("salesperson") for t in snap["all_targets"] if t.get("salesperson")})
         sp_territory = {}
+        sp_target = {}
+        sp_dispatched = {}
         for t in snap["all_targets"]:
             sp = t.get("salesperson")
             st = t.get("state")
             if sp and st:
                 sp_territory.setdefault(sp, set()).add(st)
+            if sp:
+                sp_target[sp] = sp_target.get(sp, 0.0) + float(t.get("target_mt", 0.0))
+                sp_dispatched[sp] = sp_dispatched.get(sp, 0.0) + float(t.get("dispatched_mt", 0.0))
 
         STATE["employees"] = [
             {
@@ -2080,7 +2092,9 @@ def sync_hr_pb_excel():
                 "phone": f"98140{10000+i}",
                 "city": "/".join(sorted(sp_territory.get(sp_name, ["Punjab/Haryana"]))),
                 "salesTerritory": "/".join(sorted(sp_territory.get(sp_name, ["Punjab/Haryana"]))),
-                "monthlyTargetQty": "100.000",
+                "monthlyTargetQty": f"{sp_target.get(sp_name, 100.0):.3f}",
+                "dispatchedQty": f"{sp_dispatched.get(sp_name, 0.0):.3f}",
+                "pendingQty": f"{max(0.0, sp_target.get(sp_name, 100.0) - sp_dispatched.get(sp_name, 0.0)):.3f}",
                 "targetUnit": "MT",
                 "active": True,
                 "mayDispatch": True
@@ -2160,12 +2174,12 @@ def resubmit_and_reconcile_endpoint():
 @app.get("/api/v1/app/version")
 def get_app_version():
     return {
-        "version_code": 2,
-        "version_name": "1.0.2",
+        "version_code": 3,
+        "version_name": "1.0.3",
         "download_url": "/api/v1/app/latest-apk",
-        "release_notes": "Live two-way Sales Command Cockpit sync with Web Panel.",
+        "release_notes": "Person-wise sales accuracy fix: exact targets, dispatches, dealer counts, and offline caching.",
         "mandatory": False,
-        "published_at": "2026-11-19T10:04:46+05:30"
+        "published_at": "2026-11-19T10:45:00+05:30"
     }
 
 @app.get("/api/v1/app/latest-apk")
