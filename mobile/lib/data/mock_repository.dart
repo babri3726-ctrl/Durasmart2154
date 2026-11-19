@@ -217,26 +217,54 @@ class MockRepository extends ChangeNotifier {
       // 0. Dashboard Cockpit & Executive Summary
       final summary = await ApiSyncService.fetchDashboardSummary();
       if (summary != null) {
-        if (summary['outstandingPaise'] is num) {
-          serverOutstanding = (summary['outstandingPaise'] as num).toDouble() / 100.0;
+        final outRaw = summary['outstandingPaise'];
+        if (outRaw is num) {
+          serverOutstanding = outRaw.toDouble() / 100.0;
+        } else if (outRaw != null) {
+          final parsed = double.tryParse(outRaw.toString());
+          if (parsed != null) serverOutstanding = parsed / 100.0;
         }
-        if (summary['overduePaise'] is num) {
-          serverOverdue = (summary['overduePaise'] as num).toDouble() / 100.0;
+
+        final ovRaw = summary['overduePaise'];
+        if (ovRaw is num) {
+          serverOverdue = ovRaw.toDouble() / 100.0;
+        } else if (ovRaw != null) {
+          final parsed = double.tryParse(ovRaw.toString());
+          if (parsed != null) serverOverdue = parsed / 100.0;
         }
+
         if (summary['dispatched'] is List && (summary['dispatched'] as List).isNotEmpty) {
           final firstDisp = (summary['dispatched'] as List).first;
-          if (firstDisp is Map && firstDisp['dispatchedQuantity'] is num) {
-            serverDispatchesMt = (firstDisp['dispatchedQuantity'] as num).toDouble();
+          if (firstDisp is Map) {
+            final rawQty = firstDisp['dispatchedQuantity'];
+            if (rawQty is num) {
+              serverDispatchesMt = rawQty.toDouble();
+            } else if (rawQty != null) {
+              serverDispatchesMt = double.tryParse(rawQty.toString()) ?? serverDispatchesMt;
+            }
           }
         }
-        if (summary['collectedPaise'] is num) {
-          serverCollections = (summary['collectedPaise'] as num).toDouble() / 100.0;
+
+        final colRaw = summary['collectedPaise'];
+        if (colRaw is num) {
+          serverCollections = colRaw.toDouble() / 100.0;
+        } else if (colRaw != null) {
+          final parsed = double.tryParse(colRaw.toString());
+          if (parsed != null) serverCollections = parsed / 100.0;
         }
-        if (summary['ordersCount'] is num) {
-          serverOrdersCount = (summary['ordersCount'] as num).toInt();
+
+        final rawOrders = summary['orderCount'] ?? summary['ordersCount'];
+        if (rawOrders is num) {
+          serverOrdersCount = rawOrders.toInt();
+        } else if (rawOrders != null) {
+          serverOrdersCount = int.tryParse(rawOrders.toString()) ?? serverOrdersCount;
         }
-        if (summary['delayedOrderCount'] is num) {
-          serverDelayedOrders = (summary['delayedOrderCount'] as num).toInt();
+
+        final rawDelayed = summary['delayedOrderCount'] ?? summary['delayedOrders'];
+        if (rawDelayed is num) {
+          serverDelayedOrders = rawDelayed.toInt();
+        } else if (rawDelayed != null) {
+          serverDelayedOrders = int.tryParse(rawDelayed.toString()) ?? serverDelayedOrders;
         }
       }
 
