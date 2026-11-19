@@ -54,8 +54,8 @@ class MockRepository extends ChangeNotifier {
   int? serverActiveDealers;
   int? serverSalesTeamCount;
   List<SalespersonSummary> salespersonSummaries = [];
-  static const int currentVersionCode = 4;
-  static const String currentVersionName = '1.0.4';
+  static const int currentVersionCode = 5;
+  static const String currentVersionName = '1.0.5';
   AppUpdateInfo? availableUpdate;
   Timer? _syncTimer;
 
@@ -140,6 +140,9 @@ class MockRepository extends ChangeNotifier {
 
   void addDebtor(DebtorItem item) {
     debtors.insert(0, item);
+    if (serverOutstanding != null) {
+      serverOutstanding = serverOutstanding! + item.balance;
+    }
     // Mirror into customers list so debtor is immediately selectable in New Order form
     final existingCust = customers.where((c) => c.id == item.id).firstOrNull;
     final sp = employees.where(
@@ -181,7 +184,11 @@ class MockRepository extends ChangeNotifier {
   void updateDebtor(DebtorItem item) {
     final idx = debtors.indexWhere((d) => d.id == item.id);
     if (idx != -1) {
+      final oldBalance = debtors[idx].balance;
       debtors[idx] = item;
+      if (serverOutstanding != null) {
+        serverOutstanding = (serverOutstanding! + (item.balance - oldBalance)).clamp(0.0, double.infinity);
+      }
       final sp = employees.where(
         (e) =>
             e.name.toLowerCase() == item.salesperson.toLowerCase() ||
@@ -710,12 +717,10 @@ class MockRepository extends ChangeNotifier {
   }
 
   double customerOutstanding(String customerId) {
-    final debtor = debtors.where(
-      (d) =>
-          d.id == customerId ||
-          (customerById(customerId)?.name.toLowerCase() ==
-              d.name.toLowerCase()),
-    ).firstOrNull;
+    final debtor = debtorById(customerId) ??
+        (customerById(customerId) != null
+            ? debtorById(customerById(customerId)!.name)
+            : null);
     if (debtor != null) {
       return debtor.balance;
     }
@@ -737,12 +742,10 @@ class MockRepository extends ChangeNotifier {
   double customerOverdue(String customerId) {
     final now = DateTime.now();
     var overdue = 0.0;
-    final debtor = debtors.where(
-      (d) =>
-          d.id == customerId ||
-          (customerById(customerId)?.name.toLowerCase() ==
-              d.name.toLowerCase()),
-    ).firstOrNull;
+    final debtor = debtorById(customerId) ??
+        (customerById(customerId) != null
+            ? debtorById(customerById(customerId)!.name)
+            : null);
     if (debtor != null && debtor.balance > 0) {
       overdue += debtor.balance;
     }
@@ -1323,6 +1326,15 @@ class MockRepository extends ChangeNotifier {
     final debtor = debtors.where((d) => d.id == customerId || (customer != null && d.name.toLowerCase().trim() == customer.name.toLowerCase().trim())).firstOrNull;
     if (debtor != null) {
       debtor.balance = (debtor.balance - amount).clamp(0.0, double.infinity);
+    }
+    if (serverOutstanding != null) {
+      serverOutstanding = (serverOutstanding! - amount).clamp(0.0, double.infinity);
+    }
+    if (serverOverdue != null) {
+      serverOverdue = (serverOverdue! - amount).clamp(0.0, double.infinity);
+    }
+    if (serverCollections != null) {
+      serverCollections = serverCollections! + amount;
     }
     _pushNotification(
       'Payment recorded',

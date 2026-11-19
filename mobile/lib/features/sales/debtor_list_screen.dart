@@ -20,25 +20,34 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
   String _selectedTerritory = 'All';
 
   void _showAddDebtorDialog(BuildContext context) {
+    final repo = context.read<MockRepository>();
     final nameCtrl = TextEditingController();
     final cityCtrl = TextEditingController();
     final disttCtrl = TextEditingController();
     final balCtrl = TextEditingController(text: '0.00');
     String stateVal = 'Punjab';
-    final activeSalespeople = <String>[
-      'Mozi Ram',
-      'AJAY JI',
-      'GAURAV JI',
-      'PANKAJ JI',
-      'MUKESH JI',
-      'Amanpreet Singh',
-      'Harpreet Singh',
-      'Gurmeet Singh',
-      'Rajinder Kumar',
-      'Kuldeep Singh',
-      'Unassigned',
-    ];
-    String selectedSp = 'Mozi Ram';
+    final liveTeam = repo.employees
+        .where((e) => e.department == 'Sales')
+        .map((e) => e.name)
+        .toList();
+    final activeSalespeople = liveTeam.isNotEmpty
+        ? liveTeam
+        : <String>[
+            'AJAY JI',
+            'Aksit',
+            'GAURAV JI',
+            'JAGDEEP 2/ Aakash Kumar',
+            'JAGDEEP 3/ Dalip Kumar',
+            'Jagdeep Singh',
+            'Mozi Ram',
+            'PANKAJ JI',
+            'Pankaj Goyal',
+            'SANDEEP2/Mozi Ram',
+            'Sandeep Mahajan',
+            'Suresh Jindal',
+            'VIJAY JI',
+          ];
+    String selectedSp = activeSalespeople.first;
 
     showDialog(
       context: context,
@@ -304,7 +313,9 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
       return a.name.compareTo(b.name);
     });
 
-    final double totalReceivables = items.fold(0.0, (sum, d) => sum + d.balance);
+    final double totalReceivables = (_query.isEmpty && _selectedTerritory == 'All' && repo.serverOutstanding != null && repo.serverOutstanding! > 0)
+        ? repo.serverOutstanding!
+        : items.fold(0.0, (sum, d) => sum + d.balance);
     final int punjabCount = repo.debtors.where((d) => d.state.toLowerCase() == 'punjab').length;
     final int haryanaCount = repo.debtors.where((d) => d.state.toLowerCase() == 'haryana').length;
 

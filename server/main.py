@@ -2174,12 +2174,12 @@ def resubmit_and_reconcile_endpoint():
 @app.get("/api/v1/app/version")
 def get_app_version():
     return {
-        "version_code": 4,
-        "version_name": "1.0.4",
+        "version_code": 5,
+        "version_name": "1.0.5",
         "download_url": "/api/v1/app/latest-apk",
-        "release_notes": "Payment & Collections fix: live ₹56.69 Cr outstanding, on-account receipts for all dealers, and synchronized balances.",
+        "release_notes": "Real-time payment deduction on total outstanding, on-account debtor balance display, and live sales rep assignment.",
         "mandatory": False,
-        "published_at": "2026-11-19T11:40:00+05:30"
+        "published_at": "2026-11-19T12:15:00+05:30"
     }
 
 @app.get("/api/v1/app/latest-apk")

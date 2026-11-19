@@ -285,12 +285,6 @@ class _RecordPaymentScreenState extends State<RecordPaymentScreen> {
         child: ListView(
           padding: AppSpacing.page,
           children: [
-            const DemoNotice(
-              text:
-                  'Demo receipt entry. The payment is stored in the in-memory demo repository so the ledger and '
-                  'outstanding screens update immediately — no bank or accounting entry is created.',
-            ),
-            const SizedBox(height: 14),
             if (customer != null)
               _PositionPanel(
                 customer: customer,
@@ -396,7 +390,9 @@ class _RecordPaymentScreenState extends State<RecordPaymentScreen> {
                       labelText: 'Amount received *',
                       prefixText: '₹ ',
                       helperText: order == null
-                          ? 'Select an invoice to see its balance.'
+                          ? (customer != null
+                              ? 'Party total outstanding: ${rupees(repo.customerOutstanding(customer.id))}'
+                              : 'Select a customer to view balance.')
                           : 'Invoice balance ${rupees(balance)}',
                       helperStyle: const TextStyle(fontSize: 11, height: 1.3),
                     ),
@@ -571,6 +567,15 @@ class _PositionPanel extends StatelessWidget {
                   : 'Balance after ${rupees(entered)}',
               value: rupees(preview),
               valueColor: preview < 0 ? AppColors.orange : AppColors.ink,
+            ),
+          ] else ...[
+            const Divider(height: 22),
+            InfoRow(
+              label: entered <= 0
+                  ? 'Enter an amount to preview'
+                  : 'Balance after ${rupees(entered)}',
+              value: rupees((outstanding - entered).clamp(0.0, double.infinity)),
+              valueColor: (outstanding - entered) < 0 ? AppColors.orange : AppColors.ink,
             ),
           ],
         ],
