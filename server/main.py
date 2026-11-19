@@ -319,12 +319,12 @@ try:
 
         # Ensure all dealers have unified party attributes and alias customers to debtors
         for idx, d in enumerate(STATE["debtors"]):
-            sp_name = d.get("salesperson", "")
-            sp_id = next((e["id"] for e in STATE["employees"] if e["name"].lower() == sp_name.lower()), "EMP-SP-01")
+            sp_name = (d.get("salesperson") or "").strip()
+            sp_id = next((e["id"] for e in STATE["employees"] if e["name"].lower() == sp_name.lower()), "") if sp_name and sp_name.lower() != "unassigned" else ""
             bal = float(d.get("balance", 0.0))
             bal_paise = int(round(bal * 100))
             d.setdefault("mobile", f"98140{20000 + idx}")
-            d.setdefault("salespersonId", sp_id)
+            d["salespersonId"] = d.get("salespersonId") if (d.get("salespersonId") and sp_name.lower() != "unassigned") else sp_id
             d.setdefault("creditDays", 30)
             d.setdefault("contactPerson", d["name"])
             d.setdefault("source", "hr-pb")
@@ -1080,8 +1080,8 @@ def get_dashboard_summary(from_date: str | None = Query(None, alias="from"), to_
     tot_disp_mt = round(base_disp_mt + recorded_disp_mt, 3)
 
     return {
-        "periodStart": from_date or "2026-10-01",
-        "periodEnd": to_date or "2026-10-31",
+        "periodStart": from_date or datetime.now().strftime("%Y-%m-01"),
+        "periodEnd": to_date or datetime.now().strftime("%Y-%m-%d"),
         "orderCount": len(in_window_orders),
         "ordersValuePaise": orders_value,
         "collectedPaise": collected_paise,
@@ -1131,7 +1131,7 @@ def get_unified_party_receivables() -> list[dict[str, Any]]:
                 "city": d.get("city") or d.get("district") or "",
                 "state": d.get("state") or "",
                 "salesperson": d.get("salesperson") or "Unassigned",
-                "salespersonId": d.get("salespersonId") or "EMP-SP-01",
+                "salespersonId": (d.get("salespersonId") or "") if (d.get("salesperson") and d.get("salesperson").lower() != "unassigned") else "",
                 "balance_paise": bal_paise,
                 "order_paise": 0,
             }
@@ -1157,7 +1157,7 @@ def get_unified_party_receivables() -> list[dict[str, Any]]:
                 "city": c.get("city") or c.get("district") or "",
                 "state": c.get("state") or "",
                 "salesperson": c.get("salesperson") or c.get("salespersonName") or "Unassigned",
-                "salespersonId": c.get("salespersonId") or "EMP-SP-01",
+                "salespersonId": (c.get("salespersonId") or "") if (c.get("salesperson") and c.get("salesperson").lower() != "unassigned") else "",
                 "balance_paise": cust_bal,
                 "order_paise": 0,
             }
@@ -1371,8 +1371,8 @@ def get_salesperson_performance(
         rows.append({
             "employeeId": sp_info["id"],
             "employeeName": sp_info["name"],
-            "periodStart": from_date or "2026-10-01",
-            "periodEnd": to_date or "2026-10-31",
+            "periodStart": from_date or datetime.now().strftime("%Y-%m-01"),
+            "periodEnd": to_date or datetime.now().strftime("%Y-%m-%d"),
             "productCategory": productCategory,
             "targetSource": "targets",
             "excludedTargetRows": 0,
@@ -1395,8 +1395,8 @@ def get_salesperson_performance(
     rows.sort(key=lambda r: float(r["units"][0]["targetQuantity"]), reverse=True)
 
     return {
-        "periodStart": from_date or "2026-10-01",
-        "periodEnd": to_date or "2026-10-31",
+        "periodStart": from_date or datetime.now().strftime("%Y-%m-01"),
+        "periodEnd": to_date or datetime.now().strftime("%Y-%m-%d"),
         "productCategory": productCategory,
         "rows": rows
     }
@@ -1778,7 +1778,7 @@ def create_debtor(body: DebtorCreate):
     bal_val = float(body.balance or 0.0)
     bal_paise = round(bal_val * 100)
     sp_name = body.salesperson or "Unassigned"
-    sp_id = next((e["id"] for e in STATE.get("employees", []) if e["name"].lower() == sp_name.lower()), "EMP-SP-01")
+    sp_id = next((e["id"] for e in STATE.get("employees", []) if e["name"].lower() == sp_name.lower()), "") if sp_name.lower() != "unassigned" else ""
     debtor = {
         "id": new_id,
         "name": body.name.strip(),
@@ -2676,7 +2676,7 @@ def create_order(body: dict[str, Any]):
     
     cust_name = body.get("customerName") or (cust.get("name") if cust else "Direct Dealer")
     sp_name = body.get("salespersonName") or (cust.get("salesperson") if cust else "")
-    sp_id = body.get("salespersonId") or (cust.get("salespersonId") if cust else "EMP-SP-01")
+    sp_id = body.get("salespersonId") or (cust.get("salespersonId") if cust else "")
     state_name = body.get("state") or (cust.get("state") if cust else "")
     
     raw_lines = body.get("lines", [])
@@ -3996,7 +3996,7 @@ def assign_territory(
         raise HTTPException(status_code=403, detail="Only owner can assign territories.")
     district_clean = body.district.strip().upper()
     sp_name = body.salesperson.strip()
-    sp_id = body.salespersonId or "EMP-SP-01"
+    sp_id = body.salespersonId or (next((e["id"] for e in STATE.get("employees", []) if e["name"].lower() == sp_name.lower()), "") if sp_name.lower() != "unassigned" else "")
 
     with db.get_connection() as conn:
         conn.execute("""
