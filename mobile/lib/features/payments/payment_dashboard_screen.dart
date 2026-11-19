@@ -23,6 +23,16 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
   String? _salespersonId;
   bool _overdueOnly = false;
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<MockRepository>().syncWithBackend();
+      }
+    });
+  }
+
   void _shiftMonth(int delta) =>
       setState(() => _month = DateTime(_month.year, _month.month + delta));
 
@@ -98,11 +108,21 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
     SalesMetrics metrics,
     MockRepository repo,
   ) {
-    final totalOutstanding = scopeRows.fold(
+    final rawOutstanding = scopeRows.fold(
       0.0,
       (sum, row) => sum + row.outstanding,
     );
-    final totalOverdue = scopeRows.fold(0.0, (sum, row) => sum + row.overdue);
+    final rawOverdue = scopeRows.fold(0.0, (sum, row) => sum + row.overdue);
+    final totalOutstanding = _salespersonId == null
+        ? (repo.serverOutstanding != null && repo.serverOutstanding! > 0
+            ? repo.serverOutstanding!
+            : rawOutstanding)
+        : rawOutstanding;
+    final totalOverdue = _salespersonId == null
+        ? (repo.serverOverdue != null && repo.serverOverdue! > 0
+            ? repo.serverOverdue!
+            : rawOverdue)
+        : rawOverdue;
     final scopeName = _salespersonId == null
         ? 'Full team'
         : repo.salespersonName(_salespersonId!);
@@ -218,11 +238,21 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
       salespersonId: _salespersonId,
       month: _month,
     );
-    final totalOutstanding = scopeRows.fold(
+    final rawOutstanding = scopeRows.fold(
       0.0,
       (sum, row) => sum + row.outstanding,
     );
-    final totalOverdue = scopeRows.fold(0.0, (sum, row) => sum + row.overdue);
+    final rawOverdue = scopeRows.fold(0.0, (sum, row) => sum + row.overdue);
+    final totalOutstanding = _salespersonId == null
+        ? (repo.serverOutstanding != null && repo.serverOutstanding! > 0
+            ? repo.serverOutstanding!
+            : rawOutstanding)
+        : rawOutstanding;
+    final totalOverdue = _salespersonId == null
+        ? (repo.serverOverdue != null && repo.serverOverdue! > 0
+            ? repo.serverOverdue!
+            : rawOverdue)
+        : rawOverdue;
     final scopeName = _salespersonId == null
         ? 'Full team'
         : repo.salespersonName(_salespersonId!);
@@ -250,12 +280,6 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: AppSpacing.page,
           children: [
-          const DemoNotice(
-            text:
-                'Demo payment dashboard. Every figure below is calculated live from the demo orders, payments '
-                'and dispatches on this device — nothing is linked to a bank, ERP or accounting system.',
-          ),
-          const SizedBox(height: 14),
           WhitePanel(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -360,10 +384,12 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
               Expanded(
                 child: MetricCard(
                   title: 'Customers with balance',
-                  value: '${visibleRows.length}',
+                  value: _salespersonId == null && repo.serverActiveDealers != null
+                      ? '${repo.serverActiveDealers}'
+                      : '${visibleRows.length}',
                   caption: _overdueOnly
                       ? 'Overdue only • scope has ${scopeRows.length}'
-                      : 'of ${repo.customers.length} customers on record',
+                      : 'of ${repo.serverActiveDealers ?? repo.customers.length} customers on record',
                   icon: Icons.groups_rounded,
                   gradient: AppGradients.customer,
                 ),

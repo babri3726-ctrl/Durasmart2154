@@ -30,7 +30,41 @@ class _OutstandingScreenState extends State<OutstandingScreen> {
   List<_OutstandingRow> _rows(MockRepository repo) {
     final now = DateTime.now();
     final rows = <_OutstandingRow>[];
+    final seen = <String>{};
+
+    for (final d in repo.debtors) {
+      if (d.balance <= 0.0001) continue;
+      seen.add(d.id.toLowerCase().trim());
+      seen.add(d.name.toLowerCase().trim());
+      rows.add(
+        _OutstandingRow(
+          customer: repo.customerById(d.id) ??
+              Customer(
+                id: d.id,
+                name: d.name,
+                city: d.city.isNotEmpty ? d.city : (d.district.isNotEmpty ? d.district : d.state),
+                mobile: '919800000000',
+                salespersonId: 'EMP-SP-01',
+                type: 'Dealer',
+              ),
+          outstanding: d.balance,
+          overdue: d.balance,
+          overdueDays: 30,
+          salespersonName: d.salesperson.isNotEmpty ? d.salesperson : 'Unassigned',
+          nextDueDate: null,
+          openOrderCount: 0,
+          advance: 0.0,
+          openOrders: const [],
+          now: now,
+        ),
+      );
+    }
+
     for (final customer in repo.customers) {
+      if (seen.contains(customer.id.toLowerCase().trim()) ||
+          seen.contains(customer.name.toLowerCase().trim())) {
+        continue;
+      }
       final outstanding = repo.customerOutstanding(customer.id);
       if (outstanding <= 0.0001) continue;
       final openOrders =
@@ -84,12 +118,13 @@ class _OutstandingScreenState extends State<OutstandingScreen> {
   Widget build(BuildContext context) {
     final repo = context.watch<MockRepository>();
     final rows = _rows(repo);
-    final totalOutstanding = rows.fold(
-      0.0,
-      (sum, row) => sum + row.outstanding,
-    );
-    final totalOverdue = rows.fold(0.0, (sum, row) => sum + row.overdue);
-    final overdueCount = rows.where((row) => row.overdue > 0).length;
+    final totalOutstanding = repo.serverOutstanding != null && repo.serverOutstanding! > 0
+        ? repo.serverOutstanding!
+        : rows.fold(0.0, (sum, row) => sum + row.outstanding);
+    final totalOverdue = repo.serverOverdue != null && repo.serverOverdue! > 0
+        ? repo.serverOverdue!
+        : rows.fold(0.0, (sum, row) => sum + row.overdue);
+    final overdueCount = repo.serverActiveDealers ?? rows.where((row) => row.overdue > 0).length;
 
     return Scaffold(
       appBar: AppBar(

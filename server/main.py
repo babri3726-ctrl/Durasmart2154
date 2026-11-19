@@ -2174,12 +2174,12 @@ def resubmit_and_reconcile_endpoint():
 @app.get("/api/v1/app/version")
 def get_app_version():
     return {
-        "version_code": 3,
-        "version_name": "1.0.3",
+        "version_code": 4,
+        "version_name": "1.0.4",
         "download_url": "/api/v1/app/latest-apk",
-        "release_notes": "Person-wise sales accuracy fix: exact targets, dispatches, dealer counts, and offline caching.",
+        "release_notes": "Payment & Collections fix: live ₹56.69 Cr outstanding, on-account receipts for all dealers, and synchronized balances.",
         "mandatory": False,
-        "published_at": "2026-11-19T10:45:00+05:30"
+        "published_at": "2026-11-19T11:40:00+05:30"
     }
 
 @app.get("/api/v1/app/latest-apk")

@@ -44,7 +44,15 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
   @override
   Widget build(BuildContext context) {
     final repo = context.watch<MockRepository>();
-    final customer = repo.customerById(widget.customerId);
+    final customer = repo.customerById(widget.customerId) ??
+        repo.debtors.where((d) => d.id == widget.customerId).map((d) => Customer(
+              id: d.id,
+              name: d.name,
+              city: d.city.isNotEmpty ? d.city : (d.district.isNotEmpty ? d.district : d.state),
+              mobile: '919800000000',
+              salespersonId: 'EMP-SP-01',
+              type: 'Dealer',
+            )).firstOrNull;
 
     if (customer == null) {
       return Scaffold(

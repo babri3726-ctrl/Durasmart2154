@@ -53,6 +53,20 @@ class _RecordPaymentScreenState extends State<RecordPaymentScreen> {
 
   List<Customer> _customers(MockRepository repo) {
     final list = List<Customer>.from(repo.customers);
+    final seen = list.map((c) => c.id).toSet();
+    for (final d in repo.debtors) {
+      if (!seen.contains(d.id)) {
+        list.add(Customer(
+          id: d.id,
+          name: d.name,
+          city: d.city.isNotEmpty ? d.city : (d.district.isNotEmpty ? d.district : d.state),
+          mobile: '919800000000',
+          salespersonId: 'EMP-SP-01',
+          type: 'Dealer',
+        ));
+        seen.add(d.id);
+      }
+    }
     list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return list;
   }
@@ -114,13 +128,21 @@ class _RecordPaymentScreenState extends State<RecordPaymentScreen> {
     final order = _orderId == null ? null : repo.orderById(_orderId!);
     final customer = _customerId == null
         ? null
-        : repo.customerById(_customerId!);
+        : (repo.customerById(_customerId!) ??
+            repo.debtors.where((d) => d.id == _customerId).map((d) => Customer(
+                  id: d.id,
+                  name: d.name,
+                  city: d.city,
+                  mobile: '919800000000',
+                  salespersonId: 'EMP-SP-01',
+                  type: 'Dealer',
+                )).firstOrNull);
     final formValid = _formKey.currentState?.validate() ?? false;
 
-    if (customer == null || order == null) {
+    if (customer == null) {
       setState(
         () => _formError =
-            'Choose a customer and an invoice before recording a payment.',
+            'Choose a customer before recording a payment.',
       );
       return;
     }
@@ -138,28 +160,29 @@ class _RecordPaymentScreenState extends State<RecordPaymentScreen> {
       return;
     }
 
-    final balance = repo.orderBalance(order.id);
-    if (!_allowAdvance && amount > balance + 0.0001) {
+    final balance = order != null ? repo.orderBalance(order.id) : (repo.debtorById(customer.id)?.balance ?? 0.0);
+    if (order != null && !_allowAdvance && amount > balance + 0.0001) {
       setState(() => _formError = _exceedsMessage(balance));
       return;
     }
 
+    final invoiceLabel = order?.number ?? 'On-Account (Ledger Credit)';
     final confirmed = await ConfirmDialog.show(
       context,
-      title: 'Record payment (demo)',
+      title: 'Record payment',
       message:
-          'Customer: ${customer.name}\nInvoice: ${order.number}\n'
+          'Customer: ${customer.name}\nInvoice: $invoiceLabel\n'
           'Amount: ${rupees(amount)}\nMethod: ${paymentMethodLabel(_method)}\n'
           'Date: ${dateLabel(_date)}\n'
           '${balance - amount >= 0 ? 'Balance after: ${rupees(balance - amount)}' : 'Advance credit: ${rupees(amount - balance)}'}\n\n'
-          'This only writes to the demo data on this device.',
+          'Records receipt and syncs with cloud accounts.',
       confirmLabel: 'Record payment',
     );
     if (!confirmed || !mounted) return;
 
     final payment = repo.recordPayment(
       customerId: customer.id,
-      orderId: order.id,
+      orderId: order?.id,
       amount: amount,
       method: _method,
       date: _date,
@@ -173,18 +196,18 @@ class _RecordPaymentScreenState extends State<RecordPaymentScreen> {
       setState(() {
         _formError =
             'Payment rejected — re-check the amount against the outstanding '
-            '${rupees(repo.orderBalance(order.id))}, or turn on the advance switch.';
+            '${rupees(balance)}, or turn on the advance switch.';
       });
       _formKey.currentState?.validate();
       return;
     }
 
-    final newBalance = repo.orderBalance(order.id);
+    final newBalance = order != null ? repo.orderBalance(order.id) : ((balance - amount) > 0 ? (balance - amount) : 0.0);
     final outstanding = repo.customerOutstanding(customer.id);
     setState(() {
       _lastPaymentId = payment.id;
       _lastCustomerId = customer.id;
-      _lastOrderId = order.id;
+      _lastOrderId = order?.id;
       _formError = null;
     });
     _resetInputFields();

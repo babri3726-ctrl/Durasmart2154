@@ -54,8 +54,8 @@ class MockRepository extends ChangeNotifier {
   int? serverActiveDealers;
   int? serverSalesTeamCount;
   List<SalespersonSummary> salespersonSummaries = [];
-  static const int currentVersionCode = 3;
-  static const String currentVersionName = '1.0.3';
+  static const int currentVersionCode = 4;
+  static const String currentVersionName = '1.0.4';
   AppUpdateInfo? availableUpdate;
   Timer? _syncTimer;
 
@@ -587,6 +587,9 @@ class MockRepository extends ChangeNotifier {
   ];
 
   // ── lookups ──────────────────────────────────────────────────────────
+  DebtorItem? debtorById(String id) =>
+      debtors.where((d) => d.id == id || d.name.toLowerCase().trim() == id.toLowerCase().trim()).firstOrNull;
+
   Customer? customerById(String id) {
     final direct = customers.where((c) => c.id == id).firstOrNull;
     if (direct != null) return direct;

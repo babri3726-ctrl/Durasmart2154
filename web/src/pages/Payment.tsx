@@ -431,12 +431,12 @@ export default function Payment() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div className="rounded-xl border border-line bg-surface p-4 shadow-sm">
               <span className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-muted">
-                <ArrowDownLeft size={14} className="text-emerald-600" /> Total Receipts (Cr)
+                <ArrowDownLeft size={14} className="text-emerald-600" /> Total Bank Receipts (Cr)
               </span>
               <p className="mt-1 font-mono text-lg font-black text-emerald-600">
                 {rupees(bankSummary.totalReceiptsPaise)}
               </p>
-              <span className="text-[10px] text-faint">Deposits &amp; incoming collections</span>
+              <span className="text-[10px] text-faint">Bank deposits (all books &amp; transfers)</span>
             </div>
             <div className="rounded-xl border border-line bg-surface p-4 shadow-sm">
               <span className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-muted">
