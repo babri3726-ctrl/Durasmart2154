@@ -734,10 +734,7 @@ def load_all_persisted_state() -> dict[str, Any]:
             signed_paise = amt if (ob["direction"] or "debit").lower() in ("debit", "owes") else -amt
             ob_by_customer[ob["customer_id"]] = (signed_paise, ob["direction"] or "debit")
 
-        non_debtor_pattern = re.compile(
-            r"^(purchage|purchase|opening stock|closing stock|advance income tax|gst|tds|tcs|discount|round ?off|shares? market|sales less|import bill)|(\b(land|plot|kothi|fac|fec|factory|show ?room|farm house|flat|complex|comlex|hdfc p\.o|yes bank|hdfc bank|cash book)\b)",
-            re.IGNORECASE
-        )
+        from .ledger_classifier import is_sundry_debtor
 
         cur.execute("SELECT * FROM parties ORDER BY name ASC")
         parties = cur.fetchall()
@@ -747,9 +744,7 @@ def load_all_persisted_state() -> dict[str, Any]:
         for p in parties:
             p_name = p["name"] or ""
             p_type = p["party_type"] if "party_type" in p.keys() else "customer"
-            if p_type != "customer":
-                continue
-            if non_debtor_pattern.search(p_name):
+            if not is_sundry_debtor(p_name, p_type):
                 continue
             bal_paise = p["balance_paise"] or 0
             bal_rupees = round(bal_paise / 100.0, 2)
@@ -1106,8 +1101,9 @@ def find_or_create_party_by_name(conn, party_name: str, party_type: str = "custo
                     return pid, False
 
     # 4. Create new party
-    from .voucher_parser import detect_state_and_city
-    state, city = detect_state_and_city(norm_name)
+    from .ledger_classifier import classify_party_name, resolve_location
+    actual_party_type = classify_party_name(norm_name) if party_type == "customer" else party_type
+    city, district, state = resolve_location(norm_name)
     slug = re.sub(r"[^A-Z0-9]", "", norm_name.upper())[:8] or "CUST"
     unique_suffix = hashlib.md5(norm_name.encode("utf-8")).hexdigest()[:4].upper()
     new_id = f"DEBTOR-TALLY-{slug}-{unique_suffix}"
@@ -1118,7 +1114,7 @@ def find_or_create_party_by_name(conn, party_name: str, party_type: str = "custo
         INSERT INTO parties (id, name, state, city, district, salesperson, balance_paise, credit_days, status, party_type, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, 'Unassigned', 0, 30, 'active', ?, ?, ?)
         """,
-        (new_id, norm_name, state, city, city, party_type, now, now)
+        (new_id, norm_name, state, city, district or city, actual_party_type, now, now)
     )
     return new_id, True
 
@@ -1835,18 +1831,14 @@ def import_opening_balances(filepath: str, as_of: str = "") -> dict[str, Any]:
         cur = conn.cursor()
         cur.execute("SELECT id, name FROM parties")
         existing_parties = cur.fetchall()
-        import re
-        non_debtor_pattern = re.compile(
-            r"^(purchage|purchase|opening stock|closing stock|advance income tax|gst|tds|tcs|discount|round ?off|shares? market|sales less|import bill)|(\b(land|plot|kothi|fac|fec|factory|show ?room|farm house|flat|complex|comlex|hdfc p\.o|yes bank|hdfc bank|cash book)\b)",
-            re.IGNORECASE
-        )
+        from .ledger_classifier import is_sundry_debtor
         norm = lambda s: re.sub(r'[^a-z0-9]', '', (s or "").lower())
         p_by_norm = {norm(p[1]): p[0] for p in existing_parties if p[1]}
         p_by_exact = {(p[1] or "").strip().lower(): p[0] for p in existing_parties if p[1]}
 
         for e in entries:
             name = e["name"]
-            if non_debtor_pattern.search(name or ""):
+            if not is_sundry_debtor(name or ""):
                 continue
             norm_name = norm(name)
             party_id = p_by_exact.get(name.lower()) or p_by_norm.get(norm_name)
@@ -1911,6 +1903,51 @@ def import_opening_balances(filepath: str, as_of: str = "") -> dict[str, Any]:
         "totalDebitPaise": data["totalDebitPaise"],
         "totalCreditPaise": data["totalCreditPaise"],
     }
+
+def zero_all_balances() -> dict[str, Any]:
+    """Zeroes all party balances and clears opening balances so fresh Excel can be imported."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE parties SET balance_paise = 0")
+        cur.execute("DELETE FROM opening_balances")
+        conn.commit()
+    return {"success": True, "message": "All party balances successfully set to 0.00 and opening balances cleared."}
+
+def reclassify_all_parties_and_locations() -> dict[str, Any]:
+    """Scans all existing parties in database and updates party_type, city, district, and state."""
+    from .ledger_classifier import classify_party_name, resolve_location
+    updated_types = 0
+    updated_locations = 0
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name, city, district, state, party_type FROM parties")
+        rows = cur.fetchall()
+        for row in rows:
+            p_id = row[0]
+            name = row[1] or ""
+            curr_city = row[2] or ""
+            curr_dist = row[3] or ""
+            curr_state = row[4] or "Punjab"
+            curr_type = row[5] or "customer"
+
+            new_type = classify_party_name(name)
+            city, dist, state = resolve_location(name, fallback_state=curr_state)
+
+            final_city = city or curr_city
+            final_dist = dist or curr_dist or final_city
+            final_state = state or curr_state
+
+            if new_type != curr_type or final_city != curr_city or final_dist != curr_dist or final_state != curr_state:
+                cur.execute(
+                    "UPDATE parties SET party_type = ?, city = ?, district = ?, state = ? WHERE id = ?",
+                    (new_type, final_city, final_dist, final_state, p_id)
+                )
+                if new_type != curr_type:
+                    updated_types += 1
+                if final_city != curr_city or final_dist != curr_dist or final_state != curr_state:
+                    updated_locations += 1
+        conn.commit()
+    return {"success": True, "updated_types": updated_types, "updated_locations": updated_locations}
 
 # ----------------- Invitations & User Management -----------------
 
@@ -2256,41 +2293,15 @@ def seed_real_users(force: bool = False):
             now
         ))
 
-        # Seed 13 HR-PB Employees
-        for emp in DEFAULT_HRPB_EMPLOYEES:
-            e_id = f"usr-{emp['emp_id'].lower()}"
-            e_pwd_hash, e_salt = hash_password(DEFAULT_EMPLOYEE_PASSWORD)
-            conn.execute("""
-                INSERT INTO users (
-                    id, username, email, phone, name, password_hash, salt,
-                    role, department, employee_id, sales_territory, active, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'employee', 'Sales', ?, ?, 1, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    username=excluded.username,
-                    email=excluded.email,
-                    name=excluded.name,
-                    employee_id=excluded.employee_id,
-                    sales_territory=excluded.sales_territory,
-                    updated_at=excluded.updated_at
-            """, (
-                e_id,
-                emp["username"],
-                emp["email"],
-                emp["phone"],
-                emp["name"],
-                e_pwd_hash,
-                e_salt,
-                emp["emp_id"],
-                emp["territory"],
-                now,
-                now
-            ))
-
-        # Purge any dummy placeholder users
+        # Purge any dummy placeholder users from users table
         conn.execute("""
             DELETE FROM users 
-            WHERE username IN ('harpreet', 'dummy', 'admin', 'md', 'director', 'demo')
+            WHERE (email LIKE '%@durasmart.com' AND email NOT IN ('ishu.jindal@durasmart.com', 'babri3726@gmail.com'))
                OR email LIKE '%@example.test'
+               OR email LIKE '%@demo.test'
+               OR username LIKE 'test%'
+               OR username LIKE 'user_%'
+               OR username IN ('harpreet', 'dummy', 'admin', 'md', 'director', 'demo')
         """)
         conn.commit()
 

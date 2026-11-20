@@ -77,6 +77,7 @@ import {
   mergeDebtors,
   updateOpeningBalance,
   uploadOpeningBalances,
+  resetAccountingBalances,
   listEmployees,
   serverHost,
   ServerError,
@@ -978,6 +979,25 @@ function DebtorListCard() {
   const [mergeTargetId, setMergeTargetId] = useState('');
   const [merging, setMerging] = useState(false);
   const [allDebtorsDirectory, setAllDebtorsDirectory] = useState<ServerDebtor[]>([]);
+  const [isResetting, setIsResetting] = useState(false);
+
+  const handleZeroBalances = async () => {
+    if (!window.confirm("Are you sure you want to clean up existing balances and set all to ₹0.00? This clears existing vouchers/opening balances so you can upload your fresh Excel file.")) {
+      return;
+    }
+    setIsResetting(true);
+    try {
+      await resetAccountingBalances();
+      invalidate(syncKeys.debtors);
+      invalidate(syncKeys.dashboard);
+      retry();
+      alert("All existing balances successfully zeroed out! Ready for fresh Excel upload.");
+    } catch (e: any) {
+      alert(e.message || "Failed to zero balances");
+    } finally {
+      setIsResetting(false);
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -1325,6 +1345,16 @@ function DebtorListCard() {
               With Balance Only
             </button>
           </div>
+          <button
+            type="button"
+            disabled={isResetting}
+            onClick={handleZeroBalances}
+            className="flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] font-bold text-rose-700 hover:bg-rose-100 transition shadow-sm"
+            title="Clean up existing balances to ₹0.00 so you can upload a fresh Excel file"
+          >
+            <RefreshCw size={12} className={isResetting ? "animate-spin" : ""} />
+            {isResetting ? "Zeroing..." : "Zero All Balances"}
+          </button>
           <input
             className="input !w-auto !py-2"
             value={term}

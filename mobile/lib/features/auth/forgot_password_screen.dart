@@ -90,40 +90,14 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         _userRole = user?['role'] as String? ?? 'employee';
         _maskedContact = user?['maskedContact'] as String? ?? identifier;
         _devOtp = res['devOtp'] as String?;
-        if (_devOtp != null) {
-          _otpController.text = _devOtp!;
-        }
-        _step = 2;
-      });
-      return;
-    }
-
-    // Offline / Mock fallback check
-    final repo = context.read<MockRepository>();
-    final key = identifier.toLowerCase();
-    final match = repo.demoAccounts.where((a) =>
-        a.email.toLowerCase() == key ||
-        a.id.toLowerCase() == key ||
-        a.employeeId?.toLowerCase() == key ||
-        a.name.toLowerCase() == key ||
-        (key == 'owner' && a.isOwner) ||
-        (key == 'ishujindal' && a.isOwner)).firstOrNull;
-
-    setState(() => _loading = false);
-
-    if (match != null) {
-      setState(() {
-        _userName = match.name;
-        _userRole = match.isOwner ? 'owner' : 'employee';
-        _maskedContact = match.email;
-        _devOtp = '123456';
-        _otpController.text = '123456';
+        _otpController.clear();
         _step = 2;
       });
       return;
     }
 
     setState(() {
+      _loading = false;
       _errorMessage = res?['error'] as String? ??
           'No account found matching "$identifier". Please check your registered email or employee ID.';
     });

@@ -3236,6 +3236,7 @@ export interface ForgotPasswordResult {
   message: string;
   identifier: string;
   devOtp?: string;
+  emailSent?: boolean;
   expiresAt?: string;
   user?: {
     id: string;

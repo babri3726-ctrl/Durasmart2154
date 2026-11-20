@@ -27,7 +27,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _obscure = true;
   bool _loading = false;
-  bool _demoExpanded = false;
   String? _inlineError;
 
   @override
@@ -122,18 +121,8 @@ class _LoginScreenState extends State<LoginScreen> {
     Navigator.pushReplacementNamed(context, '/home');
   }
 
-  void _useAccount(AppUser account) {
-    _idController.text = account.email;
-    _passwordController.text = account.isOwner
-        ? MockRepository.ownerPasscode
-        : MockRepository.employeePasscode;
-    setState(() => _inlineError = null);
-  }
-
   @override
   Widget build(BuildContext context) {
-    final accounts = context.watch<MockRepository>().demoAccounts;
-
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
@@ -144,15 +133,6 @@ class _LoginScreenState extends State<LoginScreen> {
               _hero(),
               const SizedBox(height: 20),
               _formCard(),
-              AppSpacing.gap,
-              _demoAccounts(accounts),
-              AppSpacing.gap,
-              const DemoNotice(
-                text:
-                    'This is local mock authentication, NOT secure authorization. '
-                    'A real backend must verify every login and enforce roles in '
-                    'production. Here the role only filters which tiles are shown.',
-              ),
             ],
           ),
         ),
@@ -227,7 +207,7 @@ class _LoginScreenState extends State<LoginScreen> {
             validator: _validateId,
             decoration: const InputDecoration(
               labelText: 'Email or Employee ID',
-              hintText: 'ishu.jindal@durasmart.com or EMP-SP-01',
+              hintText: 'Enter your email or employee ID',
               prefixIcon: Icon(Icons.badge_rounded, color: AppColors.purple),
             ),
           ),
@@ -318,75 +298,5 @@ class _LoginScreenState extends State<LoginScreen> {
     ),
   );
 
-  Widget _demoAccounts(List<AppUser> accounts) => WhitePanel(
-    padding: const EdgeInsets.all(6),
-    child: Column(
-      children: [
-        ListTile(
-          leading: const Icon(Icons.groups_rounded, color: AppColors.teal),
-          title: const Text('Authorized Team Accounts', style: AppText.heading),
-          subtitle: const Text(
-            'Tap one to autofill the form',
-            style: AppText.caption,
-          ),
-          trailing: Icon(
-            _demoExpanded
-                ? Icons.expand_less_rounded
-                : Icons.expand_more_rounded,
-            color: AppColors.muted,
-          ),
-          onTap: () => setState(() => _demoExpanded = !_demoExpanded),
-        ),
-        if (_demoExpanded)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(6, 0, 6, 8),
-            child: Column(
-              children: [
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(10, 2, 10, 10),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Owner: Ishu Jindal | Sales Team: HR-PB Verified Officers',
-                      style: TextStyle(fontSize: 12, color: AppColors.muted),
-                    ),
-                  ),
-                ),
-                for (final account in accounts)
-                  ListTile(
-                    dense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                    leading: AvatarCircle(name: account.name, size: 34),
-                    title: Text(
-                      account.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 13,
-                      ),
-                    ),
-                    subtitle: Text(
-                      '${account.email} • ${account.department}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppColors.muted,
-                      ),
-                    ),
-                    trailing: StatusChip(
-                      label: account.isOwner ? 'Owner' : 'Employee',
-                      color: account.isOwner
-                          ? AppColors.purple
-                          : AppColors.blue,
-                    ),
-                    onTap: () => _useAccount(account),
-                  ),
-              ],
-            ),
-          ),
-      ],
-    ),
-  );
+
 }

@@ -49,6 +49,24 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
     );
   }
 
+  bool _isNonDebtorLedger(String name) {
+    final lower = name.toLowerCase().trim();
+    if (lower.isEmpty) return true;
+    final nonDebtorTerms = [
+      'exp', 'expense', 'selery', 'salary', 'interst', 'interest',
+      'cash', 'bank', 'hdfc', 'sbi', 'icici', 'axis', 'loan',
+      'mechnery', 'machinery', 'mutul', 'mutual fund', 'house 303',
+      'shop public', 'donation', 'foundation', 'trust', 'huf', 'drawings',
+      'c a', 'audit', 'tax', 'gst', 'tds', 'discount', 'round off'
+    ];
+    final isDealer = RegExp(r'\b(steel|trader|store|industry|enterprises?|corp|co|agro|iron|metal|metel|concast|fabricator|hardware)\b').hasMatch(lower);
+    if (isDealer) return false;
+    for (final term in nonDebtorTerms) {
+      if (lower.contains(term)) return true;
+    }
+    return false;
+  }
+
   List<PaymentDashboardRow> _scopeRows(MockRepository repo) {
     final rows = <PaymentDashboardRow>[];
     final seen = <String>{};
@@ -56,6 +74,7 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
     // 1. Process all live debtors with balances from SQLite / HR-PB
     for (final d in repo.debtors) {
       if (d.balance <= 0) continue;
+      if (_isNonDebtorLedger(d.name)) continue;
       final sp = repo.employees.where(
         (e) =>
             e.name.toLowerCase().trim() == d.salesperson.toLowerCase().trim() ||
@@ -90,6 +109,7 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
 
     // 2. Process any remaining customers with order-based balances
     for (final customer in repo.customers) {
+      if (_isNonDebtorLedger(customer.name)) continue;
       if (seen.contains(customer.id.toLowerCase().trim()) ||
           seen.contains(customer.name.toLowerCase().trim())) {
         continue;

@@ -170,6 +170,24 @@ class MockRepository extends ChangeNotifier {
   final debtors = <DebtorItem>[];
   final salesTargets = <SalesTargetItem>[];
 
+  static bool isNonDebtorLedger(String name) {
+    final lower = name.toLowerCase().trim();
+    if (lower.isEmpty) return true;
+    final nonDebtorTerms = [
+      'exp', 'expense', 'selery', 'salary', 'interst', 'interest',
+      'cash', 'bank', 'hdfc', 'sbi', 'icici', 'axis', 'loan',
+      'mechnery', 'machinery', 'mutul', 'mutual fund', 'house 303',
+      'shop public', 'donation', 'foundation', 'trust', 'huf', 'drawings',
+      'c a', 'audit', 'tax', 'gst', 'tds', 'discount', 'round off'
+    ];
+    final isDealer = RegExp(r'\b(steel|trader|store|industry|enterprises?|corp|co|agro|iron|metal|metel|concast|fabricator|hardware)\b').hasMatch(lower);
+    if (isDealer) return false;
+    for (final term in nonDebtorTerms) {
+      if (lower.contains(term)) return true;
+    }
+    return false;
+  }
+
   void addDebtor(DebtorItem item) {
     debtors.insert(0, item);
     if (serverOutstanding != null) {
@@ -341,8 +359,14 @@ class MockRepository extends ChangeNotifier {
       // 2. Customers & Debtors (Authoritative sync from backend master)
       final remoteCusts = await ApiSyncService.fetchCustomers();
       if (remoteCusts != null) {
-        final parsed = remoteCusts.map(Customer.fromJson).toList();
-        final parsedDebtors = remoteCusts.map(DebtorItem.fromJson).toList();
+        final parsed = remoteCusts
+            .map(Customer.fromJson)
+            .where((c) => !isNonDebtorLedger(c.name))
+            .toList();
+        final parsedDebtors = remoteCusts
+            .map(DebtorItem.fromJson)
+            .where((d) => !isNonDebtorLedger(d.name))
+            .toList();
         customers
           ..clear()
           ..addAll(parsed);
@@ -581,6 +605,7 @@ class MockRepository extends ChangeNotifier {
             final cached = list
                 .whereType<Map<String, dynamic>>()
                 .map(DebtorItem.fromJson)
+                .where((d) => !isNonDebtorLedger(d.name))
                 .toList();
             if (cached.isNotEmpty) {
               debtors
@@ -592,6 +617,7 @@ class MockRepository extends ChangeNotifier {
         } else if (decoded is List) {
           final cached = decoded
               .map((e) => DebtorItem.fromJson(e as Map<String, dynamic>))
+              .where((d) => !isNonDebtorLedger(d.name))
               .toList();
           if (cached.isNotEmpty) {
             for (final d in cached) {

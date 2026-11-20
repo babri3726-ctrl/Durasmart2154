@@ -397,13 +397,11 @@ try:
     # Set STATE["customers"] to STATE["debtors"] for unified single source of truth
     STATE["customers"] = STATE["debtors"]
 
-    # Auto-seed accounting books if vouchers table is empty
-    with db.get_connection() as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM vouchers")
-        v_count = cur.fetchone()[0]
-    if v_count == 0:
-        seed_all_accounting_books()
+    # Reclassify existing parties and fix city/district/state locations
+    try:
+        db.reclassify_all_parties_and_locations()
+    except Exception as _re_err:
+        print(f"Warning: reclassification error: {_re_err}")
 except Exception as e:
     print(f"Warning: Failed to initialize/load SQLite DB: {e}")
 
@@ -717,11 +715,17 @@ def forgot_password(req: ForgotPasswordRequest):
     masked_phone = f"+91 {phone[:5]}*****" if len(phone) >= 10 else phone
     masked = f"{masked_email} / {masked_phone}" if phone else masked_email
 
+    # Deliver real email via SMTP
+    from server.mailer import send_password_reset_email, is_smtp_configured
+    target_email = email if (email and "@" in email) else identifier
+    mail_res = send_password_reset_email(target_email, otp_info["otp"], user.get("name", "Team Member"))
+
     return {
         "status": "ok",
-        "message": "Verification code has been generated. Use the OTP to reset your password.",
+        "message": f"Verification code sent to {masked}. Check your inbox.",
         "identifier": identifier,
-        "devOtp": otp_info["otp"],
+        "devOtp": otp_info["otp"] if not is_smtp_configured() else None,
+        "emailSent": mail_res.get("sent", False),
         "expiresAt": otp_info["expires_at"],
         "user": {
             "id": user["id"],
@@ -2032,9 +2036,10 @@ def get_debtors(
     except Exception:
         pass
 
+    from .ledger_classifier import is_sundry_debtor
     items = [
         d for d in STATE.get("debtors", [])
-        if d.get("name", "").strip().lower() not in ("(as per details)", "discount", "")
+        if is_sundry_debtor(d.get("name", ""), d.get("party_type"))
     ]
     if q:
         query = q.lower().strip()
@@ -2486,17 +2491,31 @@ def resubmit_and_reconcile_endpoint():
     }
 
 @app.post("/api/v1/accounting/reset-balances")
+@app.post("/api/v1/accounting/zero-balances")
+@app.post("/api/v1/debtors/reset-balances")
 def reset_accounting_balances_endpoint():
     """
     Cleans up all accounting balances and transactions:
     Purges all vouchers and opening balances, and resets all party balances to 0.
     """
     res = db.clean_accounting_balances()
-    # Refresh in-memory state
+    db.reclassify_all_parties_and_locations()
+
+    # Zero all in-memory debtor balances
+    for d in STATE.get("debtors", []):
+        d["balance"] = 0.0
+        d["balance_formatted"] = "0.00"
+        d["outstandingPaise"] = 0
+        d["openingPaise"] = 0
+        d["openingBalance"] = 0.0
+        d["overduePaise"] = 0
+        d["isOverdue"] = False
+
     persisted = db.load_all_persisted_state()
     for k in ["debtors", "customers", "opening_balances"]:
         if k in persisted:
             STATE[k] = persisted[k]
+
     return {
         "status": "success",
         "message": "All existing vouchers and opening balances purged; all party balances reset to 0.",

@@ -260,8 +260,24 @@ def get_district_coverage_info(db_path: str = "data/operations.db") -> list[dict
             c = conn.cursor()
             c.execute("SELECT name, city, district, state, salesperson, salesperson_id FROM parties")
             for row in c.fetchall():
-                _, city, dist, st, sp, sp_id = row
+                name, city, dist, st, sp, sp_id = row
                 d_key = (dist or "").strip().upper()
+                if not d_key and city:
+                    c_clean = city.strip().upper()
+                    if c_clean in DISTRICT_COORDINATES:
+                        d_key = c_clean
+                    else:
+                        for k, v in DISTRICT_COORDINATES.items():
+                            if k in c_clean or c_clean in k:
+                                d_key = k
+                                break
+                if not d_key:
+                    # Try matching name
+                    n_clean = (name or "").strip().upper()
+                    for k in DISTRICT_COORDINATES:
+                        if k in n_clean:
+                            d_key = k
+                            break
                 if not d_key:
                     continue
 

@@ -21,39 +21,13 @@ def clean_party_name(raw: Any) -> str:
 
 
 def detect_state_and_city(name: str) -> tuple[str, str]:
-    """Infers state and city from party name keywords."""
-    name_upper = name.upper()
-    punjab_cities = [
-        "LUDHIANA", "AMRITSAR", "JALANDHAR", "PATIALA", "BATHINDA", "HOSHIARPUR",
-        "BARNALA", "FEROZPUR", "FARIDKOT", "KAPURTHALA", "SANGRUR", "MANSA",
-        "BATALA", "MOGA", "ZIRA", "MALOUT", "AJNALA", "BHIKHIWIND", "JAGRAON", "JAGROUN"
-    ]
-    haryana_cities = [
-        "SIRSA", "HISAR", "AMBALA", "PANIPAT", "KARNAL", "KURUKSHETRA",
-        "YAMUNANAGAR", "ROHTAK", "JHAJJAR", "NARNAUL", "HANSI", "PEHOWA",
-        "CHEEKA", "DABWALI", "KAITHAL", "AGROHA"
-    ]
-    up_cities = ["GHAZIABAD", "GBD", "NOIDA", "KANPUR", "LUCKNOW", "MEERUT"]
-    hp_cities = ["KANGRA", "SHIMLA", "SOLAN", "MANDI", "DHARAMSHALA"]
-    rajasthan_cities = ["HANUMANGARH", "HANUMANGRH", "JAIPUR", "SRI GANGANAGAR"]
-
-    for city in punjab_cities:
-        if city in name_upper:
-            return "Punjab", city.title()
-    for city in haryana_cities:
-        if city in name_upper:
-            return "Haryana", city.title()
-    for city in up_cities:
-        if city in name_upper:
-            return "Uttar Pradesh", "Ghaziabad"
-    for city in hp_cities:
-        if city in name_upper:
-            return "Himachal Pradesh", city.title()
-    for city in rajasthan_cities:
-        if city in name_upper:
-            return "Rajasthan", "Hanumangarh"
-
-    return "Punjab", ""
+    """Infers state and city from party name keywords using comprehensive gazetteer."""
+    try:
+        from .ledger_classifier import resolve_location
+        city, district, state = resolve_location(name)
+        return state, city or district
+    except Exception:
+        return "Punjab", ""
 
 
 def normalize_date_str(val: Any) -> str:
