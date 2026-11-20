@@ -2077,6 +2077,39 @@ def verify_user_password(user: dict[str, Any], password: str) -> bool:
     computed, _ = hash_password(password, salt=salt)
     return secrets.compare_digest(computed, expected)
 
+def upsert_user_from_firebase(uid: str, email: str, name: str = "", phone: str = "") -> dict[str, Any]:
+    clean_email = (email or "").strip().lower()
+    existing = (get_user_by_identifier(clean_email) if clean_email else None) or get_user_by_id(uid)
+    if existing:
+        return existing
+    
+    is_owner = (
+        clean_email in ("ishu.jindal@durasmart.com", "owner@durasmart.com", "babri3726@gmail.com")
+        or "owner" in clean_email
+        or "ishu" in clean_email
+    )
+    role = "owner" if is_owner else "employee"
+    dept = "Management" if is_owner else "Sales"
+    emp_id = "OWNER-01" if is_owner else f"EMP-{uid[:6].upper()}"
+    territory = "Executive / All Territories" if is_owner else "Punjab"
+    clean_name = name.strip() or (clean_email.split("@")[0].title() if clean_email else "DuraSmart User")
+    username = clean_email.split("@")[0] if clean_email else f"user_{uid[:6]}"
+    
+    now = datetime.now().isoformat()
+    with get_connection() as conn:
+        conn.execute("""
+            INSERT OR REPLACE INTO users (
+                id, username, email, phone, name, password_hash, salt,
+                role, department, employee_id, sales_territory, active,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, '', '', ?, ?, ?, ?, 1, ?, ?)
+        """, (uid, username, clean_email, phone, clean_name, role, dept, emp_id, territory, now, now))
+        conn.commit()
+    return get_user_by_id(uid) or {
+        "id": uid, "username": username, "email": clean_email, "name": clean_name,
+        "role": role, "department": dept, "employee_id": emp_id, "sales_territory": territory
+    }
+
 def update_user_profile(user_id: str, name: str | None = None, phone: str | None = None) -> dict[str, Any] | None:
     now = datetime.now().isoformat()
     updates = []

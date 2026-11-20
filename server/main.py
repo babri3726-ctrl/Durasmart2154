@@ -26,6 +26,15 @@ from server import db
 from .hr_pb_parser import DEFAULT_HRPB_PATH, extract_hr_pb_targets, get_default_hrpb_path
 from .stock_parser import DEFAULT_ONEDRIVE_PATH, extract_3sheet_stock, get_file_sha256, get_default_stock_path
 
+try:
+    import firebase_admin
+    from firebase_admin import auth as fb_auth
+    if not firebase_admin._apps:
+        firebase_admin.initialize_app(options={"projectId": "durasmart-32cc2"})
+except Exception as _fb_err:
+    print("Firebase Admin initialization note:", _fb_err)
+    fb_auth = None
+
 app = FastAPI(title="Operations API", version="1.0.0")
 
 def ensure_latest_stock_snapshot(force: bool = False) -> dict | None:
@@ -399,6 +408,9 @@ except Exception as e:
     print(f"Warning: Failed to initialize/load SQLite DB: {e}")
 
 # ----------------- Auth Models & Endpoints -----------------
+class FirebaseLoginRequest(BaseModel):
+    idToken: str
+
 class LoginRequest(BaseModel):
     identifier: str | None = None
     username: str | None = None
@@ -641,6 +653,52 @@ def login(req: LoginRequest):
         }
     }
 
+@app.post("/api/v1/auth/firebase-login")
+def firebase_login(req: FirebaseLoginRequest):
+    token_str = (req.idToken or "").strip()
+    if not token_str:
+        raise HTTPException(status_code=400, detail="Firebase idToken is required")
+    
+    uid = None
+    email = ""
+    name = "User"
+    phone = ""
+    
+    if fb_auth is not None:
+        try:
+            decoded = fb_auth.verify_id_token(token_str)
+            uid = decoded.get("uid") or decoded.get("sub") or ""
+            email = (decoded.get("email") or "").strip().lower()
+            name = decoded.get("name") or (email.split("@")[0].title() if email else "User")
+            phone = decoded.get("phone_number") or ""
+        except Exception as e:
+            raise HTTPException(status_code=401, detail=f"Firebase verification error: {e}")
+    else:
+        raise HTTPException(status_code=500, detail="Firebase Admin is not available on server")
+    
+    db_user = db.upsert_user_from_firebase(uid=uid, email=email, name=name, phone=phone)
+    role = db_user.get("role", "employee")
+    emp_id = db_user.get("employee_id") or None
+    user_db_id = db_user.get("id", uid)
+    
+    return {
+        "accessToken": f"jwt-access-token-{role}-{emp_id or 'none'}-{user_db_id}",
+        "refreshToken": f"jwt-refresh-token-{role}-{emp_id or 'none'}-{user_db_id}",
+        "tokenType": "Bearer",
+        "accessExpiresAt": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+        "expiresIn": 86400,
+        "user": {
+            "id": user_db_id,
+            "name": db_user.get("name", name),
+            "email": db_user.get("email", email),
+            "role": role,
+            "department": db_user.get("department", "Management" if role == "owner" else "Sales"),
+            "employeeId": emp_id,
+            "phone": db_user.get("phone", phone),
+            "salesTerritory": db_user.get("sales_territory", "Punjab"),
+        }
+    }
+
 @app.post("/api/v1/auth/forgot-password")
 def forgot_password(req: ForgotPasswordRequest):
     identifier = req.identifier.strip()
@@ -846,6 +904,29 @@ def resolve_caller(
     x_user_id: str | None = None,
     x_employee_id: str | None = None,
 ) -> dict[str, Any]:
+    # Check if raw Firebase ID token is presented
+    if fb_auth is not None and authorization and authorization.lower().startswith("bearer ") and len(authorization) > 100 and not authorization.lower().startswith("bearer jwt-"):
+        raw_fb_tok = authorization.split(" ", 1)[1].strip()
+        try:
+            fb_dec = fb_auth.verify_id_token(raw_fb_tok)
+            fb_email = (fb_dec.get("email") or "").strip().lower()
+            fb_uid = fb_dec.get("uid") or ""
+            is_owner = (
+                fb_email in ("ishu.jindal@durasmart.com", "owner@durasmart.com", "babri3726@gmail.com")
+                or "owner" in fb_email
+                or "ishu" in fb_email
+            )
+            return {
+                "role": "owner" if is_owner else "employee",
+                "department": "Management" if is_owner else "Sales",
+                "employeeId": "OWNER-01" if is_owner else f"EMP-{fb_uid[:6].upper()}",
+                "isOwner": is_owner,
+                "isDispatch": False,
+                "isSales": not is_owner,
+            }
+        except Exception:
+            pass
+
     token = (authorization or "").lower()
     role_header = (x_user_role or "").lower().strip()
     
@@ -2758,10 +2839,10 @@ def get_discount_ledger():
 @app.get("/api/v1/app/version")
 def get_app_version():
     return {
-        "version_code": 10,
-        "version_name": "1.1.1",
+        "version_code": 11,
+        "version_name": "1.1.2",
         "download_url": "/api/v1/app/latest-apk",
-        "release_notes": "Authoritative debtor synchronization, zero-balance fallback fix, and cache invalidation.",
+        "release_notes": "Firebase Authentication integration with unified backend and panel sync.",
         "mandatory": False,
         "published_at": datetime.now().isoformat()
     }

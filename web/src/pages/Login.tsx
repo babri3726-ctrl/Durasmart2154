@@ -2,16 +2,13 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import { useLiveSession } from '../lib/liveSession';
-import { ServerError, serverHost, signIn } from '../lib/serverApi';
+import { ServerError, serverHost, signIn, signInWithFirebaseToken } from '../lib/serverApi';
+import { auth } from '../lib/firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { APP_NAME, APP_SUBTITLE, APP_TAGLINE } from '../lib/appConfig';
 import { toast } from '../lib/toast';
 
-/** The panel's only sign-in: the data source's own.
- *
- *  The stored token this screen produces is what every screen sends, and the rights behind it are
- *  decided by whatever answered — a real backend when `VITE_API_BASE_URL` is set, the built-in
- *  store otherwise. With no backend there is nothing to ask an office for, so the two demo logins
- *  are printed below the form rather than hidden in the source. */
+/** The panel's primary sign-in powered by Firebase Authentication with automatic backend sync. */
 export default function Login() {
   const [idOrEmail, setIdOrEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -25,12 +22,39 @@ export default function Login() {
     setError('');
     setBusy(true);
     try {
-      const serverUser = await signIn(idOrEmail, password);
-      useLiveSession.getState().setUser(serverUser);
-      toast.success(`Signed in as ${serverUser.name}`);
-      navigate('/');
-    } catch (cause) {
-      setError(cause instanceof ServerError ? cause.message : 'The backend could not be reached.');
+      const email = idOrEmail.includes('@') ? idOrEmail.trim() : `${idOrEmail.trim().toLowerCase()}@durasmart.com`;
+      let idToken: string | null = null;
+      try {
+        const cred = await signInWithEmailAndPassword(auth, email, password);
+        idToken = await cred.user.getIdToken();
+      } catch (fbErr: any) {
+        if (fbErr?.code === 'auth/user-not-found' || fbErr?.code === 'auth/invalid-credential') {
+          // If the user does not exist in Firebase yet, attempt to bridge or register them
+          try {
+            const newCred = await createUserWithEmailAndPassword(auth, email, password);
+            idToken = await newCred.user.getIdToken();
+          } catch {
+            // Fallback to direct server login if Firebase registration is restricted
+            const legacyUser = await signIn(idOrEmail, password);
+            useLiveSession.getState().setUser(legacyUser);
+            toast.success(`Signed in as ${legacyUser.name}`);
+            navigate('/');
+            return;
+          }
+        } else {
+          throw fbErr;
+        }
+      }
+
+      if (idToken) {
+        const serverUser = await signInWithFirebaseToken(idToken);
+        useLiveSession.getState().setUser(serverUser);
+        toast.success(`Signed in via Firebase as ${serverUser.name}`);
+        navigate('/');
+      }
+    } catch (cause: any) {
+      const msg = cause?.message || (cause instanceof ServerError ? cause.message : 'Authentication failed.');
+      setError(msg.replace('Firebase: ', ''));
     } finally {
       setBusy(false);
     }

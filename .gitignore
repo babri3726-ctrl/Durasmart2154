@@ -52,5 +52,11 @@ worktrees/
 .playwright-mcp/
 .gemini/
 durasmart.db
+*.xlsx
+*.xls
+data/imports/
+data/*.db
+data/operations.db
+
 
 

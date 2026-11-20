@@ -383,6 +383,16 @@ export async function signIn(identifier: string, password: string): Promise<Serv
   return result.user;
 }
 
+export async function signInWithFirebaseToken(idToken: string): Promise<ServerUser> {
+  const result = await send<LoginResult>('/auth/firebase-login', {
+    method: 'POST',
+    auth: false,
+    body: { idToken },
+  });
+  writeTokens(result.accessToken, result.refreshToken);
+  return result.user;
+}
+
 /** What one rotation attempt produced. `refused` and `unreachable` are the whole distinction:
  *  the first spends the session and the second must not. */
 type RefreshOutcome =

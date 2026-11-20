@@ -933,6 +933,37 @@ class ApiSyncService {
     }
   }
 
+  /// Signs in against the backend /api/v1/auth/firebase-login using a Firebase ID token
+  static Future<Map<String, dynamic>?> loginWithFirebase(String idToken) async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 10);
+      final req = await client.postUrl(
+        Uri.parse('$host/api/v1/auth/firebase-login'),
+      );
+      req.headers.contentType = ContentType.json;
+      req.write(
+        jsonEncode({
+          'idToken': idToken.trim(),
+        }),
+      );
+      final resp = await req.close();
+      final body = await resp.transform(utf8.decoder).join();
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      if (resp.statusCode == 200) {
+        if (data['accessToken'] is String) {
+          setAuthToken(data['accessToken'] as String);
+        }
+        return data;
+      }
+      return {'error': data['detail'] ?? 'Firebase authentication failed'};
+    } catch (e) {
+      return {'error': 'Cannot connect to server ($e)'};
+    }
+  }
+
   /// Signs in against the backend /api/v1/auth/login
   static Future<Map<String, dynamic>?> loginUser(
     String identifier,

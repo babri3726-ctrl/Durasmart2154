@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../core/api_sync_service.dart';
 import '../../core/formatters.dart';
@@ -63,10 +64,38 @@ class _LoginScreenState extends State<LoginScreen> {
       _inlineError = null;
     });
 
-    final onlineRes = await ApiSyncService.loginUser(
-      _idController.text.trim(),
-      _passwordController.text,
-    );
+    final id = _idController.text.trim();
+    final pwd = _passwordController.text;
+    final email = id.contains('@') ? id : '${id.toLowerCase()}@durasmart.com';
+
+    String? fbToken;
+    try {
+      final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: email,
+        password: pwd,
+      );
+      fbToken = await cred.user?.getIdToken();
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'user-not-found' || e.code == 'invalid-credential') {
+        try {
+          final newCred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+            email: email,
+            password: pwd,
+          );
+          fbToken = await newCred.user?.getIdToken();
+        } catch (_) {}
+      }
+    } catch (_) {}
+
+    Map<String, dynamic>? onlineRes;
+    if (fbToken != null) {
+      onlineRes = await ApiSyncService.loginWithFirebase(fbToken);
+    }
+
+    if (onlineRes == null || onlineRes['user'] == null) {
+      // Fallback to direct backend credentials check
+      onlineRes = await ApiSyncService.loginUser(id, pwd);
+    }
 
     if (!mounted) return;
 
@@ -79,10 +108,7 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    final user = repo.authenticate(
-      _idController.text,
-      _passwordController.text,
-    );
+    final user = repo.authenticate(id, pwd);
     if (!mounted) return;
     setState(() => _loading = false);
     if (user == null) {

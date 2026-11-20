@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "683661642672",
+    "project_id": "durasmart-32cc2",
+    "storage_bucket": "durasmart-32cc2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:683661642672:android:98742e06e7d9a604d0a475",
+        "android_client_info": {
+          "package_name": "com.demoops.mobile"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "683661642672-kuvk3gnof9gvpqceu4hfnmqt12k2jvu2.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDibPYY9fAGbcc2Dieq73MB1C0hIOI9onE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "683661642672-kuvk3gnof9gvpqceu4hfnmqt12k2jvu2.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
