@@ -235,6 +235,13 @@ class MoreScreen extends StatelessWidget {
                 AppGradients.employee,
               ),
               _Item(
+                'Staff Invite Codes',
+                'Generate & manage invites',
+                '/employees',
+                Icons.vpn_key_rounded,
+                AppGradients.brand,
+              ),
+              _Item(
                 'Profile',
                 'Your account details',
                 '/profile',

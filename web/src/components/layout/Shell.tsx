@@ -4,7 +4,7 @@ import {
   BookOpen,
   LayoutDashboard, TrendingUp, Wallet, Truck, Boxes,
   Map, Route, AlarmClock, Users, ShoppingCart, FilePlus2, IdCard, BarChart3, Settings, ReceiptIndianRupee,
-  Megaphone,
+  Megaphone, KeyRound,
   ChevronLeft, ChevronRight, LogOut, Menu, User,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -34,6 +34,7 @@ const NAV: { label: string; to: string; icon: LucideIcon; end?: boolean; hidden?
   { label: 'Orders', to: '/orders', icon: ShoppingCart, end: true },
   { label: 'New Order', to: '/orders/new', icon: FilePlus2, end: true },
   { label: 'Employees', to: '/employees', icon: IdCard },
+  { label: 'Staff Invitations', to: '/employees', icon: KeyRound },
   { label: 'Reports', to: '/reports', icon: BarChart3 },
   { label: 'Settings', to: '/settings', icon: Settings },
 ];
@@ -125,6 +126,7 @@ function ProfileMenu() {
 function Header() {
   const collapsed = useUi((s) => s.collapsed);
   const toggleMobileNav = useUi((s) => s.toggleMobileNav);
+  const user = useLiveSession((s) => s.user);
   return (
     <header
       className={`no-print sticky top-0 z-30 flex flex-wrap items-center gap-3 border-b border-line bg-white/85 px-4 py-3 backdrop-blur transition-all sm:px-5 ${collapsed ? 'lg:ml-[68px]' : 'lg:ml-60'}`}
@@ -132,7 +134,16 @@ function Header() {
       <button className="rounded-xl border border-line bg-white p-2 text-muted hover:text-ink lg:hidden" onClick={toggleMobileNav} aria-label="Open navigation">
         <Menu size={17} />
       </button>
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex items-center gap-2.5">
+        {user?.role === 'owner' && (
+          <NavLink
+            to="/employees"
+            className="hidden sm:inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-[#4F46E5] to-[#7C3AED] px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:opacity-95 transition-opacity"
+          >
+            <KeyRound size={13} />
+            <span>Generate Invite Code</span>
+          </NavLink>
+        )}
         <ProfileMenu />
       </div>
     </header>

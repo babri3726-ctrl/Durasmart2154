@@ -404,6 +404,14 @@ class _HomeDashboard extends StatelessWidget {
       'Live yard & 1-Click Sync',
       AppGradients.dispatch,
     ),
+    _MenuEntry(
+      'Staff Invite Codes',
+      '/employees',
+      Icons.vpn_key_rounded,
+      'Generate & manage staff invites',
+      AppGradients.brand,
+      showForEmployee: false,
+    ),
   ];
 
   @override
