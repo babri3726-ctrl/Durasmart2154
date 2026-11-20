@@ -1,6 +1,6 @@
 name: demo_operations_mobile
 description: Demo Operations - cross-platform business management UI prototype.
-version: 1.0.8+8
+version: 1.1.0+9
 publish_to: 'none'
 
 environment:

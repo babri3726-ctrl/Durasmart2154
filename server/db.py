@@ -723,6 +723,9 @@ def load_all_persisted_state() -> dict[str, Any]:
         seen_debtor_names = set()
         for p in parties:
             p_name = p["name"] or ""
+            p_type = p["party_type"] if "party_type" in p.keys() else "customer"
+            if p_type != "customer":
+                continue
             if non_debtor_pattern.search(p_name):
                 continue
             bal_paise = p["balance_paise"] or 0
@@ -1045,7 +1048,7 @@ def load_opening_balances() -> dict[str, list[dict[str, Any]]]:
 
 # ----------------- Vouchers & Transaction Ledger -----------------
 
-def find_or_create_party_by_name(conn, party_name: str) -> tuple[str, bool]:
+def find_or_create_party_by_name(conn, party_name: str, party_type: str = "customer") -> tuple[str, bool]:
     """Finds an existing party or creates a new one in SQLite. Returns (party_id, is_new)."""
     import re
     norm_name = " ".join(party_name.strip().split())
@@ -1089,10 +1092,10 @@ def find_or_create_party_by_name(conn, party_name: str) -> tuple[str, bool]:
 
     conn.execute(
         """
-        INSERT INTO parties (id, name, state, city, district, salesperson, balance_paise, credit_days, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'Unassigned', 0, 30, 'active', ?, ?)
+        INSERT INTO parties (id, name, state, city, district, salesperson, balance_paise, credit_days, status, party_type, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'Unassigned', 0, 30, 'active', ?, ?, ?)
         """,
-        (new_id, norm_name, state, city, city, now, now)
+        (new_id, norm_name, state, city, city, party_type, now, now)
     )
     return new_id, True
 
@@ -1178,7 +1181,11 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
         for v in vouchers:
             v_id = v["id"]
             party_name = v["partyName"]
-            party_id, is_new = find_or_create_party_by_name(conn, party_name)
+            if v.get("partyId"):
+                party_id = v["partyId"]
+                is_new = False
+            else:
+                party_id, is_new = find_or_create_party_by_name(conn, party_name, party_type=v.get("partyType", "customer"))
             if is_new:
                 new_parties_count += 1
             v["partyId"] = party_id
@@ -1320,11 +1327,11 @@ def reconcile_adjustment_vouchers(
             cur.execute(
                 """
                 SELECT id, voucher_no FROM vouchers
-                WHERE LOWER(party_name) = ?
+                WHERE (LOWER(party_name) IN (?, ? || ' ledger') OR party_id IN ('LEDGER-DISCOUNT', 'LEDGER-ROUNDOFF'))
                   AND voucher_date = ?
                   AND (debit_paise = ? OR credit_paise = ?)
                 """,
-                (target_generic_party.lower(), vdate, amt_paise, amt_paise)
+                (target_generic_party.lower(), target_generic_party.lower(), vdate, amt_paise, amt_paise)
             )
             candidates = cur.fetchall()
             match = next((row for row in candidates if row[0] not in claimed_match_ids), None)
@@ -1380,10 +1387,10 @@ def reconcile_adjustment_vouchers(
             recompute_party_balance(pid, conn)
 
         # Clear fake generic party balance
-        cur.execute("SELECT id FROM parties WHERE LOWER(name) = ?", (target_generic_party.lower(),))
-        target_row = cur.fetchone()
-        if target_row:
-            recompute_party_balance(target_row[0], conn)
+        cur.execute("SELECT id FROM parties WHERE LOWER(name) IN (?, ? || ' ledger')", (target_generic_party.lower(), target_generic_party.lower()))
+        target_rows = cur.fetchall()
+        for tr in target_rows:
+            recompute_party_balance(tr[0], conn)
 
         conn.commit()
 

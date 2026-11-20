@@ -726,7 +726,7 @@ class ApiSyncService {
     final host = await resolveWorkingHost();
     if (host == null) return null;
     try {
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
       final req = await client.getUrl(Uri.parse('$host/api/v1/app/version'));
       final resp = await req.close();
       if (resp.statusCode == 200) {

@@ -3491,6 +3491,127 @@ export function getDueAlarms(employeeId?: string): Promise<{ dueAlarms: ServerTa
   return send<{ dueAlarms: ServerTask[]; count: number }>(`/tasks/due-alarms${qStr ? `?${qStr}` : ''}`);
 }
 
+// ── Multi-Excel 4-Book Sync Hub ──────────────────────────────────────────
+
+export interface MultiExcelFileInfo {
+  filename: string;
+  detectedType: 'daybook' | 'roundoff' | 'discount' | 'trialbalance' | 'unknown';
+  sizeBytes: number;
+  fileSha256: string;
+  details?: {
+    voucherCount?: number;
+    count?: number;
+    bookSource?: string;
+    periodText?: string;
+    totalDebitPaise?: number;
+    totalCreditPaise?: number;
+    voucherTypes?: Record<string, number>;
+    stockEntriesDisabled?: number;
+    sample?: any[];
+  };
+  error?: string;
+}
+
+export interface MultiExcelPreviewResponse {
+  status: string;
+  filesCount: number;
+  files: MultiExcelFileInfo[];
+}
+
+export interface MultiExcelApplyResponse {
+  status: string;
+  message: string;
+  results: Record<string, any>;
+}
+
+export async function previewMultiExcel(files: File[]): Promise<MultiExcelPreviewResponse> {
+  const formData = new FormData();
+  for (const f of files) {
+    formData.append('files', f);
+  }
+  const token = localStorage.getItem('durasmart_access_token');
+  const res = await fetch('/api/v1/imports/multi-excel/preview', {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to preview multi-excel bundle' }));
+    throw new Error(err.detail || 'Preview failed');
+  }
+  return res.json();
+}
+
+export async function applyMultiExcel(files: File[]): Promise<MultiExcelApplyResponse> {
+  const formData = new FormData();
+  for (const f of files) {
+    formData.append('files', f);
+  }
+  const token = localStorage.getItem('durasmart_access_token');
+  const res = await fetch('/api/v1/imports/multi-excel/apply', {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to apply multi-excel bundle' }));
+    throw new Error(err.detail || 'Apply failed');
+  }
+  return res.json();
+}
+
+export interface CashLedgerResponse {
+  category: string;
+  accounts: Array<{ id: string; name: string; balance: number; balance_paise: number }>;
+  totalBalance: number;
+  totalBalancePaise: number;
+  vouchers: ServerVoucher[];
+}
+
+export interface BankLedgerResponse {
+  category: string;
+  accounts: Array<{ id: string; name: string; balance: number; balance_paise: number }>;
+  totalBalance: number;
+  totalBalancePaise: number;
+  vouchers: ServerVoucher[];
+}
+
+export interface RoundoffLedgerResponse {
+  ledger: string;
+  partyId: string;
+  voucherCount: number;
+  totalDebit: number;
+  totalCredit: number;
+  netAmount: number;
+  vouchers: ServerVoucher[];
+}
+
+export interface DiscountLedgerResponse {
+  ledger: string;
+  partyId: string;
+  voucherCount: number;
+  totalDebit: number;
+  totalCredit: number;
+  vouchers: ServerVoucher[];
+}
+
+export function getCashLedger(): Promise<CashLedgerResponse> {
+  return send<CashLedgerResponse>('/ledgers/cash');
+}
+
+export function getBankLedger(): Promise<BankLedgerResponse> {
+  return send<BankLedgerResponse>('/ledgers/bank');
+}
+
+export function getRoundoffLedger(): Promise<RoundoffLedgerResponse> {
+  return send<RoundoffLedgerResponse>('/ledgers/roundoff');
+}
+
+export function getDiscountLedger(): Promise<DiscountLedgerResponse> {
+  return send<DiscountLedgerResponse>('/ledgers/discount');
+}
+
+
 
 
 

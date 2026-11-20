@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 import {
+  Building2,
   CheckCircle2,
   FileSpreadsheet,
   FileText,
   Filter,
+  Layers,
+  Percent,
   RefreshCw,
   Search,
   Trash2,
+  TrendingDown,
+  TrendingUp,
   Upload,
+  Wallet,
   X,
 } from 'lucide-react';
 import { Card, KpiCard, PageHeader } from '../components/ui/Card';
@@ -16,39 +22,125 @@ import { rupees } from '../lib/format';
 import { invalidate, syncKeys } from '../lib/syncStore';
 import { toast } from '../lib/toast';
 import {
-  applyPaymentWorkbook,
+  applyMultiExcel,
+  BankLedgerResponse,
+  CashLedgerResponse,
   deleteVoucher,
+  DiscountLedgerResponse,
+  getBankLedger,
+  getCashLedger,
+  getDiscountLedger,
+  getRoundoffLedger,
   listVouchers,
-  previewPaymentWorkbook,
-  ServerDebtorPreview,
+  MultiExcelFileInfo,
+  MultiExcelPreviewResponse,
+  previewMultiExcel,
+  RoundoffLedgerResponse,
   ServerVoucher,
 } from '../lib/serverApi';
 
 const PAGE_SIZE = 25;
 
+type LedgerTab =
+  | 'all'
+  | 'cash'
+  | 'bank'
+  | 'roundoff'
+  | 'discount'
+  | 'sales'
+  | 'payment'
+  | 'receipt'
+  | 'contra'
+  | 'journal'
+  | 'credit note'
+  | 'debit note';
+
+interface MultiUploadSlot {
+  key: 'daybook' | 'roundoff' | 'discount' | 'trialbalance';
+  title: string;
+  description: string;
+  hint: string;
+  expectedName: string;
+  file?: File;
+  preview?: MultiExcelFileInfo;
+}
+
 export default function Daybook() {
   const [vouchers, setVouchers] = useState<ServerVoucher[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedType, setSelectedType] = useState<string>('all');
+  const [selectedTab, setSelectedTab] = useState<LedgerTab>('all');
   const [selectedSource, setSelectedSource] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
+  const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
 
-  // Upload modal state
+  // Dedicated Ledger Metadata
+  const [cashMeta, setCashMeta] = useState<CashLedgerResponse | null>(null);
+  const [bankMeta, setBankMeta] = useState<BankLedgerResponse | null>(null);
+  const [roundoffMeta, setRoundoffMeta] = useState<RoundoffLedgerResponse | null>(null);
+  const [discountMeta, setDiscountMeta] = useState<DiscountLedgerResponse | null>(null);
+
+  // 4-Excel Unified Upload Hub Modal State
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<ServerDebtorPreview | null>(null);
+  const [slots, setSlots] = useState<Record<string, MultiUploadSlot>>({
+    daybook: {
+      key: 'daybook',
+      title: 'Day Book',
+      description: 'Master voucher register (Sales, Purchases, Payments, Receipts, Contra)',
+      hint: 'Stock entries auto-disabled; Cash & Banks contra tracked',
+      expectedName: 'DAYBOOK.xlsx',
+    },
+    roundoff: {
+      key: 'roundoff',
+      title: 'Round Off Ledger',
+      description: 'Dedicated rounding adjustments (P&L register)',
+      hint: 'Separated from customer trade debtor balances',
+      expectedName: 'ROUNDOFF.xlsx',
+    },
+    discount: {
+      key: 'discount',
+      title: 'Discount Ledger',
+      description: 'Customer discounts (Cash/Trade/Scheme)',
+      hint: 'Reconciles debtor credits while tracking discount totals',
+      expectedName: 'DISCOUNT.xlsx',
+    },
+    trialbalance: {
+      key: 'trialbalance',
+      title: 'Trial Balance / Opening',
+      description: 'Master ledger baseline opening balances',
+      hint: 'Auto-maps baseline opening for debtors, creditors, cash & bank',
+      expectedName: 'TRIALBALANCE.xlsx',
+    },
+  });
+
+  const [multiPreview, setMultiPreview] = useState<MultiExcelPreviewResponse | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [applying, setApplying] = useState(false);
-  const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
 
   const fileInputId = useId();
 
+  // Load vouchers according to selected view/tab
   const loadData = useCallback(() => {
     setLoading(true);
+
+    let effectiveSource: string | undefined = selectedSource === 'all' ? undefined : selectedSource;
+    let effectiveType: string | undefined = undefined;
+
+    if (selectedTab === 'cash') {
+      effectiveSource = 'Cash Book';
+    } else if (selectedTab === 'bank') {
+      effectiveSource = 'bank';
+    } else if (selectedTab === 'roundoff') {
+      effectiveSource = 'Round Off Ledger';
+    } else if (selectedTab === 'discount') {
+      effectiveSource = 'Discount Ledger';
+    } else if (selectedTab !== 'all') {
+      effectiveType = selectedTab;
+    }
+
     listVouchers({
-      bookSource: selectedSource === 'all' ? undefined : selectedSource,
-      voucherType: selectedType === 'all' ? undefined : selectedType,
+      bookSource: effectiveSource,
+      voucherType: effectiveType,
       q: searchQuery.trim() || undefined,
       limit: 20000,
     })
@@ -60,58 +152,97 @@ export default function Daybook() {
         toast.error(`Failed to load Day Book: ${err.message || 'Error'}`);
         setLoading(false);
       });
-  }, [selectedSource, selectedType, searchQuery]);
+  }, [selectedSource, selectedTab, searchQuery]);
+
+  // Load dedicated ledger summaries
+  const loadLedgerSummaries = useCallback(() => {
+    getCashLedger().then(setCashMeta).catch(() => {});
+    getBankLedger().then(setBankMeta).catch(() => {});
+    getRoundoffLedger().then(setRoundoffMeta).catch(() => {});
+    getDiscountLedger().then(setDiscountMeta).catch(() => {});
+  }, []);
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+    loadLedgerSummaries();
+  }, [loadData, loadLedgerSummaries]);
 
-  // File selection & preview
-  const handleFileChange = async (file: File) => {
-    setSelectedFile(file);
+  // File Drop / Selection for 4-Slot Hub
+  const handleFilesDropped = (droppedFiles: FileList | File[]) => {
+    const nextSlots = { ...slots };
+    const filesArr = Array.from(droppedFiles);
+
+    for (const f of filesArr) {
+      const fn = f.name.toLowerCase();
+      if (fn.includes('round') || fn.includes('roun')) {
+        nextSlots.roundoff = { ...nextSlots.roundoff, file: f };
+      } else if (fn.includes('disc')) {
+        nextSlots.discount = { ...nextSlots.discount, file: f };
+      } else if (fn.includes('trial') || fn.includes('open') || fn.includes('tb')) {
+        nextSlots.trialbalance = { ...nextSlots.trialbalance, file: f };
+      } else if (fn.includes('day') || fn.includes('book')) {
+        nextSlots.daybook = { ...nextSlots.daybook, file: f };
+      } else {
+        // Fallback default: if daybook is empty assign to daybook, otherwise trialbalance
+        if (!nextSlots.daybook.file) {
+          nextSlots.daybook = { ...nextSlots.daybook, file: f };
+        } else {
+          nextSlots.trialbalance = { ...nextSlots.trialbalance, file: f };
+        }
+      }
+    }
+    setSlots(nextSlots);
+    setMultiPreview(null);
+  };
+
+  const handlePreviewMulti = async () => {
+    const selectedFiles = Object.values(slots)
+      .map((s) => s.file)
+      .filter((f): f is File => Boolean(f));
+
+    if (selectedFiles.length === 0) {
+      toast.info('Please select or drop at least one Excel workbook.');
+      return;
+    }
+
     setPreviewing(true);
-    setPreview(null);
     try {
-      const buffer = await file.arrayBuffer();
-      const prev = await previewPaymentWorkbook(new Uint8Array(buffer), file.name);
-      setPreview(prev);
+      const res = await previewMultiExcel(selectedFiles);
+      setMultiPreview(res);
+      toast.success(`Parsed ${res.filesCount} workbooks successfully. Review summary below.`);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Invalid Day Book file';
-      toast.error(`Preview failed: ${msg}`);
-      setSelectedFile(null);
+      const msg = err instanceof Error ? err.message : 'Preview failed';
+      toast.error(`Multi-Excel preview failed: ${msg}`);
     } finally {
       setPreviewing(false);
     }
   };
 
-  const handleApply = async () => {
-    if (!selectedFile || !preview) return;
+  const handleApplyMulti = async () => {
+    const selectedFiles = Object.values(slots)
+      .map((s) => s.file)
+      .filter((f): f is File => Boolean(f));
+
+    if (selectedFiles.length === 0) return;
+
     setApplying(true);
     try {
-      const buffer = await selectedFile.arrayBuffer();
-      const res = await applyPaymentWorkbook(new Uint8Array(buffer), {
-        fileSha256: preview.fileSha256,
-        previewDigest: preview.applyPreviewDigest,
-        fileName: selectedFile.name,
-      });
-
-      if (res.createdRowCount === 0 && res.unchangedRowCount > 0) {
-        toast.info(
-          `Day Book up to date: all ${res.unchangedRowCount} vouchers are already in the database (0 new records).`
-        );
-      } else {
-        toast.success(
-          `Applied Day Book: ${res.createdRowCount} new vouchers, ${res.unchangedRowCount} existing vouchers.`
-        );
-      }
+      const res = await applyMultiExcel(selectedFiles);
+      toast.success(res.message || 'Multi-Excel upload successfully applied!');
       setUploadOpen(false);
-      setSelectedFile(null);
-      setPreview(null);
+      setMultiPreview(null);
+      // Reset files in slots
+      const clearedSlots = { ...slots };
+      Object.keys(clearedSlots).forEach((k) => {
+        clearedSlots[k] = { ...clearedSlots[k], file: undefined, preview: undefined };
+      });
+      setSlots(clearedSlots);
       invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.vouchers);
       loadData();
+      loadLedgerSummaries();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Error';
-      toast.error(`Failed to apply Day Book: ${msg}`);
+      const msg = err instanceof Error ? err.message : 'Apply failed';
+      toast.error(`Failed to apply Excel data: ${msg}`);
     } finally {
       setApplying(false);
     }
@@ -125,6 +256,7 @@ export default function Daybook() {
       toast.success('Voucher deleted successfully');
       invalidate(syncKeys.debtors, syncKeys.customers);
       loadData();
+      loadLedgerSummaries();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error';
       toast.error(`Failed to delete voucher: ${msg}`);
@@ -148,23 +280,24 @@ export default function Daybook() {
     if (t === 'payment') return 'bg-amber-100 text-amber-800 border-amber-200';
     if (t === 'contra') return 'bg-purple-100 text-purple-800 border-purple-200';
     if (t === 'journal') return 'bg-slate-100 text-slate-800 border-slate-300';
-    if (t.includes('credit note')) return 'bg-indigo-100 text-indigo-800 border-indigo-200';
-    if (t.includes('stock')) return 'bg-cyan-100 text-cyan-800 border-cyan-200';
+    if (t === 'credit note') return 'bg-rose-100 text-rose-800 border-rose-200';
+    if (t === 'debit note') return 'bg-indigo-100 text-indigo-800 border-indigo-200';
     return 'bg-slate-100 text-slate-700 border-slate-200';
   };
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6">
+      {/* Header with Title and Upload Button */}
       <PageHeader
-        title="Day Book"
-        subtitle="Complete daily transaction register across Sales, Receipts, Payments, Journals, and Contras"
+        title="Day Book & Accounting Ledgers"
+        subtitle="Unified financial ledger sync: Sales, Receipts, Payments, Contras, Cashbooks, Bank Accounts, and Dedicated Nominal Ledgers."
         actions={
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={loadData}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 transition"
-              title="Refresh"
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition"
             >
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
               <span>Refresh</span>
@@ -172,37 +305,37 @@ export default function Daybook() {
             <button
               type="button"
               onClick={() => setUploadOpen(true)}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow hover:bg-blue-700 transition"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-blue-700 transition"
             >
               <Upload size={14} />
-              <span>Upload Day Book (.xlsx)</span>
+              <span>4-Excel Sync Hub</span>
             </button>
           </div>
         }
       />
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
-          label="Total Entries"
-          value={String(vouchers.length)}
-          hint="Recorded vouchers"
-          gradient="from-blue-600 to-indigo-600"
+          label="Total Vouchers"
+          value={vouchers.length.toLocaleString('en-IN')}
+          hint="Active financial vouchers in database"
+          gradient="from-slate-700 to-slate-900"
           icon={<FileText size={20} />}
         />
         <KpiCard
           label="Total Debits (+)"
           value={rupees(totalDebits)}
-          hint="Sales, vendor debits, outward"
-          gradient="from-blue-600 to-cyan-600"
-          icon={<FileSpreadsheet size={20} />}
+          hint="Sales, payments, money applied"
+          gradient="from-blue-600 to-indigo-600"
+          icon={<TrendingUp size={20} />}
         />
         <KpiCard
           label="Total Credits (-)"
           value={rupees(totalCredits)}
           hint="Receipts, customer credits"
           gradient="from-emerald-600 to-teal-600"
-          icon={<CheckCircle2 size={20} />}
+          icon={<TrendingDown size={20} />}
         />
         <KpiCard
           label="Net Movement"
@@ -212,6 +345,119 @@ export default function Daybook() {
           icon={<Filter size={20} />}
         />
       </div>
+
+      {/* Dedicated Ledger Overview Banners */}
+      {selectedTab === 'cash' && cashMeta && (
+        <Card className="border-l-4 border-l-amber-500 bg-amber-50/40 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl bg-amber-100 p-2 text-amber-700">
+                <Wallet size={24} />
+              </div>
+              <div>
+                <h4 className="text-sm font-black text-amber-950">Cash in Hand Ledgers (Liquid Accounts)</h4>
+                <p className="text-xs text-amber-800">
+                  Physical liquid cash treated strictly as Cash in Hand. Excluded from customer debtors.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-4 text-xs font-bold">
+              {cashMeta.accounts.map((acc) => (
+                <div key={acc.id} className="rounded-lg border border-amber-200 bg-white px-3 py-1.5 shadow-xs">
+                  <span className="text-slate-500 mr-1.5">{acc.name}:</span>
+                  <span className="font-mono text-amber-900 font-extrabold">{rupees(acc.balance_paise)}</span>
+                </div>
+              ))}
+              <div className="rounded-lg bg-amber-600 px-3 py-1.5 text-white shadow-xs">
+                <span>Total Cash: {rupees(cashMeta.totalBalancePaise)}</span>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {selectedTab === 'bank' && bankMeta && (
+        <Card className="border-l-4 border-l-blue-500 bg-blue-50/40 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl bg-blue-100 p-2 text-blue-700">
+                <Building2 size={24} />
+              </div>
+              <div>
+                <h4 className="text-sm font-black text-blue-950">Bank Ledgers (Yes Bank & HDFC Bank)</h4>
+                <p className="text-xs text-blue-800">
+                  Live bank statements recorded in Payments & Contras. Classified as Bank accounts.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-4 text-xs font-bold">
+              {bankMeta.accounts.map((acc) => (
+                <div key={acc.id} className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 shadow-xs">
+                  <span className="text-slate-500 mr-1.5">{acc.name}:</span>
+                  <span className="font-mono text-blue-900 font-extrabold">{rupees(acc.balance_paise)}</span>
+                </div>
+              ))}
+              <div className="rounded-lg bg-blue-600 px-3 py-1.5 text-white shadow-xs">
+                <span>Total Bank: {rupees(bankMeta.totalBalancePaise)}</span>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {selectedTab === 'roundoff' && roundoffMeta && (
+        <Card className="border-l-4 border-l-purple-500 bg-purple-50/40 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl bg-purple-100 p-2 text-purple-700">
+                <Layers size={24} />
+              </div>
+              <div>
+                <h4 className="text-sm font-black text-purple-950">Round Off Ledger (Dedicated P&L)</h4>
+                <p className="text-xs text-purple-800">
+                  Separated from trade debtors into dedicated P&L nominal account. Total entries: {roundoffMeta.voucherCount}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 text-xs font-bold">
+              <div className="rounded-lg border border-purple-200 bg-white px-3 py-1.5 shadow-xs">
+                <span className="text-slate-500 mr-1.5">Total Debits:</span>
+                <span className="font-mono text-purple-900 font-extrabold">₹{roundoffMeta.totalDebit.toFixed(2)}</span>
+              </div>
+              <div className="rounded-lg border border-purple-200 bg-white px-3 py-1.5 shadow-xs">
+                <span className="text-slate-500 mr-1.5">Total Credits:</span>
+                <span className="font-mono text-purple-900 font-extrabold">₹{roundoffMeta.totalCredit.toFixed(2)}</span>
+              </div>
+              <div className="rounded-lg bg-purple-600 px-3 py-1.5 text-white shadow-xs">
+                <span>Net Round Off: ₹{roundoffMeta.netAmount.toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {selectedTab === 'discount' && discountMeta && (
+        <Card className="border-l-4 border-l-teal-500 bg-teal-50/40 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl bg-teal-100 p-2 text-teal-700">
+                <Percent size={24} />
+              </div>
+              <div>
+                <h4 className="text-sm font-black text-teal-950">Discount Ledger (Customer Deductions)</h4>
+                <p className="text-xs text-teal-800">
+                  Credits trade debtors while tracking total business discount expenses. Total entries: {discountMeta.voucherCount}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 text-xs font-bold">
+              <div className="rounded-lg bg-teal-600 px-3 py-1.5 text-white shadow-xs">
+                <span>Total Discounts Given: ₹{discountMeta.totalCredit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Filter and Search Bar */}
       <Card className="p-4 space-y-4">
@@ -247,36 +493,42 @@ export default function Daybook() {
               <option value="Sales Register">📑 Sales Register</option>
               <option value="HDFC Bank Book">🏦 HDFC Bank Book</option>
               <option value="Yes Bank Book">🏦 Yes Bank Book</option>
-              <option value="Cash Book">💵 Cash Book</option>
+              <option value="Cash Book">💵 Cash Book (All)</option>
               <option value="Khan Cash Book">💵 Khan Cash Book</option>
               <option value="Cash GBD Book">💵 Cash GBD Book</option>
+              <option value="Round Off Ledger">⚖️ Round Off Ledger</option>
+              <option value="Discount Ledger">🏷️ Discount Ledger</option>
             </select>
           </div>
         </div>
 
-        {/* Voucher Type Pills */}
+        {/* View / Tab Pills */}
         <div className="flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-3">
-          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1">Vch Type:</span>
+          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mr-1">Views & Types:</span>
           {[
-            { id: 'all', label: 'All Vouchers' },
-            { id: 'sales', label: 'Sales' },
-            { id: 'receipt', label: 'Receipt' },
-            { id: 'payment', label: 'Payment' },
-            { id: 'contra', label: 'Contra' },
-            { id: 'journal', label: 'Journal' },
-            { id: 'credit note', label: 'Credit Note' },
-            { id: 'stock journal', label: 'Stock Journal' },
+            { id: 'all', label: 'All Vouchers', color: 'blue' },
+            { id: 'cash', label: '💵 Cash in Hand', color: 'amber' },
+            { id: 'bank', label: '🏦 Bank Accounts', color: 'indigo' },
+            { id: 'roundoff', label: '⚖️ Round Off Ledger', color: 'purple' },
+            { id: 'discount', label: '🏷️ Discount Ledger', color: 'teal' },
+            { id: 'sales', label: 'Sales', color: 'blue' },
+            { id: 'receipt', label: 'Receipt', color: 'emerald' },
+            { id: 'payment', label: 'Payment', color: 'amber' },
+            { id: 'contra', label: 'Contra', color: 'purple' },
+            { id: 'journal', label: 'Journal', color: 'slate' },
+            { id: 'credit note', label: 'Credit Note', color: 'rose' },
+            { id: 'debit note', label: 'Debit Note', color: 'indigo' },
           ].map((tab) => (
             <button
               key={tab.id}
               type="button"
               onClick={() => {
-                setSelectedType(tab.id);
+                setSelectedTab(tab.id as LedgerTab);
                 setPage(1);
               }}
               className={`rounded-full px-3 py-1 text-xs font-bold transition ${
-                selectedType === tab.id
-                  ? 'bg-blue-600 text-white shadow-sm'
+                selectedTab === tab.id
+                  ? 'bg-blue-600 text-white shadow-xs'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
@@ -287,7 +539,7 @@ export default function Daybook() {
       </Card>
 
       {/* Vouchers Table */}
-      <Card className="overflow-hidden border border-slate-200 shadow-sm">
+      <Card className="overflow-hidden border border-slate-200 shadow-xs">
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-left text-xs">
             <thead>
@@ -295,7 +547,7 @@ export default function Daybook() {
                 <th className="py-3 px-4">Date</th>
                 <th className="py-3 px-3">Type</th>
                 <th className="py-3 px-3">Vch No</th>
-                <th className="py-3 px-4">Particulars (Party)</th>
+                <th className="py-3 px-4">Particulars (Party / Account)</th>
                 <th className="py-3 px-4">Narration / Notes</th>
                 <th className="py-3 px-4 text-right">Debit (+)</th>
                 <th className="py-3 px-4 text-right">Credit (-)</th>
@@ -316,7 +568,7 @@ export default function Daybook() {
                   <td colSpan={9} className="py-12 text-center text-slate-400">
                     <FileText size={32} className="mx-auto mb-2 text-slate-300" />
                     <p className="font-bold text-slate-600">No vouchers found</p>
-                    <p className="text-xs text-slate-400">Try adjusting your search filters or upload daybook.xlsx.</p>
+                    <p className="text-xs text-slate-400">Try adjusting your filters or upload Excels using the 4-Excel Sync Hub.</p>
                   </td>
                 </tr>
               ) : (
@@ -355,10 +607,10 @@ export default function Daybook() {
                         type="button"
                         onClick={() => handleDelete(v.id)}
                         disabled={deleteBusyId === v.id}
-                        className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition disabled:opacity-50"
                         title="Delete voucher"
+                        className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition disabled:opacity-30"
                       >
-                        <Trash2 size={14} />
+                        {deleteBusyId === v.id ? <RefreshCw size={13} className="animate-spin" /> : <Trash2 size={13} />}
                       </button>
                     </td>
                   </tr>
@@ -368,112 +620,233 @@ export default function Daybook() {
           </table>
         </div>
 
+        {/* Pagination Footer */}
         {vouchers.length > PAGE_SIZE && (
-          <div className="border-t border-slate-200 bg-slate-50 px-4 py-3">
-            <Pager page={page} pageSize={PAGE_SIZE} total={vouchers.length} onPage={setPage} />
+          <div className="border-t border-slate-200 bg-slate-50/60 p-3">
+            <Pager
+              page={page}
+              total={vouchers.length}
+              pageSize={PAGE_SIZE}
+              onPage={(p: number) => setPage(p)}
+            />
           </div>
         )}
       </Card>
 
-      {/* Upload Day Book Modal */}
+      {/* 4-Excel Unified Upload Hub Modal */}
       {uploadOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="rounded-lg bg-blue-100 p-2 text-blue-600">
-                  <FileSpreadsheet size={20} />
+              <div className="flex items-center gap-2.5">
+                <div className="rounded-xl bg-blue-100 p-2 text-blue-600">
+                  <FileSpreadsheet size={22} />
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-slate-900">Upload Day Book Workbook</h3>
-                  <p className="text-[11px] text-slate-500">Supports Tally Day Book Excel exports (.xlsx)</p>
+                  <h3 className="text-base font-black text-slate-900">4-Excel Unified Accounting Hub</h3>
+                  <p className="text-xs text-slate-500">
+                    Upload DAYBOOK, ROUNDOFF, DISCOUNT & TRIAL BALANCE with automated auto-setup.
+                  </p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => {
                   setUploadOpen(false);
-                  setSelectedFile(null);
-                  setPreview(null);
+                  setMultiPreview(null);
                 }}
                 className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition"
               >
-                <X size={18} />
+                <X size={20} />
               </button>
             </div>
 
-            {/* Dropzone */}
+            {/* Drag & Drop Multi-file Target */}
             <div
               onClick={() => document.getElementById(fileInputId)?.click()}
-              className="cursor-pointer rounded-xl border-2 border-dashed border-slate-300 bg-slate-50/60 p-6 text-center hover:border-blue-500 hover:bg-blue-50/30 transition"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (e.dataTransfer.files) {
+                  handleFilesDropped(e.dataTransfer.files);
+                }
+              }}
+              className="cursor-pointer rounded-xl border-2 border-dashed border-blue-300 bg-blue-50/40 p-5 text-center hover:border-blue-500 hover:bg-blue-50/70 transition"
             >
-              <Upload size={28} className="mx-auto mb-2 text-slate-400" />
-              <p className="text-xs font-bold text-slate-800">
-                {selectedFile ? selectedFile.name : 'Click to select daybook.xlsx'}
+              <Upload size={28} className="mx-auto mb-2 text-blue-600" />
+              <p className="text-xs font-bold text-slate-900">
+                Drag & Drop 1 to 4 Excel files here, or click to browse
               </p>
-              <p className="mt-1 text-[11px] text-slate-400">
-                Excel workbooks with Date, Particulars, Vch Type, Debit Amount, Credit Amount
+              <p className="mt-1 text-[11px] text-slate-500">
+                Supports DAYBOOK.xlsx, ROUNDOFF.xlsx, DISCOUNT.xlsx, and TRIALBALANCE / opening.xlsx
               </p>
               <input
                 id={fileInputId}
                 type="file"
-                accept=".xlsx,.xls"
+                multiple
+                accept=".xlsx,.xls,.xlsm"
                 className="hidden"
                 onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleFileChange(f);
+                  if (e.target.files) handleFilesDropped(e.target.files);
                 }}
               />
             </div>
 
+            {/* 4 Slots Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {Object.values(slots).map((slot) => {
+                const isLoaded = Boolean(slot.file);
+                return (
+                  <div
+                    key={slot.key}
+                    className={`rounded-xl border p-3.5 space-y-2 transition ${
+                      isLoaded
+                        ? 'border-emerald-300 bg-emerald-50/30'
+                        : 'border-slate-200 bg-slate-50/50'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={`rounded-lg p-1.5 ${
+                            isLoaded ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'
+                          }`}
+                        >
+                          <FileSpreadsheet size={16} />
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-slate-900">{slot.title}</p>
+                          <p className="text-[10px] text-slate-500">{slot.expectedName}</p>
+                        </div>
+                      </div>
+                      {isLoaded ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                          <CheckCircle2 size={11} /> Ready
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                          Optional
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-600 leading-tight">{slot.description}</p>
+                    <div className="flex items-center justify-between border-t border-slate-100 pt-2 text-[10px]">
+                      <span className="font-semibold text-slate-400 truncate max-w-[170px]" title={slot.file?.name}>
+                        {slot.file ? slot.file.name : slot.hint}
+                      </span>
+                      {slot.file && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSlots({
+                              ...slots,
+                              [slot.key]: { ...slot, file: undefined, preview: undefined },
+                            });
+                            setMultiPreview(null);
+                          }}
+                          className="text-rose-500 hover:text-rose-700 font-bold"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Pre-flight Preview Results */}
             {previewing && (
               <div className="flex items-center justify-center gap-2 py-4 text-xs font-bold text-blue-600">
                 <RefreshCw size={16} className="animate-spin" />
-                <span>Parsing Day Book vouchers and detecting ledger entries...</span>
+                <span>Auto-detecting Excel formats and verifying ledger rules...</span>
               </div>
             )}
 
-            {preview && (
-              <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 space-y-2">
-                <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                  <span>Workbook Source:</span>
-                  <span className="font-extrabold text-blue-800">{preview.sheetName || 'Day Book'}</span>
+            {multiPreview && (
+              <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-blue-950">Pre-Flight Audit Validation</span>
+                  <span className="rounded-full bg-blue-200 px-2.5 py-0.5 text-[11px] font-black text-blue-900">
+                    {multiPreview.filesCount} Workbooks Verified
+                  </span>
                 </div>
-                <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                  <span>Total Vouchers Parsed:</span>
-                  <span className="font-mono font-extrabold text-slate-900">{preview.rows?.length || 0}</span>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {multiPreview.files.map((f, i) => (
+                    <div key={i} className="rounded-lg border border-blue-100 bg-white p-2.5 text-xs">
+                      <div className="flex items-center justify-between font-bold">
+                        <span className="text-slate-900">{f.filename}</span>
+                        <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] uppercase font-black text-blue-800">
+                          {f.detectedType}
+                        </span>
+                      </div>
+                      {f.details && (
+                        <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-slate-600 font-medium">
+                          {f.details.voucherCount !== undefined && (
+                            <span>Vouchers: <strong>{f.details.voucherCount}</strong></span>
+                          )}
+                          {f.details.count !== undefined && (
+                            <span>Ledgers: <strong>{f.details.count}</strong></span>
+                          )}
+                          {f.details.totalDebitPaise !== undefined && (
+                            <span>Dr: <strong>{rupees(f.details.totalDebitPaise)}</strong></span>
+                          )}
+                          {f.details.totalCreditPaise !== undefined && (
+                            <span>Cr: <strong>{rupees(f.details.totalCreditPaise)}</strong></span>
+                          )}
+                          <span className="text-emerald-700 font-bold">Stock Entries Disabled: 0</span>
+                        </div>
+                      )}
+                      {f.error && <p className="mt-1 text-[11px] text-rose-600 font-bold">{f.error}</p>}
+                    </div>
+                  ))}
                 </div>
-                <div className="flex items-center justify-between text-xs font-bold text-slate-700">
-                  <span>File SHA256:</span>
-                  <span className="font-mono text-[10px] text-slate-500">{preview.fileSha256?.substring(0, 16)}...</span>
-                </div>
-                <div className="rounded-lg bg-blue-100/80 p-2 text-center text-xs font-bold text-blue-900 border border-blue-200">
-                  ⚡ Preview ready. Click <strong>"Import into Day Book"</strong> below to save to database.
+                <div className="rounded-lg bg-emerald-100/80 p-2 text-center text-xs font-bold text-emerald-900 border border-emerald-200">
+                  ✓ Ready to apply. Click <strong>"Apply All to Database"</strong> to atomically ingest into SQLite.
                 </div>
               </div>
             )}
 
-            <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setUploadOpen(false);
-                  setSelectedFile(null);
-                  setPreview(null);
-                }}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleApply}
-                disabled={!preview || applying}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-5 py-2 text-xs font-bold text-white shadow hover:bg-blue-700 transition disabled:opacity-50"
-              >
-                {applying ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                <span>{applying ? 'Applying Vouchers...' : 'Import into Day Book'}</span>
-              </button>
+            {/* Modal Actions */}
+            <div className="flex items-center justify-between border-t border-slate-100 pt-3">
+              <span className="text-[11px] text-slate-400">
+                Stock entries automatically disabled. Cash & Bank contra recorded.
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUploadOpen(false);
+                    setMultiPreview(null);
+                  }}
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 transition"
+                >
+                  Cancel
+                </button>
+                {!multiPreview ? (
+                  <button
+                    type="button"
+                    onClick={handlePreviewMulti}
+                    disabled={previewing || Object.values(slots).every((s) => !s.file)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-5 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 transition disabled:opacity-50"
+                  >
+                    {previewing ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />}
+                    <span>{previewing ? 'Auditing Files...' : 'Preview Files'}</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleApplyMulti}
+                    disabled={applying}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-700 transition disabled:opacity-50"
+                  >
+                    {applying ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                    <span>{applying ? 'Applying Pipeline...' : 'Apply All to Database'}</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

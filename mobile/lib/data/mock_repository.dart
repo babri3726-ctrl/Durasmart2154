@@ -86,8 +86,8 @@ class MockRepository extends ChangeNotifier {
   int? serverActiveDealers;
   int? serverSalesTeamCount;
   List<SalespersonSummary> salespersonSummaries = [];
-  static const int currentVersionCode = 8;
-  static const String currentVersionName = '1.0.8';
+  static const int currentVersionCode = 9;
+  static const String currentVersionName = '1.1.0';
   AppUpdateInfo? availableUpdate;
   Timer? _syncTimer;
 

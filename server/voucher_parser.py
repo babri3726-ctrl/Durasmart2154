@@ -240,6 +240,12 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
         # Voucher type and number
         vch_type_val = ws.cell(r, col_map.get("vch_type", p_col + 1)).value if "vch_type" in col_map else ""
         vch_type = str(vch_type_val or "").strip()
+        
+        # STRICT USER SPECIFICATION: Stock entries strictly disabled
+        if vch_type.lower() in ("stock journal", "physical stock", "material in", "material out") or "stock" in vch_type.lower():
+            skipped_count += 1
+            continue
+
         vch_no_val = ws.cell(r, col_map.get("vch_no", p_col + 2)).value if "vch_no" in col_map else ""
         if isinstance(vch_no_val, datetime):
             vch_no = vch_no_val.strftime("%d-%b-%y")
@@ -247,6 +253,40 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
             vch_no = str(vch_no_val).strip()
         else:
             vch_no = ""
+
+        # Classify party account type and normalize special ledgers
+        p_lower = (party_name or "").strip().lower()
+        party_type = "customer"
+        party_id = ""
+
+        if not is_roundoff_ledger and p_lower in ("round off", "roundoff", "rounoff"):
+            party_name = "Round Off Ledger"
+            party_id = "LEDGER-ROUNDOFF"
+            party_type = "roundoff"
+        elif not is_discount_ledger and p_lower in ("discount", "cd discount"):
+            party_name = "Discount Ledger"
+            party_id = "LEDGER-DISCOUNT"
+            party_type = "discount"
+        elif p_lower in ("khan cash", "khancash"):
+            party_name = "KHAN CASH"
+            party_id = "LEDGER-KHANCASH"
+            party_type = "cash"
+        elif p_lower in ("cash gbd", "cashgbd"):
+            party_name = "Cash Gbd"
+            party_id = "LEDGER-CASHGBD"
+            party_type = "cash"
+        elif p_lower in ("cash", "cash book"):
+            party_name = "Cash"
+            party_id = "LEDGER-CASH"
+            party_type = "cash"
+        elif p_lower in ("yes bank", "yes bank deemand loan", "yes"):
+            party_name = "Yes Bank"
+            party_id = "LEDGER-YESBANK"
+            party_type = "bank"
+        elif any(k == p_lower or p_lower.startswith(k) for k in ("hdfc p.o.finance", "hdfc dura", "hdfc bank", "hdfc loan account")):
+            party_name = "HDFC Bank"
+            party_id = "LEDGER-HDFC"
+            party_type = "bank"
 
         if (is_discount_ledger or is_roundoff_ledger) and vch_no:
             prefix_label = "Discount" if is_discount_ledger else "Round Off"
@@ -313,6 +353,8 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
             "voucherType": vch_type or ("Sales" if "Sales" in book_source else "Receipt"),
             "voucherDate": vch_date,
             "partyName": party_name,
+            "partyId": party_id,
+            "partyType": party_type,
             "narration": narration,
             "prefix": prefix,
             "debitPaise": debit_paise,
@@ -420,3 +462,45 @@ def parse_opening_balance_workbook(filepath: str) -> dict[str, Any]:
         "totalDebitPaise": sum(e["amountPaise"] for e in entries if e["direction"] == "debit"),
         "totalCreditPaise": sum(e["amountPaise"] for e in entries if e["direction"] == "credit"),
     }
+
+
+def detect_excel_type(filepath: str) -> str:
+    """
+    Auto-detects whether an Excel workbook is:
+    - 'daybook': Day Book with vouchers (Sales, Payment, Receipt, Contra, Journal)
+    - 'roundoff': Dedicated Round Off ledger
+    - 'discount': Dedicated Discount ledger
+    - 'trialbalance': Trial Balance / Master Opening Balance register
+    - 'unknown': Other/unrecognized format
+    """
+    fn = os.path.basename(filepath).lower()
+    if any(k in fn for k in ("roundoff", "round_off", "round off", "rounoff")):
+        return "roundoff"
+    if "discount" in fn:
+        return "discount"
+    if any(k in fn for k in ("trial", "opening", "tb.", "trialbalance", "trial_balance")):
+        return "trialbalance"
+    if any(k in fn for k in ("daybook", "day_book", "day book")):
+        return "daybook"
+
+    try:
+        wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
+        ws = wb.active
+        top_text = ""
+        for r in range(1, 10):
+            row_vals = [str(ws.cell(r, c).value or "").lower() for c in range(1, 10)]
+            top_text += " ".join(row_vals) + " "
+        wb.close()
+
+        if "round off" in top_text or "roundoff" in top_text or "rounoff" in top_text:
+            return "roundoff"
+        if "discount" in top_text and "vch type" not in top_text:
+            return "discount"
+        if "trial balance" in top_text or ("particulars" in top_text and "closing balance" in top_text):
+            return "trialbalance"
+        if "day book" in top_text or "vch type" in top_text or "contra" in top_text:
+            return "daybook"
+    except Exception:
+        pass
+
+    return "unknown"

@@ -2404,15 +2404,339 @@ def resubmit_and_reconcile_endpoint():
         "discountReconciliation": res
     }
 
+# ============================================================================
+# MULTI-EXCEL 4-BOOK SYNC HUB (Daybook, Round Off, Discount, Trial Balance)
+# ============================================================================
+
+@app.post("/api/v1/imports/multi-excel/preview")
+async def preview_multi_excel_bundle(files: list[UploadFile] = File(...)):
+    """
+    Accepts 1 to 4 Excel workbooks (Daybook, Round Off, Discount, Trial Balance).
+    Auto-detects their accounting purpose, verifies column headers, and returns 
+    a consolidated pre-flight validation report without mutating database state.
+    """
+    from .voucher_parser import parse_accounting_workbook, parse_opening_balance_workbook, detect_excel_type
+    
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    temp_dir = os.path.join(base_dir, "data", "imports", "temp_multi")
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    parsed_files = []
+    
+    for f in files:
+        if not f.filename.endswith((".xlsx", ".xlsm")):
+            continue
+        temp_path = os.path.join(temp_dir, f.filename)
+        content = await f.read()
+        with open(temp_path, "wb") as out_fp:
+            out_fp.write(content)
+            
+        file_sha = hashlib.sha256(content).hexdigest()
+        detected_type = detect_excel_type(temp_path)
+        
+        file_info = {
+            "filename": f.filename,
+            "detectedType": detected_type,
+            "sizeBytes": len(content),
+            "fileSha256": file_sha,
+        }
+        
+        if detected_type == "trialbalance":
+            try:
+                tb_res = parse_opening_balance_workbook(temp_path)
+                file_info["details"] = {
+                    "count": tb_res["count"],
+                    "periodText": tb_res.get("periodText", ""),
+                    "totalDebitPaise": tb_res["totalDebitPaise"],
+                    "totalCreditPaise": tb_res["totalCreditPaise"],
+                    "sample": tb_res["entries"][:5]
+                }
+            except Exception as e:
+                file_info["error"] = str(e)
+        else:
+            try:
+                wb_res = parse_accounting_workbook(temp_path, file_sha256=file_sha)
+                type_counts = {}
+                for v in wb_res.get("vouchers", []):
+                    vt = v.get("voucherType", "Other")
+                    type_counts[vt] = type_counts.get(vt, 0) + 1
+                    
+                file_info["details"] = {
+                    "voucherCount": wb_res.get("voucherCount", 0),
+                    "bookSource": wb_res.get("bookSource", "Accounting Book"),
+                    "periodText": wb_res.get("periodText", ""),
+                    "totalDebitPaise": wb_res.get("totalDebitPaise", 0),
+                    "totalCreditPaise": wb_res.get("totalCreditPaise", 0),
+                    "voucherTypes": type_counts,
+                    "stockEntriesDisabled": 0,
+                    "sample": wb_res.get("vouchers", [])[:5]
+                }
+            except Exception as e:
+                file_info["error"] = str(e)
+                
+        parsed_files.append(file_info)
+        
+    return {
+        "status": "success",
+        "filesCount": len(parsed_files),
+        "files": parsed_files
+    }
+
+@app.post("/api/v1/imports/multi-excel/apply")
+async def apply_multi_excel_bundle(files: list[UploadFile] = File(...)):
+    """
+    Executes atomic 4-Excel import pipeline:
+    1. Trial Balance opening balances
+    2. Day Book vouchers (stock entries strictly disabled, cash/banks/roundoff/discount mapped)
+    3. Dedicated Round Off Ledger
+    4. Dedicated Discount Ledger
+    5. Cleanup & ledger reclassification
+    6. Refreshes in-memory state
+    """
+    from .voucher_parser import parse_accounting_workbook, parse_opening_balance_workbook, detect_excel_type
+    
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    imports_dir = os.path.join(base_dir, "data", "imports")
+    os.makedirs(imports_dir, exist_ok=True)
+    
+    saved_files = []
+    
+    for f in files:
+        if not f.filename.endswith((".xlsx", ".xlsm")):
+            continue
+        save_path = os.path.join(imports_dir, f.filename)
+        content = await f.read()
+        with open(save_path, "wb") as out_fp:
+            out_fp.write(content)
+        detected_type = detect_excel_type(save_path)
+        saved_files.append({
+            "filename": f.filename,
+            "path": save_path,
+            "type": detected_type,
+            "content": content
+        })
+        
+    by_type = {sf["type"]: sf for sf in saved_files}
+    results = {}
+    
+    # 1. Trial Balance
+    if "trialbalance" in by_type:
+        tb_file = by_type["trialbalance"]
+        try:
+            tb_res = db.import_opening_balances(tb_file["path"])
+            results["trialBalance"] = {
+                "filename": tb_file["filename"],
+                "updatedCount": tb_res.get("updatedCount", 0),
+                "createdPartyCount": tb_res.get("createdPartyCount", 0)
+            }
+        except Exception as e:
+            results["trialBalance"] = {"error": str(e)}
+            
+    # 2. Daybook
+    if "daybook" in by_type:
+        db_file = by_type["daybook"]
+        try:
+            f_sha = hashlib.sha256(db_file["content"]).hexdigest()
+            parsed_db = parse_accounting_workbook(db_file["path"], file_sha256=f_sha)
+            db_res = db.save_vouchers_batch(parsed_db["vouchers"], file_sha=f_sha)
+            results["daybook"] = {
+                "filename": db_file["filename"],
+                "vouchersParsed": parsed_db.get("voucherCount", 0),
+                "insertedCount": db_res.get("insertedCount", 0),
+                "skippedCount": db_res.get("skippedCount", 0),
+                "newPartiesCount": db_res.get("newPartiesCount", 0)
+            }
+        except Exception as e:
+            results["daybook"] = {"error": str(e)}
+            
+    # 3. Round Off
+    if "roundoff" in by_type:
+        ro_file = by_type["roundoff"]
+        try:
+            f_sha = hashlib.sha256(ro_file["content"]).hexdigest()
+            parsed_ro = parse_accounting_workbook(ro_file["path"], file_sha256=f_sha)
+            ro_res = db.reconcile_adjustment_vouchers(
+                parsed_ro["vouchers"],
+                target_generic_party="round off",
+                book_source="Round Off Ledger",
+                file_sha=f_sha
+            )
+            results["roundoff"] = {
+                "filename": ro_file["filename"],
+                "reconciledCount": ro_res.get("reconciledCount", 0),
+                "insertedCount": ro_res.get("insertedCount", 0),
+                "skippedCount": ro_res.get("skippedCount", 0)
+            }
+        except Exception as e:
+            results["roundoff"] = {"error": str(e)}
+            
+    # 4. Discount
+    if "discount" in by_type:
+        disc_file = by_type["discount"]
+        try:
+            f_sha = hashlib.sha256(disc_file["content"]).hexdigest()
+            parsed_disc = parse_accounting_workbook(disc_file["path"], file_sha256=f_sha)
+            disc_res = db.reconcile_adjustment_vouchers(
+                parsed_disc["vouchers"],
+                target_generic_party="discount",
+                book_source="Discount Ledger",
+                file_sha=f_sha
+            )
+            results["discount"] = {
+                "filename": disc_file["filename"],
+                "reconciledCount": disc_res.get("reconciledCount", 0),
+                "insertedCount": disc_res.get("insertedCount", 0),
+                "skippedCount": disc_res.get("skippedCount", 0)
+            }
+        except Exception as e:
+            results["discount"] = {"error": str(e)}
+            
+    # 5. Run classification & cleanup
+    try:
+        from scripts.clean_and_classify_ledgers import run_cleanup
+        run_cleanup()
+    except Exception as e:
+        results["cleanupError"] = str(e)
+        
+    # 6. Refresh in-memory state
+    persisted = db.load_all_persisted_state()
+    for k in ["debtors", "customers", "opening_balances"]:
+        if k in persisted:
+            STATE[k] = persisted[k]
+            
+    return {
+        "status": "success",
+        "message": f"Multi-Excel upload successfully applied ({len(saved_files)} files processed).",
+        "results": results
+    }
+
+@app.get("/api/v1/ledgers/cash")
+def get_cash_ledger():
+    """Returns liquid cash in hand balances and transactions for Cash, KHAN CASH, and Cash Gbd."""
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name, balance_paise / 100.0 as balance, balance_paise
+            FROM parties
+            WHERE party_type = 'cash' OR id IN ('LEDGER-CASH', 'LEDGER-KHANCASH', 'LEDGER-CASHGBD')
+            ORDER BY name
+        """)
+        accounts = [dict(r) for r in cur.fetchall()]
+        
+        cur.execute("""
+            SELECT * FROM vouchers
+            WHERE party_id IN ('LEDGER-CASH', 'LEDGER-KHANCASH', 'LEDGER-CASHGBD')
+               OR book_source IN ('Cash Book', 'Khan Cash Book', 'Cash GBD Book')
+            ORDER BY voucher_date DESC, id DESC
+            LIMIT 200
+        """)
+        vouchers = [dict(r) for r in cur.fetchall()]
+        
+        total_cash_paise = sum(a["balance_paise"] for a in accounts)
+        return {
+            "category": "Cash in Hand",
+            "accounts": accounts,
+            "totalBalance": total_cash_paise / 100.0,
+            "totalBalancePaise": total_cash_paise,
+            "vouchers": vouchers
+        }
+
+@app.get("/api/v1/ledgers/bank")
+def get_bank_ledger():
+    """Returns bank balances and transactions for Yes Bank and HDFC Bank."""
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, name, balance_paise / 100.0 as balance, balance_paise
+            FROM parties
+            WHERE party_type = 'bank' OR id IN ('LEDGER-YESBANK', 'LEDGER-HDFC')
+            ORDER BY name
+        """)
+        accounts = [dict(r) for r in cur.fetchall()]
+        
+        cur.execute("""
+            SELECT * FROM vouchers
+            WHERE party_id IN ('LEDGER-YESBANK', 'LEDGER-HDFC')
+               OR book_source IN ('HDFC Bank Book', 'Yes Bank Book')
+            ORDER BY voucher_date DESC, id DESC
+            LIMIT 200
+        """)
+        vouchers = [dict(r) for r in cur.fetchall()]
+        
+        total_bank_paise = sum(a["balance_paise"] for a in accounts)
+        return {
+            "category": "Bank Accounts",
+            "accounts": accounts,
+            "totalBalance": total_bank_paise / 100.0,
+            "totalBalancePaise": total_bank_paise,
+            "vouchers": vouchers
+        }
+
+@app.get("/api/v1/ledgers/roundoff")
+def get_roundoff_ledger():
+    """Returns Round Off transactions and cumulative P&L impact."""
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT * FROM vouchers
+            WHERE party_id = 'LEDGER-ROUNDOFF'
+               OR LOWER(party_name) IN ('round off', 'roundoff', 'rounoff')
+               OR book_source = 'Round Off Ledger'
+            ORDER BY voucher_date DESC, id DESC
+            LIMIT 200
+        """)
+        vouchers = [dict(r) for r in cur.fetchall()]
+        
+        total_dr = sum(v["debit_paise"] for v in vouchers)
+        total_cr = sum(v["credit_paise"] for v in vouchers)
+        net_paise = total_dr - total_cr
+        
+        return {
+            "ledger": "Round Off Ledger",
+            "partyId": "LEDGER-ROUNDOFF",
+            "voucherCount": len(vouchers),
+            "totalDebit": total_dr / 100.0,
+            "totalCredit": total_cr / 100.0,
+            "netAmount": net_paise / 100.0,
+            "vouchers": vouchers
+        }
+
+@app.get("/api/v1/ledgers/discount")
+def get_discount_ledger():
+    """Returns Discount ledger transactions and cumulative discount given."""
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT * FROM vouchers
+            WHERE party_id = 'LEDGER-DISCOUNT'
+               OR LOWER(party_name) = 'discount'
+               OR book_source = 'Discount Ledger'
+            ORDER BY voucher_date DESC, id DESC
+            LIMIT 200
+        """)
+        vouchers = [dict(r) for r in cur.fetchall()]
+        
+        total_dr = sum(v["debit_paise"] for v in vouchers)
+        total_cr = sum(v["credit_paise"] for v in vouchers)
+        
+        return {
+            "ledger": "Discount Ledger",
+            "partyId": "LEDGER-DISCOUNT",
+            "voucherCount": len(vouchers),
+            "totalDebit": total_dr / 100.0,
+            "totalCredit": total_cr / 100.0,
+            "vouchers": vouchers
+        }
+
 @app.get("/api/v1/app/version")
 def get_app_version():
     return {
-        "version_code": 8,
-        "version_name": "1.0.8",
+        "version_code": 9,
+        "version_name": "1.1.0",
         "download_url": "/api/v1/app/latest-apk",
-        "release_notes": "Clean type parsing for all employees and full sync of 902 debtors and live sales metrics.",
+        "release_notes": "Multi-Excel 4-book sync (Daybook, Round Off, Discount, Trial Balance), stock entry disabler, dedicated cash/bank ledgers.",
         "mandatory": False,
-        "published_at": "2026-11-19T16:15:00+05:30"
+        "published_at": datetime.now().isoformat()
     }
 
 @app.get("/api/v1/app/latest-apk")
