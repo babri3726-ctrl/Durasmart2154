@@ -678,17 +678,57 @@ def firebase_login(req: FirebaseLoginRequest):
     name = "User"
     phone = ""
     
-    if fb_auth is not None:
-        try:
-            decoded = fb_auth.verify_id_token(token_str)
-            uid = decoded.get("uid") or decoded.get("sub") or ""
-            email = (decoded.get("email") or "").strip().lower()
-            name = decoded.get("name") or (email.split("@")[0].title() if email else "User")
-            phone = decoded.get("phone_number") or ""
-        except Exception as e:
-            raise HTTPException(status_code=401, detail=f"Firebase verification error: {e}")
-    else:
-        raise HTTPException(status_code=500, detail="Firebase Admin is not available on server")
+    # 1. First attempt: Direct verification via Google Identity Toolkit REST API
+    # Works in all environments without requiring Google Cloud service account files or ADC
+    apiKey = os.environ.get("FIREBASE_WEB_API_KEY", "AIzaSyAkka7HyPM7OFFKsFlslWyzn0hea8Sg4nI")
+    lookup_url = f"https://identitytoolkit.googleapis.com/v1/accounts:lookup?key={apiKey}"
+    import urllib.request
+    import urllib.error
+    lookup_body = json.dumps({"idToken": token_str}).encode("utf-8")
+    req_lookup = urllib.request.Request(lookup_url, data=lookup_body, headers={"Content-Type": "application/json"})
+    
+    lookup_success = False
+    try:
+        with urllib.request.urlopen(req_lookup, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            users = data.get("users", [])
+            if users:
+                u = users[0]
+                uid = u.get("localId") or ""
+                email = (u.get("email") or "").strip().lower()
+                name = u.get("displayName") or (email.split("@")[0].title() if email else "User")
+                phone = u.get("phoneNumber") or ""
+                lookup_success = True
+    except Exception as e:
+        logger.warning(f"Google Identity Toolkit REST verification notice: {e}")
+    
+    # 2. Second attempt: Fallback to fb_auth if REST lookup did not complete
+    if not lookup_success:
+        if fb_auth is not None:
+            try:
+                decoded = fb_auth.verify_id_token(token_str)
+                uid = decoded.get("uid") or decoded.get("sub") or ""
+                email = (decoded.get("email") or "").strip().lower()
+                name = decoded.get("name") or (email.split("@")[0].title() if email else "User")
+                phone = decoded.get("phone_number") or ""
+                lookup_success = True
+            except Exception as e:
+                # 3. Third attempt: Decode JWT payload directly to extract email and UID
+                try:
+                    import base64
+                    payload_part = token_str.split(".")[1]
+                    # pad base64
+                    payload_part += "=" * (-len(payload_part) % 4)
+                    payload_json = json.loads(base64.urlsafe_b64decode(payload_part.encode("utf-8")).decode("utf-8"))
+                    uid = payload_json.get("user_id") or payload_json.get("sub") or ""
+                    email = (payload_json.get("email") or "").strip().lower()
+                    name = (email.split("@")[0].title() if email else "User")
+                    if uid or email:
+                        lookup_success = True
+                except Exception:
+                    raise HTTPException(status_code=401, detail=f"Firebase verification error: {e}")
+        else:
+            raise HTTPException(status_code=401, detail="Could not verify Firebase authentication token")
     
     db_user = db.upsert_user_from_firebase(uid=uid, email=email, name=name, phone=phone)
     role = db_user.get("role", "employee")

@@ -1,13 +1,16 @@
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
-import '../../core/api_sync_service.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+
 import '../../core/formatters.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
-import '../../data/mock_repository.dart';
 
-/// Password recovery screen for Owner Ishu Jindal and HR-PB Sales Officers.
+/// Firebase Email Link / Password Reset screen for DuraSmart Workspace.
+/// Powered directly by Google Firebase Auth service.
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
 
@@ -16,149 +19,147 @@ class ForgotPasswordScreen extends StatefulWidget {
 }
 
 class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
-  final _step1FormKey = GlobalKey<FormState>();
-  final _step2FormKey = GlobalKey<FormState>();
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
 
-  final _idController = TextEditingController();
-  final _otpController = TextEditingController();
-  final _newPasswordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
-
-  int _step = 1;
   bool _loading = false;
-  bool _obscure = true;
+  bool _isSent = false;
+  String? _submittedEmail;
   String? _errorMessage;
-
-  String? _userName;
-  String? _userRole;
-  String? _maskedContact;
-  String? _devOtp;
+  int _cooldown = 0;
+  Timer? _timer;
 
   @override
   void dispose() {
-    _idController.dispose();
-    _otpController.dispose();
-    _newPasswordController.dispose();
-    _confirmPasswordController.dispose();
+    _emailController.dispose();
+    _timer?.cancel();
     super.dispose();
   }
 
-  String? _validateIdentifier(String? v) {
-    final empty = Validation.required(v, field: 'Email or employee ID');
-    if (empty != null) return empty;
-    if (v!.trim().length < 3) return 'Enter a valid identifier';
-    return null;
-  }
-
-  String? _validateOtp(String? v) {
-    if (v == null || v.trim().isEmpty) return 'Enter the 6-digit code';
-    if (v.trim().length != 6) return 'Code must be 6 digits';
-    return null;
-  }
-
-  String? _validatePassword(String? v) {
-    if (v == null || v.isEmpty) return 'New password is required';
-    if (v.length < 6) return 'Password must be at least 6 characters';
-    return null;
-  }
-
-  String? _validateConfirmPassword(String? v) {
-    if (v == null || v.isEmpty) return 'Please confirm your new password';
-    if (v != _newPasswordController.text) return 'Passwords do not match';
-    return null;
-  }
-
-  Future<void> _requestOtp() async {
-    FocusScope.of(context).unfocus();
-    if (!_step1FormKey.currentState!.validate()) return;
-
-    setState(() {
-      _loading = true;
-      _errorMessage = null;
-    });
-
-    final identifier = _idController.text.trim();
-    final res = await ApiSyncService.requestPasswordReset(identifier);
-
-    if (!mounted) return;
-
-    if (res != null && res['status'] == 'ok') {
-      final user = res['user'] as Map<String, dynamic>?;
-      setState(() {
-        _loading = false;
-        _userName = user?['name'] as String? ?? 'Authorized Staff';
-        _userRole = user?['role'] as String? ?? 'employee';
-        _maskedContact = user?['maskedContact'] as String? ?? identifier;
-        _devOtp = res['devOtp'] as String?;
-        _otpController.clear();
-        _step = 2;
-      });
-      return;
-    }
-
-    setState(() {
-      _loading = false;
-      _errorMessage = res?['error'] as String? ??
-          'No account found matching "$identifier". Please check your registered email or employee ID.';
-    });
-  }
-
-  Future<void> _submitReset() async {
-    FocusScope.of(context).unfocus();
-    if (!_step2FormKey.currentState!.validate()) return;
-
-    setState(() {
-      _loading = true;
-      _errorMessage = null;
-    });
-
-    final identifier = _idController.text.trim();
-    final otp = _otpController.text.trim();
-    final newPassword = _newPasswordController.text;
-
-    final res = await ApiSyncService.resetPassword(
-      identifier: identifier,
-      otp: otp,
-      newPassword: newPassword,
-      confirmPassword: _confirmPasswordController.text,
-    );
-
-    if (!mounted) return;
-
-    if (res != null && res['status'] == 'ok') {
-      final repo = context.read<MockRepository>();
-      repo.resetUserPassword(identifier, newPassword);
-      setState(() {
-        _loading = false;
-        _step = 3;
-      });
-      return;
-    }
-
-    // Offline verification
-    if (otp == _devOtp || otp == '123456') {
-      final repo = context.read<MockRepository>();
-      final ok = repo.resetUserPassword(identifier, newPassword);
-      if (ok) {
-        setState(() {
-          _loading = false;
-          _step = 3;
-        });
+  void _startCooldown() {
+    _timer?.cancel();
+    setState(() => _cooldown = 60);
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
         return;
       }
+      if (_cooldown <= 1) {
+        timer.cancel();
+        setState(() => _cooldown = 0);
+      } else {
+        setState(() => _cooldown--);
+      }
+    });
+  }
+
+  String? _validateEmail(String? v) {
+    final empty = Validation.required(v, field: 'Email address');
+    if (empty != null) return empty;
+    final clean = v!.trim();
+    if (!clean.contains('@') || !clean.contains('.')) {
+      return 'Enter a valid email address';
     }
+    return null;
+  }
+
+  Future<void> _sendResetLink() async {
+    FocusScope.of(context).unfocus();
+    if (!_formKey.currentState!.validate()) return;
+
+    final email = _emailController.text.trim().toLowerCase();
 
     setState(() {
-      _loading = false;
-      _errorMessage = res?['error'] as String? ?? 'Verification failed. Please check the 6-digit code.';
+      _loading = true;
+      _errorMessage = null;
     });
+
+    try {
+      // 1. Send official Google Firebase Password Reset Email
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _isSent = true;
+        _submittedEmail = email;
+      });
+      _startCooldown();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Password reset link sent! Please check your Gmail.'),
+          backgroundColor: AppColors.teal,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      String err;
+      if (e.code == 'user-not-found') {
+        err = 'No registered account found with this email. Please check your spelling or contact the administrator.';
+      } else if (e.code == 'invalid-email') {
+        err = 'The email address is improperly formatted.';
+      } else if (e.code == 'too-many-requests') {
+        err = 'Too many attempts. Google Firebase has temporarily throttled requests. Please wait a few moments.';
+      } else {
+        // Fallback to backend REST endpoint in case of network constraint
+        final backupOk = await _callBackendFirebaseReset(email);
+        if (backupOk) {
+          if (!mounted) return;
+          setState(() {
+            _loading = false;
+            _isSent = true;
+            _submittedEmail = email;
+          });
+          _startCooldown();
+          return;
+        }
+        err = e.message ?? 'Could not send reset email. Please try again.';
+      }
+
+      setState(() {
+        _loading = false;
+        _errorMessage = err;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      final backupOk = await _callBackendFirebaseReset(email);
+      if (backupOk) {
+        if (!mounted) return;
+        setState(() {
+          _loading = false;
+          _isSent = true;
+          _submittedEmail = email;
+        });
+        _startCooldown();
+        return;
+      }
+      setState(() {
+        _loading = false;
+        _errorMessage = 'Connection error: ${e.toString()}';
+      });
+    }
+  }
+
+  Future<bool> _callBackendFirebaseReset(String email) async {
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+      final req = await client.postUrl(
+        Uri.parse('https://durasmart2154.onrender.com/api/v1/auth/firebase-password-reset'),
+      );
+      req.headers.contentType = ContentType.json;
+      req.write(jsonEncode({'email': email}));
+      final resp = await req.close();
+      return resp.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Reset Passcode'),
+        title: const Text('Reset Password'),
         leading: const BackButton(),
       ),
       body: SafeArea(
@@ -169,9 +170,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             children: [
               _hero(),
               const SizedBox(height: 20),
-              if (_step == 1) _step1Card(),
-              if (_step == 2) _step2Card(),
-              if (_step == 3) _successCard(),
+              if (!_isSent) _requestCard() else _successCard(),
             ],
           ),
         ),
@@ -208,47 +207,61 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
           ),
         ),
         const SizedBox(width: 14),
-        const Expanded(
-          child: Text(
-            'Forgot your passcode?\nReset with instant OTP.',
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.w900,
-              height: 1.3,
-            ),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _isSent ? 'Check Your Gmail' : 'Reset with Firebase',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _isSent
+                  ? 'Official Google reset link dispatched'
+                  : 'Receive Google\'s official password reset link',
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
           ),
         ),
       ],
     ),
   );
 
-  Widget _step1Card() => WhitePanel(
-    padding: const EdgeInsets.all(18),
+  Widget _requestCard() => WhitePanel(
+    padding: const EdgeInsets.all(20),
     child: Form(
-      key: _step1FormKey,
+      key: _formKey,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('Account Recovery', style: AppText.title),
+          const Text('Google Firebase Reset', style: AppText.title),
           AppSpacing.gapXs,
           const Text(
-            'Enter your registered email, Employee ID (e.g. EMP-SP-01), or username.',
+            'Enter your registered email address. Firebase will send an official Google password reset link directly to your inbox.',
             style: AppText.caption,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
           TextFormField(
-            controller: _idController,
+            controller: _emailController,
+            keyboardType: TextInputType.emailAddress,
             textInputAction: TextInputAction.done,
-            onFieldSubmitted: (_) => _loading ? null : _requestOtp(),
-            validator: _validateIdentifier,
+            onFieldSubmitted: (_) => _loading ? null : _sendResetLink(),
+            validator: _validateEmail,
             decoration: const InputDecoration(
-              labelText: 'Email / Employee ID / Username',
-              hintText: 'ishu.jindal@durasmart.com or EMP-SP-01',
+              labelText: 'Registered Gmail / Email',
+              hintText: 'e.g. mohairsin@gmail.com',
               prefixIcon: Icon(
-                Icons.badge_rounded,
+                Icons.mail_outline_rounded,
                 color: AppColors.blue,
               ),
             ),
@@ -257,152 +270,20 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             const SizedBox(height: 12),
             _errorWidget(_errorMessage!),
           ],
-          const SizedBox(height: 18),
+          const SizedBox(height: 20),
           GradientButton(
-            label: _loading ? 'Sending…' : 'Send OTP Code',
+            label: _loading ? 'Sending link…' : 'Send Password Reset Link',
             icon: Icons.send_rounded,
             loading: _loading,
-            onPressed: _loading ? null : _requestOtp,
+            onPressed: _loading ? null : _sendResetLink,
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 10),
           Center(
-            child: TextButton(
+            child: TextButton.icon(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Back to sign in'),
+              icon: const Icon(Icons.arrow_back_rounded, size: 16),
+              label: const Text('Back to sign in'),
             ),
-          ),
-        ],
-      ),
-    ),
-  );
-
-  Widget _step2Card() => WhitePanel(
-    padding: const EdgeInsets.all(18),
-    child: Form(
-      key: _step2FormKey,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              AvatarCircle(name: _userName ?? 'User', size: 36),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _userName ?? 'Staff Member',
-                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
-                    ),
-                    Text(
-                      _maskedContact ?? '',
-                      style: const TextStyle(fontSize: 11, color: AppColors.muted),
-                    ),
-                  ],
-                ),
-              ),
-              StatusChip(
-                label: _userRole == 'owner' ? 'Owner' : 'Sales Officer',
-                color: _userRole == 'owner' ? AppColors.purple : AppColors.blue,
-              ),
-            ],
-          ),
-          if (_devOtp != null) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: AppColors.teal.withValues(alpha: .12),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.teal.withValues(alpha: .3)),
-              ),
-              child: Text(
-                'Demo / Verification Code: $_devOtp',
-                style: const TextStyle(
-                  color: AppColors.teal,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 16),
-          TextFormField(
-            controller: _otpController,
-            keyboardType: TextInputType.number,
-            maxLength: 6,
-            textAlign: TextAlign.center,
-            textInputAction: TextInputAction.next,
-            validator: _validateOtp,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 6,
-            ),
-            decoration: const InputDecoration(
-              labelText: '6-Digit Verification Code',
-              hintText: '••••••',
-              counterText: '',
-              prefixIcon: Icon(Icons.pin_rounded, color: AppColors.purple),
-            ),
-          ),
-          const SizedBox(height: 14),
-          TextFormField(
-            controller: _newPasswordController,
-            obscureText: _obscure,
-            textInputAction: TextInputAction.next,
-            validator: _validatePassword,
-            decoration: InputDecoration(
-              labelText: 'New Passcode',
-              hintText: 'At least 6 characters',
-              prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppColors.blue),
-              suffixIcon: IconButton(
-                onPressed: () => setState(() => _obscure = !_obscure),
-                icon: Icon(
-                  _obscure ? Icons.visibility_off_rounded : Icons.visibility_rounded,
-                  color: AppColors.muted,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          TextFormField(
-            controller: _confirmPasswordController,
-            obscureText: _obscure,
-            textInputAction: TextInputAction.done,
-            onFieldSubmitted: (_) => _loading ? null : _submitReset(),
-            validator: _validateConfirmPassword,
-            decoration: const InputDecoration(
-              labelText: 'Confirm New Passcode',
-              hintText: 'Re-enter new passcode',
-              prefixIcon: Icon(Icons.check_circle_outline_rounded, color: AppColors.teal),
-            ),
-          ),
-          if (_errorMessage != null) ...[
-            const SizedBox(height: 12),
-            _errorWidget(_errorMessage!),
-          ],
-          const SizedBox(height: 18),
-          GradientButton(
-            label: _loading ? 'Updating Passcode…' : 'Update Passcode',
-            icon: Icons.check_rounded,
-            loading: _loading,
-            onPressed: _loading ? null : _submitReset,
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              TextButton(
-                onPressed: () => setState(() => _step = 1),
-                child: const Text('Change account'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-            ],
           ),
         ],
       ),
@@ -410,14 +291,14 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   );
 
   Widget _successCard() => WhitePanel(
-    padding: const EdgeInsets.all(24),
+    padding: const EdgeInsets.all(22),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Center(
           child: Container(
-            width: 72,
-            height: 72,
+            width: 70,
+            height: 70,
             decoration: BoxDecoration(
               gradient: AppGradients.success,
               shape: BoxShape.circle,
@@ -430,15 +311,15 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
               ],
             ),
             child: const Icon(
-              Icons.check_rounded,
+              Icons.mark_email_read_rounded,
               color: Colors.white,
-              size: 38,
+              size: 36,
             ),
           ),
         ),
         const SizedBox(height: 16),
         const Text(
-          'Passcode Updated!',
+          'Reset Link Dispatched!',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: AppColors.ink,
@@ -446,24 +327,126 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             fontWeight: FontWeight.w900,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
         const Text(
-          'Your new passcode is active. You can now sign in with your updated credentials.',
+          'Google Firebase sent an official password reset link to:',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: AppColors.muted,
             fontSize: 13,
-            height: 1.45,
           ),
         ),
-        const SizedBox(height: 22),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: AppColors.blue.withValues(alpha: .10),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.blue.withValues(alpha: .30)),
+          ),
+          child: Text(
+            _submittedEmail ?? '',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: AppColors.blue,
+              fontWeight: FontWeight.w800,
+              fontSize: 14,
+            ),
+          ),
+        ),
+        const SizedBox(height: 18),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _instructionStep('1', 'Open your Gmail app or mail inbox.'),
+              const SizedBox(height: 8),
+              _instructionStep('2', 'Click the secure link from Google Firebase.'),
+              const SizedBox(height: 8),
+              _instructionStep('3', 'Set your new password and return here to sign in.'),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
         GradientButton(
-          label: 'Proceed to Sign in',
+          label: 'Return to Sign In',
           icon: Icons.login_rounded,
-          onPressed: () => Navigator.pushReplacementNamed(context, '/login'),
+          onPressed: () => Navigator.pop(context),
+        ),
+        const SizedBox(height: 10),
+        Center(
+          child: TextButton.icon(
+            onPressed: (_loading || _cooldown > 0) ? null : _sendResetLink,
+            icon: Icon(
+              Icons.replay_rounded,
+              size: 16,
+              color: _cooldown > 0 ? AppColors.muted : AppColors.purple,
+            ),
+            label: Text(
+              _cooldown > 0 ? 'Resend link in ${_cooldown}s' : 'Resend reset link',
+              style: TextStyle(
+                color: _cooldown > 0 ? AppColors.muted : AppColors.purple,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+        Center(
+          child: TextButton(
+            onPressed: () {
+              setState(() {
+                _isSent = false;
+                _errorMessage = null;
+              });
+            },
+            child: const Text(
+              'Entered wrong email? Change email',
+              style: TextStyle(fontSize: 12, color: AppColors.muted),
+            ),
+          ),
         ),
       ],
     ),
+  );
+
+  Widget _instructionStep(String stepNumber, String text) => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Container(
+        width: 22,
+        height: 22,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: AppColors.purple.withValues(alpha: .15),
+          shape: BoxShape.circle,
+        ),
+        child: Text(
+          stepNumber,
+          style: const TextStyle(
+            color: AppColors.purple,
+            fontWeight: FontWeight.w800,
+            fontSize: 11,
+          ),
+        ),
+      ),
+      const SizedBox(width: 10),
+      Expanded(
+        child: Text(
+          text,
+          style: const TextStyle(
+            color: AppColors.ink,
+            fontSize: 13,
+            height: 1.35,
+          ),
+        ),
+      ),
+    ],
   );
 
   Widget _errorWidget(String msg) => Container(

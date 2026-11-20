@@ -60,10 +60,19 @@ export default function Login() {
       }
 
       if (idToken) {
-        const serverUser = await signInWithFirebaseToken(idToken);
-        useLiveSession.getState().setUser(serverUser);
-        toast.success(`Welcome back, ${serverUser.name}!`);
-        navigate('/');
+        let serverUser = null;
+        try {
+          serverUser = await signInWithFirebaseToken(idToken);
+        } catch (fbSyncErr) {
+          console.warn('Firebase token server sync notice, attempting backend fallback:', fbSyncErr);
+          serverUser = await signIn(cleanInput, password);
+        }
+        if (serverUser) {
+          useLiveSession.getState().setUser(serverUser);
+          toast.success(`Welcome back, ${serverUser.name}!`);
+          navigate('/');
+          return;
+        }
       }
     } catch (cause: any) {
       const msg = cause?.message || (cause instanceof ServerError ? cause.message : 'Incorrect ID / email or passcode.');
