@@ -35,6 +35,7 @@ import {
   MultiExcelFileInfo,
   MultiExcelPreviewResponse,
   previewMultiExcel,
+  resetAccountingBalances,
   RoundoffLedgerResponse,
   ServerVoucher,
 } from '../lib/serverApi';
@@ -116,6 +117,8 @@ export default function Daybook() {
   const [multiPreview, setMultiPreview] = useState<MultiExcelPreviewResponse | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [cleanExistingBeforeApply, setCleanExistingBeforeApply] = useState(true);
+  const [resettingBalances, setResettingBalances] = useState(false);
 
   const fileInputId = useId();
 
@@ -227,7 +230,7 @@ export default function Daybook() {
 
     setApplying(true);
     try {
-      const res = await applyMultiExcel(selectedFiles);
+      const res = await applyMultiExcel(selectedFiles, cleanExistingBeforeApply);
       toast.success(res.message || 'Multi-Excel upload successfully applied!');
       setUploadOpen(false);
       setMultiPreview(null);
@@ -245,6 +248,25 @@ export default function Daybook() {
       toast.error(`Failed to apply Excel data: ${msg}`);
     } finally {
       setApplying(false);
+    }
+  };
+
+  const handleResetBalances = async () => {
+    if (!confirm('Are you sure you want to clean up all existing balances and vouchers?\n\nThis will purge all previous vouchers and opening balances, setting all customer and debtor balances to ₹0 so you can upload fresh Excel files cleanly.')) {
+      return;
+    }
+    setResettingBalances(true);
+    try {
+      const res = await resetAccountingBalances();
+      toast.success(res.message || 'Existing balances successfully cleaned!');
+      invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.vouchers);
+      loadData();
+      loadLedgerSummaries();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Reset failed';
+      toast.error(`Failed to clean balances: ${msg}`);
+    } finally {
+      setResettingBalances(false);
     }
   };
 
@@ -292,7 +314,17 @@ export default function Daybook() {
         title="Day Book & Accounting Ledgers"
         subtitle="Unified financial ledger sync: Sales, Receipts, Payments, Contras, Cashbooks, Bank Accounts, and Dedicated Nominal Ledgers."
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleResetBalances}
+              disabled={resettingBalances}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 transition disabled:opacity-50"
+              title="Clean all existing vouchers and reset balances to zero before uploading fresh Excel files"
+            >
+              {resettingBalances ? <RefreshCw size={14} className="animate-spin" /> : <Trash2 size={14} />}
+              <span>{resettingBalances ? 'Cleaning...' : 'Clean Balances'}</span>
+            </button>
             <button
               type="button"
               onClick={loadData}
@@ -810,10 +842,16 @@ export default function Daybook() {
             )}
 
             {/* Modal Actions */}
-            <div className="flex items-center justify-between border-t border-slate-100 pt-3">
-              <span className="text-[11px] text-slate-400">
-                Stock entries automatically disabled. Cash & Bank contra recorded.
-              </span>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 hover:bg-amber-100 transition">
+                <input
+                  type="checkbox"
+                  checked={cleanExistingBeforeApply}
+                  onChange={(e) => setCleanExistingBeforeApply(e.target.checked)}
+                  className="rounded text-amber-600 focus:ring-amber-500"
+                />
+                <span>Clean existing balances before importing</span>
+              </label>
               <div className="flex items-center gap-2">
                 <button
                   type="button"

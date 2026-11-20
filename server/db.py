@@ -628,6 +628,29 @@ def purge_test_payments() -> int:
         conn.commit()
     return count
 
+def clean_accounting_balances() -> dict[str, int]:
+    """
+    Cleans up all existing accounting records:
+    1. Purges all vouchers (Daybook, Cashbooks, Bank statements, adjustments)
+    2. Purges all opening balance records
+    3. Resets all party/customer balance_paise to 0
+    Returns details of purged rows.
+    """
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM vouchers")
+        v_count = cur.rowcount
+        cur.execute("DELETE FROM opening_balances")
+        ob_count = cur.rowcount
+        cur.execute("UPDATE parties SET balance_paise = 0")
+        p_count = cur.rowcount
+        conn.commit()
+    return {
+        "vouchersPurged": v_count,
+        "openingBalancesPurged": ob_count,
+        "partiesReset": p_count
+    }
+
 
 def save_dispatch(dispatch: dict[str, Any]) -> dict[str, Any]:
     """Persists dispatch and dispatch lines."""

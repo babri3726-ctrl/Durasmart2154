@@ -3542,13 +3542,16 @@ export async function previewMultiExcel(files: File[]): Promise<MultiExcelPrevie
   return res.json();
 }
 
-export async function applyMultiExcel(files: File[]): Promise<MultiExcelApplyResponse> {
+export async function applyMultiExcel(files: File[], cleanExisting: boolean = false): Promise<MultiExcelApplyResponse> {
   const formData = new FormData();
   for (const f of files) {
     formData.append('files', f);
   }
   const token = localStorage.getItem('durasmart_access_token');
-  const res = await fetch('/api/v1/imports/multi-excel/apply', {
+  const url = cleanExisting
+    ? '/api/v1/imports/multi-excel/apply?clean_existing=true'
+    : '/api/v1/imports/multi-excel/apply';
+  const res = await fetch(url, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     body: formData,
@@ -3556,6 +3559,22 @@ export async function applyMultiExcel(files: File[]): Promise<MultiExcelApplyRes
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Failed to apply multi-excel bundle' }));
     throw new Error(err.detail || 'Apply failed');
+  }
+  return res.json();
+}
+
+export async function resetAccountingBalances(): Promise<{ status: string; message: string; details: any }> {
+  const token = localStorage.getItem('durasmart_access_token');
+  const res = await fetch('/api/v1/accounting/reset-balances', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to reset accounting balances' }));
+    throw new Error(err.detail || 'Reset failed');
   }
   return res.json();
 }

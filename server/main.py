@@ -2404,6 +2404,24 @@ def resubmit_and_reconcile_endpoint():
         "discountReconciliation": res
     }
 
+@app.post("/api/v1/accounting/reset-balances")
+def reset_accounting_balances_endpoint():
+    """
+    Cleans up all accounting balances and transactions:
+    Purges all vouchers and opening balances, and resets all party balances to 0.
+    """
+    res = db.clean_accounting_balances()
+    # Refresh in-memory state
+    persisted = db.load_all_persisted_state()
+    for k in ["debtors", "customers", "opening_balances"]:
+        if k in persisted:
+            STATE[k] = persisted[k]
+    return {
+        "status": "success",
+        "message": "All existing vouchers and opening balances purged; all party balances reset to 0.",
+        "details": res
+    }
+
 # ============================================================================
 # MULTI-EXCEL 4-BOOK SYNC HUB (Daybook, Round Off, Discount, Trial Balance)
 # ============================================================================
@@ -2483,9 +2501,13 @@ async def preview_multi_excel_bundle(files: list[UploadFile] = File(...)):
     }
 
 @app.post("/api/v1/imports/multi-excel/apply")
-async def apply_multi_excel_bundle(files: list[UploadFile] = File(...)):
+async def apply_multi_excel_bundle(
+    files: list[UploadFile] = File(...),
+    clean_existing: bool = False
+):
     """
     Executes atomic 4-Excel import pipeline:
+    0. If clean_existing is True, purges all old vouchers, opening balances, and zeroes party balances first.
     1. Trial Balance opening balances
     2. Day Book vouchers (stock entries strictly disabled, cash/banks/roundoff/discount mapped)
     3. Dedicated Round Off Ledger
@@ -2518,6 +2540,11 @@ async def apply_multi_excel_bundle(files: list[UploadFile] = File(...)):
         
     by_type = {sf["type"]: sf for sf in saved_files}
     results = {}
+
+    # 0. Clean existing balances if requested
+    if clean_existing:
+        clean_res = db.clean_accounting_balances()
+        results["cleanedBeforeImport"] = clean_res
     
     # 1. Trial Balance
     if "trialbalance" in by_type:
