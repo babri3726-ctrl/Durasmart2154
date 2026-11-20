@@ -6,6 +6,42 @@ import { ServerError, signUpUser, verifyInvitationCode, VerifyInvitationResult }
 import { APP_NAME, APP_SUBTITLE } from '../lib/appConfig';
 import { toast } from '../lib/toast';
 
+const SALES_OFFICERS_CATALOG = [
+  { id: 'EMP-SP-01', name: 'AJAY JI', territory: 'Haryana', targetMT: '185 MT' },
+  { id: 'EMP-SP-02', name: 'Aksit', territory: 'Punjab', targetMT: '23 MT' },
+  { id: 'EMP-SP-03', name: 'GAURAV JI', territory: 'Haryana', targetMT: '50 MT' },
+  { id: 'EMP-SP-04', name: 'JAGDEEP 2/ Aakash Kumar', territory: 'Punjab', targetMT: '78 MT' },
+  { id: 'EMP-SP-05', name: 'JAGDEEP 3/ Dalip Kumar', territory: 'Punjab', targetMT: '50 MT' },
+  { id: 'EMP-SP-06', name: 'Jagdeep Singh', territory: 'Punjab', targetMT: '271 MT' },
+  { id: 'EMP-SP-07', name: 'Mozi Ram', territory: 'Haryana', targetMT: '50 MT' },
+  { id: 'EMP-SP-08', name: 'PANKAJ JI', territory: 'Haryana', targetMT: '280 MT' },
+  { id: 'EMP-SP-09', name: 'Pankaj Goyal', territory: 'Punjab', targetMT: '127 MT' },
+  { id: 'EMP-SP-10', name: 'SANDEEP2/Mozi Ram', territory: 'Punjab', targetMT: '87 MT' },
+  { id: 'EMP-SP-11', name: 'Sandeep Mahajan', territory: 'Punjab', targetMT: '239 MT' },
+  { id: 'EMP-SP-12', name: 'Suresh Jindal', territory: 'Punjab', targetMT: '99 MT' },
+  { id: 'EMP-SP-13', name: 'VIJAY JI', territory: 'Haryana', targetMT: '70 MT' },
+];
+
+function getOfficerMatch(text: string) {
+  const t = text.toLowerCase().trim();
+  if (!t || t.length < 2) return null;
+  if (t.includes('goyal')) return SALES_OFFICERS_CATALOG.find((o) => o.id === 'EMP-SP-09');
+  if (t.includes('mahajan')) return SALES_OFFICERS_CATALOG.find((o) => o.id === 'EMP-SP-11');
+  if (t.includes('sandeep') && (t.includes('2') || t.includes('mozi'))) return SALES_OFFICERS_CATALOG.find((o) => o.id === 'EMP-SP-10');
+  if (t.includes('aakash') || (t.includes('jagdeep') && t.includes('2'))) return SALES_OFFICERS_CATALOG.find((o) => o.id === 'EMP-SP-04');
+  if (t.includes('dalip') || (t.includes('jagdeep') && t.includes('3'))) return SALES_OFFICERS_CATALOG.find((o) => o.id === 'EMP-SP-05');
+  if (t.includes('mozi')) return SALES_OFFICERS_CATALOG.find((o) => o.id === 'EMP-SP-07');
+  if (t.includes('ajay')) return SALES_OFFICERS_CATALOG.find((o) => o.id === 'EMP-SP-01');
+  if (t.includes('aksit') || t.includes('akshit')) return SALES_OFFICERS_CATALOG.find((o) => o.id === 'EMP-SP-02');
+  if (t.includes('gaurav')) return SALES_OFFICERS_CATALOG.find((o) => o.id === 'EMP-SP-03');
+  if (t.includes('suresh')) return SALES_OFFICERS_CATALOG.find((o) => o.id === 'EMP-SP-12');
+  if (t.includes('vijay')) return SALES_OFFICERS_CATALOG.find((o) => o.id === 'EMP-SP-13');
+  if (t.includes('pankaj')) return SALES_OFFICERS_CATALOG.find((o) => o.id === 'EMP-SP-08');
+  if (t.includes('sandeep')) return SALES_OFFICERS_CATALOG.find((o) => o.id === 'EMP-SP-11');
+  if (t.includes('jagdeep')) return SALES_OFFICERS_CATALOG.find((o) => o.id === 'EMP-SP-06');
+  return null;
+}
+
 export default function Signup() {
   const [searchParams] = useSearchParams();
   const initialCode = searchParams.get('code') || '';
@@ -200,11 +236,25 @@ export default function Signup() {
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Your full name"
+                  placeholder="Your full name (e.g. Ajay Ji)"
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50/50 py-3 pl-11 pr-4 text-[14px] font-medium text-slate-900 placeholder:text-slate-400 focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
                   autoComplete="name"
                 />
               </div>
+
+              {/* Officer Auto-Sync Live Badge */}
+              {(() => {
+                const matchedOfficer = getOfficerMatch(name);
+                if (!matchedOfficer) return null;
+                return (
+                  <div className="mt-2 flex items-center gap-2 rounded-xl bg-blue-50 border border-blue-200/80 px-3 py-2 text-[12px] font-semibold text-blue-800">
+                    <ShieldCheck size={16} className="text-blue-600 shrink-0" />
+                    <span>
+                      ✓ Auto-syncs to <strong>{matchedOfficer.name}</strong> ({matchedOfficer.territory} &bull; Target {matchedOfficer.targetMT})
+                    </span>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Email / Username */}

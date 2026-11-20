@@ -2114,6 +2114,64 @@ def verify_user_password(user: dict[str, Any], password: str) -> bool:
     computed, _ = hash_password(password, salt=salt)
     return secrets.compare_digest(computed, expected)
 
+SALES_OFFICERS_DIRECTORY = [
+    {"id": "EMP-SP-01", "name": "AJAY JI", "phone": "9814010000", "territory": "Haryana", "target_mt": 185.0},
+    {"id": "EMP-SP-02", "name": "Aksit", "phone": "9814010001", "territory": "Punjab", "target_mt": 23.0},
+    {"id": "EMP-SP-03", "name": "GAURAV JI", "phone": "9814010002", "territory": "Haryana", "target_mt": 50.0},
+    {"id": "EMP-SP-04", "name": "JAGDEEP 2/ Aakash Kumar", "phone": "9814010003", "territory": "Punjab", "target_mt": 78.0},
+    {"id": "EMP-SP-05", "name": "JAGDEEP 3/ Dalip Kumar", "phone": "9814010004", "territory": "Punjab", "target_mt": 50.0},
+    {"id": "EMP-SP-06", "name": "Jagdeep Singh", "phone": "9814010005", "territory": "Punjab", "target_mt": 271.0},
+    {"id": "EMP-SP-07", "name": "Mozi Ram", "phone": "9814010006", "territory": "Haryana", "target_mt": 50.0},
+    {"id": "EMP-SP-08", "name": "PANKAJ JI", "phone": "9814010007", "territory": "Haryana", "target_mt": 280.0},
+    {"id": "EMP-SP-09", "name": "Pankaj Goyal", "phone": "9814010008", "territory": "Punjab", "target_mt": 127.0},
+    {"id": "EMP-SP-10", "name": "SANDEEP2/Mozi Ram", "phone": "9814010009", "territory": "Punjab", "target_mt": 87.0},
+    {"id": "EMP-SP-11", "name": "Sandeep Mahajan", "phone": "9814010010", "territory": "Punjab", "target_mt": 239.0},
+    {"id": "EMP-SP-12", "name": "Suresh Jindal", "phone": "9814010011", "territory": "Punjab", "target_mt": 99.0},
+    {"id": "EMP-SP-13", "name": "VIJAY JI", "phone": "9814010012", "territory": "Haryana", "target_mt": 70.0},
+]
+
+def find_matching_sales_officer(name: str = "", phone: str = "", identifier: str = "") -> dict[str, Any] | None:
+    """Matches user input by phone, name, or email to the 13 official sales officers."""
+    import re
+    clean_p = re.sub(r"\D", "", phone or "")
+    if len(clean_p) >= 10:
+        p10 = clean_p[-10:]
+        for o in SALES_OFFICERS_DIRECTORY:
+            if o["phone"] == p10:
+                return o
+
+    combined = f"{name or ''} {identifier or ''}".lower()
+
+    if "goyal" in combined:
+        return next(o for o in SALES_OFFICERS_DIRECTORY if o["id"] == "EMP-SP-09")
+    if "mahajan" in combined:
+        return next(o for o in SALES_OFFICERS_DIRECTORY if o["id"] == "EMP-SP-11")
+    if "sandeep" in combined and ("2" in combined or "mozi" in combined):
+        return next(o for o in SALES_OFFICERS_DIRECTORY if o["id"] == "EMP-SP-10")
+    if "aakash" in combined or ("jagdeep" in combined and "2" in combined):
+        return next(o for o in SALES_OFFICERS_DIRECTORY if o["id"] == "EMP-SP-04")
+    if "dalip" in combined or ("jagdeep" in combined and "3" in combined):
+        return next(o for o in SALES_OFFICERS_DIRECTORY if o["id"] == "EMP-SP-05")
+    if "mozi" in combined:
+        return next(o for o in SALES_OFFICERS_DIRECTORY if o["id"] == "EMP-SP-07")
+    if "ajay" in combined:
+        return next(o for o in SALES_OFFICERS_DIRECTORY if o["id"] == "EMP-SP-01")
+    if "aksit" in combined or "akshit" in combined:
+        return next(o for o in SALES_OFFICERS_DIRECTORY if o["id"] == "EMP-SP-02")
+    if "gaurav" in combined:
+        return next(o for o in SALES_OFFICERS_DIRECTORY if o["id"] == "EMP-SP-03")
+    if "suresh" in combined:
+        return next(o for o in SALES_OFFICERS_DIRECTORY if o["id"] == "EMP-SP-12")
+    if "vijay" in combined:
+        return next(o for o in SALES_OFFICERS_DIRECTORY if o["id"] == "EMP-SP-13")
+    if "pankaj" in combined:
+        return next(o for o in SALES_OFFICERS_DIRECTORY if o["id"] == "EMP-SP-08")
+    if "sandeep" in combined:
+        return next(o for o in SALES_OFFICERS_DIRECTORY if o["id"] == "EMP-SP-11")
+    if "jagdeep" in combined:
+        return next(o for o in SALES_OFFICERS_DIRECTORY if o["id"] == "EMP-SP-06")
+    return None
+
 def upsert_user_from_firebase(uid: str, email: str, name: str = "", phone: str = "") -> dict[str, Any]:
     clean_email = (email or "").strip().lower()
     existing = (get_user_by_identifier(clean_email) if clean_email else None) or get_user_by_id(uid)
@@ -2127,9 +2185,19 @@ def upsert_user_from_firebase(uid: str, email: str, name: str = "", phone: str =
     )
     role = "owner" if is_owner else "employee"
     dept = "Management" if is_owner else "Sales"
-    emp_id = "OWNER-01" if is_owner else f"EMP-{uid[:6].upper()}"
-    territory = "Executive / All Territories" if is_owner else "Punjab"
     clean_name = name.strip() or (clean_email.split("@")[0].title() if clean_email else "DuraSmart User")
+    emp_id = "OWNER-01" if is_owner else f"EMP-{uid[:6].upper()}"
+    territory = "Executive / All Territories" if is_owner else "Punjab/Haryana"
+
+    if not is_owner:
+        officer = find_matching_sales_officer(clean_name, phone, clean_email)
+        if officer:
+            emp_id = officer["id"]
+            territory = officer["territory"]
+            clean_name = officer["name"]
+            dept = "Sales"
+            role = "employee"
+
     username = clean_email.split("@")[0] if clean_email else f"user_{uid[:6]}"
     
     now = datetime.now().isoformat()

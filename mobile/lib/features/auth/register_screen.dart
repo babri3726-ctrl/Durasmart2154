@@ -40,6 +40,50 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _loading = false;
   String? _verifiedDept;
 
+  static const _officers = [
+    {'id': 'EMP-SP-01', 'name': 'AJAY JI', 'territory': 'Haryana', 'target': '185 MT'},
+    {'id': 'EMP-SP-02', 'name': 'Aksit', 'territory': 'Punjab', 'target': '23 MT'},
+    {'id': 'EMP-SP-03', 'name': 'GAURAV JI', 'territory': 'Haryana', 'target': '50 MT'},
+    {'id': 'EMP-SP-04', 'name': 'JAGDEEP 2/ Aakash Kumar', 'territory': 'Punjab', 'target': '78 MT'},
+    {'id': 'EMP-SP-05', 'name': 'JAGDEEP 3/ Dalip Kumar', 'territory': 'Punjab', 'target': '50 MT'},
+    {'id': 'EMP-SP-06', 'name': 'Jagdeep Singh', 'territory': 'Punjab', 'target': '271 MT'},
+    {'id': 'EMP-SP-07', 'name': 'Mozi Ram', 'territory': 'Haryana', 'target': '50 MT'},
+    {'id': 'EMP-SP-08', 'name': 'PANKAJ JI', 'territory': 'Haryana', 'target': '280 MT'},
+    {'id': 'EMP-SP-09', 'name': 'Pankaj Goyal', 'territory': 'Punjab', 'target': '127 MT'},
+    {'id': 'EMP-SP-10', 'name': 'SANDEEP2/Mozi Ram', 'territory': 'Punjab', 'target': '87 MT'},
+    {'id': 'EMP-SP-11', 'name': 'Sandeep Mahajan', 'territory': 'Punjab', 'target': '239 MT'},
+    {'id': 'EMP-SP-12', 'name': 'Suresh Jindal', 'territory': 'Punjab', 'target': '99 MT'},
+    {'id': 'EMP-SP-13', 'name': 'VIJAY JI', 'territory': 'Haryana', 'target': '70 MT'},
+  ];
+
+  Map<String, String>? _getMatchedOfficer(String text) {
+    final t = text.toLowerCase().trim();
+    if (t.length < 2) return null;
+    if (t.contains('goyal')) return _officers.firstWhere((o) => o['id'] == 'EMP-SP-09');
+    if (t.contains('mahajan')) return _officers.firstWhere((o) => o['id'] == 'EMP-SP-11');
+    if (t.contains('sandeep') && (t.contains('2') || t.contains('mozi'))) return _officers.firstWhere((o) => o['id'] == 'EMP-SP-10');
+    if (t.contains('aakash') || (t.contains('jagdeep') && t.contains('2'))) return _officers.firstWhere((o) => o['id'] == 'EMP-SP-04');
+    if (t.contains('dalip') || (t.contains('jagdeep') && t.contains('3'))) return _officers.firstWhere((o) => o['id'] == 'EMP-SP-05');
+    if (t.contains('mozi')) return _officers.firstWhere((o) => o['id'] == 'EMP-SP-07');
+    if (t.contains('ajay')) return _officers.firstWhere((o) => o['id'] == 'EMP-SP-01');
+    if (t.contains('aksit') || t.contains('akshit')) return _officers.firstWhere((o) => o['id'] == 'EMP-SP-02');
+    if (t.contains('gaurav')) return _officers.firstWhere((o) => o['id'] == 'EMP-SP-03');
+    if (t.contains('suresh')) return _officers.firstWhere((o) => o['id'] == 'EMP-SP-12');
+    if (t.contains('vijay')) return _officers.firstWhere((o) => o['id'] == 'EMP-SP-13');
+    if (t.contains('pankaj')) return _officers.firstWhere((o) => o['id'] == 'EMP-SP-08');
+    if (t.contains('sandeep')) return _officers.firstWhere((o) => o['id'] == 'EMP-SP-11');
+    if (t.contains('jagdeep')) return _officers.firstWhere((o) => o['id'] == 'EMP-SP-06');
+    return null;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController.addListener(() {
+      if (mounted) setState(() {});
+    });
+  }
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -207,12 +251,40 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         validator: _validateName,
                         decoration: const InputDecoration(
                           labelText: 'Full name',
+                          hintText: 'e.g. Ajay Ji',
                           prefixIcon: Icon(
                             Icons.person_outline_rounded,
                             color: AppColors.teal,
                           ),
                         ),
                       ),
+                      if (_getMatchedOfficer(_nameController.text) != null) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: AppColors.teal.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.teal.withOpacity(0.3)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.check_circle_rounded, color: AppColors.teal, size: 18),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '✓ Auto-syncs to ${_getMatchedOfficer(_nameController.text)!['name']} (${_getMatchedOfficer(_nameController.text)!['territory']} • Target ${_getMatchedOfficer(_nameController.text)!['target']})',
+                                  style: const TextStyle(
+                                    color: AppColors.teal,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 14),
                       TextFormField(
                         controller: _contactController,

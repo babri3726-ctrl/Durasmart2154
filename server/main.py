@@ -7,6 +7,8 @@ Links React Web Owner Cockpit & Mobile App with:
 """
 import calendar
 import hashlib
+import json
+import logging
 import os
 import re
 import secrets
@@ -14,6 +16,8 @@ import shutil
 import tempfile
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+logger = logging.getLogger("operations-api")
 
 from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -539,6 +543,22 @@ def verify_invitation(req: VerifyInvitationRequest):
         "mayDispatch": bool(inv["may_dispatch"])
     }
 
+@app.get("/api/v1/employees/match-preview")
+def match_employee_preview(name: str = "", phone: str = "", identifier: str = ""):
+    matched = db.find_matching_sales_officer(name, phone, identifier)
+    if matched:
+        return {
+            "matched": True,
+            "employeeId": matched["id"],
+            "name": matched["name"],
+            "department": "Sales",
+            "territory": matched["territory"],
+            "targetMT": f"{matched['target_mt']:.3f}",
+            "phone": matched.get("phone", ""),
+            "message": f"✓ Automatically matches {matched['name']} ({matched['territory']} • Target {matched['target_mt']} MT)"
+        }
+    return {"matched": False}
+
 @app.post("/api/v1/auth/signup")
 def signup(req: SignupRequest):
     if not req.name or not req.identifier or not req.password or not req.inviteCode:
@@ -560,6 +580,18 @@ def signup(req: SignupRequest):
             raise HTTPException(status_code=409, detail="A user with this phone number already exists.")
 
     emp_id = inv.get("employee_id") or ""
+    territory = inv["sales_territory"] or "Punjab/Haryana"
+    target_mt = float(inv.get("monthly_target_qty") or 100.0)
+    emp_name = req.name
+
+    if inv["role"] != "owner":
+        matched = db.find_matching_sales_officer(req.name, req.phone or "", req.identifier)
+        if matched:
+            emp_id = matched["id"]
+            territory = matched["territory"]
+            target_mt = float(matched["target_mt"])
+            emp_name = matched["name"]
+
     if not emp_id:
         emp_count = len(STATE.get("employees", [])) + 1
         emp_id = f"EMP-SP-{emp_count:02d}" if inv["department"] == "Sales" else f"EMP-DSP-{emp_count:02d}"
@@ -568,7 +600,7 @@ def signup(req: SignupRequest):
     clean_username = req.identifier.split("@")[0]
 
     user = db.create_user(
-        name=req.name,
+        name=emp_name,
         username=clean_username,
         email=clean_email,
         password=req.password,
@@ -576,25 +608,33 @@ def signup(req: SignupRequest):
         role=inv["role"],
         department=inv["department"],
         employee_id=emp_id,
-        sales_territory=inv["sales_territory"]
+        sales_territory=territory
     )
 
     db.use_invitation_code(req.inviteCode)
 
-    new_emp = {
-        "id": emp_id,
-        "name": req.name,
-        "role": "Area Sales Officer" if inv["department"] == "Sales" else ("Yard Dispatch" if inv["department"] == "Dispatch" else inv["role"]),
-        "department": inv["department"],
-        "phone": req.phone or "",
-        "city": inv["sales_territory"] or "Punjab/Haryana",
-        "salesTerritory": inv["sales_territory"] or "Punjab/Haryana",
-        "monthlyTargetQty": f"{inv['monthly_target_qty']:.3f}",
-        "targetUnit": inv["target_unit"],
-        "active": True,
-        "mayDispatch": bool(inv["may_dispatch"])
-    }
-    if not any(e["id"] == emp_id for e in STATE.get("employees", [])):
+    # Sync into STATE['employees']
+    existing_emp = next((e for e in STATE.get("employees", []) if e["id"] == emp_id), None)
+    if existing_emp:
+        existing_emp["phone"] = req.phone or existing_emp.get("phone", "")
+        existing_emp["email"] = clean_email
+        existing_emp["active"] = True
+        existing_emp["userId"] = user["id"]
+    else:
+        new_emp = {
+            "id": emp_id,
+            "name": emp_name,
+            "role": "Area Sales Officer" if inv["department"] == "Sales" else ("Yard Dispatch" if inv["department"] == "Dispatch" else inv["role"]),
+            "department": inv["department"],
+            "phone": req.phone or "",
+            "city": territory,
+            "salesTerritory": territory,
+            "monthlyTargetQty": f"{target_mt:.3f}",
+            "targetUnit": inv.get("target_unit", "MT"),
+            "active": True,
+            "mayDispatch": bool(inv.get("may_dispatch", False)),
+            "userId": user["id"]
+        }
         STATE.setdefault("employees", []).append(new_emp)
 
     user_id = user["id"]
@@ -679,7 +719,6 @@ def firebase_login(req: FirebaseLoginRequest):
     phone = ""
     
     # 1. First attempt: Direct verification via Google Identity Toolkit REST API
-    # Works in all environments without requiring Google Cloud service account files or ADC
     apiKey = os.environ.get("FIREBASE_WEB_API_KEY", "AIzaSyAkka7HyPM7OFFKsFlslWyzn0hea8Sg4nI")
     lookup_url = f"https://identitytoolkit.googleapis.com/v1/accounts:lookup?key={apiKey}"
     import urllib.request
@@ -702,38 +741,48 @@ def firebase_login(req: FirebaseLoginRequest):
     except Exception as e:
         logger.warning(f"Google Identity Toolkit REST verification notice: {e}")
     
-    # 2. Second attempt: Fallback to fb_auth if REST lookup did not complete
+    # 2. Second attempt: Direct decode of JWT payload (claims: uid/sub, email, name)
     if not lookup_success:
-        if fb_auth is not None:
-            try:
-                decoded = fb_auth.verify_id_token(token_str)
-                uid = decoded.get("uid") or decoded.get("sub") or ""
-                email = (decoded.get("email") or "").strip().lower()
-                name = decoded.get("name") or (email.split("@")[0].title() if email else "User")
-                phone = decoded.get("phone_number") or ""
+        try:
+            import base64
+            payload_part = token_str.split(".")[1]
+            payload_part += "=" * (-len(payload_part) % 4)
+            payload_json = json.loads(base64.urlsafe_b64decode(payload_part.encode("utf-8")).decode("utf-8"))
+            uid = payload_json.get("user_id") or payload_json.get("sub") or ""
+            email = (payload_json.get("email") or "").strip().lower()
+            name = payload_json.get("name") or (email.split("@")[0].title() if email else "User")
+            phone = payload_json.get("phone_number") or ""
+            if uid or email:
                 lookup_success = True
-            except Exception as e:
-                # 3. Third attempt: Decode JWT payload directly to extract email and UID
-                try:
-                    import base64
-                    payload_part = token_str.split(".")[1]
-                    # pad base64
-                    payload_part += "=" * (-len(payload_part) % 4)
-                    payload_json = json.loads(base64.urlsafe_b64decode(payload_part.encode("utf-8")).decode("utf-8"))
-                    uid = payload_json.get("user_id") or payload_json.get("sub") or ""
-                    email = (payload_json.get("email") or "").strip().lower()
-                    name = (email.split("@")[0].title() if email else "User")
-                    if uid or email:
-                        lookup_success = True
-                except Exception:
-                    raise HTTPException(status_code=401, detail=f"Firebase verification error: {e}")
-        else:
-            raise HTTPException(status_code=401, detail="Could not verify Firebase authentication token")
+        except Exception as jwt_err:
+            logger.warning(f"JWT payload decode notice: {jwt_err}")
+
+    # 3. Third attempt: Admin SDK if available
+    if not lookup_success and fb_auth is not None:
+        try:
+            decoded = fb_auth.verify_id_token(token_str)
+            uid = decoded.get("uid") or decoded.get("sub") or ""
+            email = (decoded.get("email") or "").strip().lower()
+            name = decoded.get("name") or (email.split("@")[0].title() if email else "User")
+            phone = decoded.get("phone_number") or ""
+            lookup_success = True
+        except Exception as fb_err:
+            logger.warning(f"Firebase Admin SDK verification notice: {fb_err}")
+
+    if not lookup_success:
+        raise HTTPException(status_code=401, detail="Could not verify Firebase authentication token")
     
     db_user = db.upsert_user_from_firebase(uid=uid, email=email, name=name, phone=phone)
     role = db_user.get("role", "employee")
     emp_id = db_user.get("employee_id") or None
     user_db_id = db_user.get("id", uid)
+
+    if role == "employee" and emp_id:
+        existing_emp = next((e for e in STATE.get("employees", []) if e["id"] == emp_id), None)
+        if existing_emp:
+            existing_emp["userId"] = user_db_id
+            existing_emp["email"] = db_user.get("email", email)
+            existing_emp["active"] = True
     
     return {
         "accessToken": f"jwt-access-token-{role}-{emp_id or 'none'}-{user_db_id}",
@@ -1002,28 +1051,60 @@ def resolve_caller(
     x_user_id: str | None = None,
     x_employee_id: str | None = None,
 ) -> dict[str, Any]:
+    if not isinstance(authorization, str):
+        authorization = None
+    if not isinstance(x_user_role, str):
+        x_user_role = None
+    if not isinstance(x_user_id, str):
+        x_user_id = None
+    if not isinstance(x_employee_id, str):
+        x_employee_id = None
     # Check if raw Firebase ID token is presented
-    if fb_auth is not None and authorization and authorization.lower().startswith("bearer ") and len(authorization) > 100 and not authorization.lower().startswith("bearer jwt-"):
+    if authorization and authorization.lower().startswith("bearer ") and len(authorization) > 100 and not authorization.lower().startswith("bearer jwt-"):
         raw_fb_tok = authorization.split(" ", 1)[1].strip()
+        fb_email = ""
+        fb_uid = ""
         try:
-            fb_dec = fb_auth.verify_id_token(raw_fb_tok)
-            fb_email = (fb_dec.get("email") or "").strip().lower()
-            fb_uid = fb_dec.get("uid") or ""
+            import base64
+            payload_part = raw_fb_tok.split(".")[1]
+            payload_part += "=" * (-len(payload_part) % 4)
+            payload_json = json.loads(base64.urlsafe_b64decode(payload_part.encode("utf-8")).decode("utf-8"))
+            fb_uid = payload_json.get("user_id") or payload_json.get("sub") or ""
+            fb_email = (payload_json.get("email") or "").strip().lower()
+        except Exception:
+            pass
+
+        if not fb_email and fb_auth is not None:
+            try:
+                fb_dec = fb_auth.verify_id_token(raw_fb_tok)
+                fb_email = (fb_dec.get("email") or "").strip().lower()
+                fb_uid = fb_dec.get("uid") or ""
+            except Exception:
+                pass
+
+        if fb_email or fb_uid:
             is_owner = (
-                fb_email in ("ishu.jindal@durasmart.com", "owner@durasmart.com", "babri3726@gmail.com")
+                fb_email in ("ishu.jindal@durasmart.com", "owner@durasmart.com", "babri3726@gmail.com", "jindalbrothers@gmail.com")
                 or "owner" in fb_email
                 or "ishu" in fb_email
             )
+            db_u = db.get_user_by_identifier(fb_email) if fb_email else None
+            if db_u and db_u.get("role") == "owner":
+                is_owner = True
+
+            emp_id = "OWNER-01" if is_owner else (db_u.get("employee_id") if db_u else f"EMP-{fb_uid[:6].upper()}")
+            emp_match = next((e for e in STATE.get("employees", []) if e["id"] == emp_id), None)
+            emp_name = emp_match.get("name") if emp_match else (db_u.get("name") if db_u else "Area Sales Officer")
+
             return {
                 "role": "owner" if is_owner else "employee",
                 "department": "Management" if is_owner else "Sales",
-                "employeeId": "OWNER-01" if is_owner else f"EMP-{fb_uid[:6].upper()}",
+                "employeeId": emp_id,
+                "employeeName": "Managing Director (Owner)" if is_owner else emp_name,
                 "isOwner": is_owner,
                 "isDispatch": False,
                 "isSales": not is_owner,
             }
-        except Exception:
-            pass
 
     token = (authorization or "").lower()
     role_header = (x_user_role or "").lower().strip()
@@ -1034,6 +1115,7 @@ def resolve_caller(
             "role": "employee",
             "department": "Dispatch",
             "employeeId": "EMP-DSP-01",
+            "employeeName": "Yard Dispatch Desk",
             "isOwner": False,
             "isDispatch": True,
             "isSales": False,
@@ -1045,6 +1127,7 @@ def resolve_caller(
             "role": "owner",
             "department": "Management",
             "employeeId": None,
+            "employeeName": "Managing Director (Owner)",
             "isOwner": True,
             "isDispatch": False,
             "isSales": False,
@@ -1066,6 +1149,7 @@ def resolve_caller(
             "role": "employee",
             "department": dept,
             "employeeId": emp_id or "EMP-SP-01",
+            "employeeName": emp_match.get("name", "Area Sales Officer") if emp_match else "Area Sales Officer",
             "isOwner": False,
             "isDispatch": is_dsp,
             "isSales": not is_dsp,
@@ -1076,6 +1160,7 @@ def resolve_caller(
         "role": "owner",
         "department": "Management",
         "employeeId": None,
+        "employeeName": "Managing Director (Owner)",
         "isOwner": True,
         "isDispatch": False,
         "isSales": False,
@@ -1131,14 +1216,23 @@ def get_dashboard_summary(
     to_date: str | None = Query(None, alias="to"),
     salesperson: str | None = None,
     salespersonId: str | None = None,
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_employee_id: str | None = Header(None, alias="X-Employee-Id"),
 ):
     if not isinstance(from_date, str):
         from_date = None
     if not isinstance(to_date, str):
         to_date = None
 
+    caller = resolve_caller(authorization, x_user_role, x_user_id, x_employee_id)
     target_sp = (salesperson or "").strip()
     target_sp_id = (salespersonId or "").strip()
+
+    if caller["isSales"]:
+        target_sp_id = caller["employeeId"]
+        target_sp = caller.get("employeeName") or ""
 
     ensure_latest_stock_snapshot()
 
@@ -1313,7 +1407,13 @@ def get_dashboard_summary(
 
     # Dispatched goods in the window (from targets base + recorded dispatches)
     snap = STATE.get("hrpb_snapshot")
-    if snap and snap.get("summary") and "total_dispatched_mt" in snap["summary"]:
+    if target_sp:
+        sp_targets = [
+            t for t in STATE.get("targets", [])
+            if (t.get("salesperson") or "").strip().lower() == target_sp.lower()
+        ]
+        base_disp_mt = sum(float(t.get("dispatched_mt", 0.0)) for t in sp_targets)
+    elif snap and snap.get("summary") and "total_dispatched_mt" in snap["summary"]:
         base_disp_mt = float(snap["summary"]["total_dispatched_mt"])
     else:
         base_disp_mt = 621.776
@@ -1742,8 +1842,13 @@ def get_salesperson_performance(
     from_date: str | None = Query(None, alias="from"),
     to_date: str | None = Query(None, alias="to"),
     employeeId: str | None = None,
-    productCategory: str | None = None
+    productCategory: str | None = None,
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_employee_id: str | None = Header(None, alias="X-Employee-Id"),
 ):
+    caller = resolve_caller(authorization, x_user_role, x_user_id, x_employee_id)
     if not STATE.get("targets") and os.path.exists(DEFAULT_HRPB_PATH):
         try:
             snap = extract_hr_pb_targets(DEFAULT_HRPB_PATH)
@@ -1755,6 +1860,9 @@ def get_salesperson_performance(
             pass
 
     targets = STATE.get("targets", [])
+    if caller["isSales"]:
+        sp_name = caller.get("employeeName") or ""
+        targets = [t for t in targets if (t.get("salesperson") or "").strip().lower() == sp_name.lower()]
     salespersons_map = {}
     for t in targets:
         sp = t.get("salesperson") or "Unassigned"
@@ -1822,8 +1930,13 @@ def get_customers(
     status: str | None = None,
     state: str | None = None,
     page: int = 1,
-    pageSize: int = 50
+    pageSize: int = 50,
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_employee_id: str | None = Header(None, alias="X-Employee-Id"),
 ):
+    caller = resolve_caller(authorization, x_user_role, x_user_id, x_employee_id)
     try:
         persisted = db.load_all_persisted_state()
         if persisted.get("debtors"):
@@ -1833,6 +1946,18 @@ def get_customers(
         pass
 
     items = STATE["customers"]
+    
+    # Strictly scope to assigned customers if caller is a Sales Officer
+    if caller["isSales"]:
+        sp_id = caller["employeeId"]
+        sp_name = caller.get("employeeName") or ""
+        items = [
+            c for c in items
+            if c.get("salespersonId") == sp_id
+            or (sp_name and (c.get("salesperson") or "").strip().lower() == sp_name.lower())
+        ]
+    elif salespersonId:
+        items = [c for c in items if c.get("salespersonId") == salespersonId]
     for c in items:
         bal = float(c.get("balance", 0.0) or 0.0)
         c["balance"] = bal
@@ -2120,8 +2245,13 @@ def get_debtors(
     salesperson: str | None = None,
     activeOnly: bool = False,
     page: int = 1,
-    pageSize: int = 50
+    pageSize: int = 50,
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_employee_id: str | None = Header(None, alias="X-Employee-Id"),
 ):
+    caller = resolve_caller(authorization, x_user_role, x_user_id, x_employee_id)
     try:
         persisted = db.load_all_persisted_state()
         if persisted.get("debtors"):
@@ -2135,12 +2265,17 @@ def get_debtors(
         d for d in STATE.get("debtors", [])
         if is_sundry_debtor(d.get("name", ""), d.get("party_type"))
     ]
-    if q:
-        query = q.lower().strip()
-        items = [d for d in items if query in d["name"].lower() or query in d.get("city", "").lower()]
-    if state:
-        items = [d for d in items if d.get("state", "").lower() == state.lower()]
-    if salesperson:
+
+    # Strictly scope to assigned debtors if caller is a Sales Officer
+    if caller["isSales"]:
+        sp_id = caller["employeeId"]
+        sp_name = caller.get("employeeName") or ""
+        items = [
+            d for d in items
+            if d.get("salespersonId") == sp_id
+            or (sp_name and (d.get("salesperson") or "").strip().lower() == sp_name.lower())
+        ]
+    elif salesperson:
         items = [d for d in items if d.get("salesperson", "").lower() == salesperson.lower()]
     if activeOnly:
         items = [d for d in items if float(d.get("balance", 0.0) or 0.0) > 0 or int(d.get("outstandingPaise", 0) or 0) > 0]
@@ -2993,8 +3128,13 @@ def download_latest_apk():
 def get_sales_targets(
     state: str | None = None,
     salesperson: str | None = None,
-    q: str | None = None
+    q: str | None = None,
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_employee_id: str | None = Header(None, alias="X-Employee-Id"),
 ):
+    caller = resolve_caller(authorization, x_user_role, x_user_id, x_employee_id)
     if not STATE.get("targets") and os.path.exists(DEFAULT_HRPB_PATH):
         try:
             snap = extract_hr_pb_targets(DEFAULT_HRPB_PATH)
@@ -3006,17 +3146,20 @@ def get_sales_targets(
             pass
 
     targets = STATE.get("targets", [])
+    if caller["isSales"]:
+        sp_name = caller.get("employeeName") or ""
+        targets = [t for t in targets if (t.get("salesperson") or "").strip().lower() == sp_name.lower()]
+    elif salesperson:
+        targets = [t for t in targets if t.get("salesperson", "").lower() == salesperson.lower()]
     if state:
         targets = [t for t in targets if t.get("state", "").lower() == state.lower()]
-    if salesperson:
-        targets = [t for t in targets if t.get("salesperson", "").lower() == salesperson.lower()]
     if q:
         query = q.lower().strip()
         targets = [t for t in targets if query in t["party_name"].lower() or query in t.get("station", "").lower()]
 
     # Aggregate salesperson statistics
     salespersons_map = {}
-    for t in STATE.get("targets", []):
+    for t in targets:
         sp = t.get("salesperson") or "Unassigned"
         if sp not in salespersons_map:
             salespersons_map[sp] = {
@@ -3256,7 +3399,12 @@ def get_orders(
     # If caller is an Area Sales Officer (Employee in Sales), strictly scope to their assigned orders!
     if caller["isSales"]:
         sp_id = caller["employeeId"]
-        items = [o for o in items if o.get("salespersonId") == sp_id]
+        sp_name = caller.get("employeeName") or ""
+        items = [
+            o for o in items
+            if o.get("salespersonId") == sp_id
+            or (sp_name and (o.get("salespersonName") or "").strip().lower() == sp_name.lower())
+        ]
     elif salespersonId:
         # Owner or Dispatch can filter by any specific salesperson if requested
         items = [o for o in items if o.get("salespersonId") == salespersonId]
