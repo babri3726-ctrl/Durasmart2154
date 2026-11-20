@@ -409,6 +409,9 @@ except Exception as e:
 class FirebaseLoginRequest(BaseModel):
     idToken: str
 
+class FirebasePasswordResetRequest(BaseModel):
+    email: str
+
 class LoginRequest(BaseModel):
     identifier: str | None = None
     username: str | None = None
@@ -709,6 +712,44 @@ def firebase_login(req: FirebaseLoginRequest):
             "salesTerritory": db_user.get("sales_territory", "Punjab"),
         }
     }
+
+@app.post("/api/v1/auth/firebase-password-reset")
+def firebase_password_reset(req: FirebasePasswordResetRequest):
+    clean_email = (req.email or "").strip().lower()
+    if not clean_email or "@" not in clean_email:
+        raise HTTPException(status_code=400, detail="A valid email address is required.")
+
+    # Check if user exists in database
+    user = db.get_user_by_identifier(clean_email)
+    if not user:
+        raise HTTPException(status_code=404, detail="No registered account found matching this email address.")
+
+    apiKey = os.environ.get("FIREBASE_WEB_API_KEY", "AIzaSyAkka7HyPM7OFFKsFlslWyzn0hea8Sg4nI")
+    url = f"https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key={apiKey}"
+    import urllib.request
+    import urllib.error
+    body = json.dumps({"requestType": "PASSWORD_RESET", "email": clean_email}).encode("utf-8")
+    req_fb = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req_fb, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return {
+                "status": "ok",
+                "message": f"Official Google password reset link has been dispatched to {clean_email}.",
+                "email": clean_email
+            }
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8")
+        try:
+            err_json = json.loads(err_body)
+            err_msg = err_json.get("error", {}).get("message", "EMAIL_NOT_FOUND")
+        except Exception:
+            err_msg = "FAILED"
+        if "EMAIL_NOT_FOUND" in err_msg:
+            raise HTTPException(status_code=404, detail="This email is not registered in Firebase Auth.")
+        raise HTTPException(status_code=400, detail=f"Firebase error: {err_msg}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to communicate with Firebase: {e}")
 
 @app.post("/api/v1/auth/forgot-password")
 def forgot_password(req: ForgotPasswordRequest):

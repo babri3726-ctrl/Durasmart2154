@@ -2121,7 +2121,7 @@ def upsert_user_from_firebase(uid: str, email: str, name: str = "", phone: str =
         return existing
     
     is_owner = (
-        clean_email in ("ishu.jindal@durasmart.com", "owner@durasmart.com", "babri3726@gmail.com")
+        clean_email in ("ishu.jindal@durasmart.com", "owner@durasmart.com", "babri3726@gmail.com", "jindalbrothers@gmail.com")
         or "owner" in clean_email
         or "ishu" in clean_email
     )
