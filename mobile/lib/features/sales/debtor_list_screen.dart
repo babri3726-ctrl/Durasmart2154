@@ -313,7 +313,7 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
       return a.name.compareTo(b.name);
     });
 
-    final double totalReceivables = (_query.isEmpty && _selectedTerritory == 'All' && repo.serverOutstanding != null && repo.serverOutstanding! > 0)
+    final double totalReceivables = (_query.isEmpty && _selectedTerritory == 'All' && repo.serverOutstanding != null)
         ? repo.serverOutstanding!
         : items.fold(0.0, (sum, d) => sum + d.balance);
     final int punjabCount = repo.debtors.where((d) => d.state.toLowerCase() == 'punjab').length;

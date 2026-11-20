@@ -86,8 +86,8 @@ class MockRepository extends ChangeNotifier {
   int? serverActiveDealers;
   int? serverSalesTeamCount;
   List<SalespersonSummary> salespersonSummaries = [];
-  static const int currentVersionCode = 9;
-  static const String currentVersionName = '1.1.0';
+  static const int currentVersionCode = 10;
+  static const String currentVersionName = '1.1.1';
   AppUpdateInfo? availableUpdate;
   Timer? _syncTimer;
 
@@ -338,31 +338,19 @@ class MockRepository extends ChangeNotifier {
         }
       }
 
-      // 2. Customers & Debtors
+      // 2. Customers & Debtors (Authoritative sync from backend master)
       final remoteCusts = await ApiSyncService.fetchCustomers();
-      if (remoteCusts != null && remoteCusts.isNotEmpty) {
-        // If live debtors arrived from backend, purge dummy seed records
-        debtors.removeWhere((d) => d.id.startsWith('DEBTOR-00') || d.id == 'DEBTOR-010');
-        customers.removeWhere((c) => c.id.startsWith('DEBTOR-00') || c.id == 'DEBTOR-010');
+      if (remoteCusts != null) {
         final parsed = remoteCusts.map(Customer.fromJson).toList();
-        for (var i = 0; i < remoteCusts.length; i++) {
-          final raw = remoteCusts[i];
-          final c = parsed[i];
-          final cName = c.name.toLowerCase().trim();
-          final idx = customers.indexWhere((existing) => existing.id == c.id || existing.name.toLowerCase().trim() == cName);
-          if (idx != -1) {
-            customers[idx] = c;
-          } else {
-            customers.add(c);
-          }
-          final debtorObj = DebtorItem.fromJson(raw);
-          final dIdx = debtors.indexWhere((existing) => existing.id == c.id || existing.name.toLowerCase().trim() == cName);
-          if (dIdx != -1) {
-            debtors[dIdx] = debtorObj;
-          } else {
-            debtors.add(debtorObj);
-          }
-        }
+        final parsedDebtors = remoteCusts.map(DebtorItem.fromJson).toList();
+        customers
+          ..clear()
+          ..addAll(parsed);
+        debtors
+          ..clear()
+          ..addAll(parsedDebtors);
+        _monthlyPaymentCache.clear();
+        _saveDebtorsCache();
       }
 
       // 3. Orders
@@ -595,15 +583,9 @@ class MockRepository extends ChangeNotifier {
                 .map(DebtorItem.fromJson)
                 .toList();
             if (cached.isNotEmpty) {
-              debtors.removeWhere((d) => d.id.startsWith('DEBTOR-00') || d.id == 'DEBTOR-010');
-              for (final d in cached) {
-                final idx = debtors.indexWhere((x) => x.id == d.id || x.name.toLowerCase().trim() == d.name.toLowerCase().trim());
-                if (idx != -1) {
-                  debtors[idx] = d;
-                } else {
-                  debtors.add(d);
-                }
-              }
+              debtors
+                ..clear()
+                ..addAll(cached);
               notifyListeners();
             }
           }
@@ -821,23 +803,21 @@ class MockRepository extends ChangeNotifier {
   }
 
   double totalOutstanding() {
-    if (serverOutstanding != null && serverOutstanding! > 0) {
+    if (serverOutstanding != null) {
       return serverOutstanding!;
     }
     if (debtors.isNotEmpty) {
-      final bal = debtors.fold(0.0, (sum, d) => sum + d.balance);
-      if (bal > 0) return bal;
+      return debtors.fold(0.0, (sum, d) => sum + d.balance);
     }
     return customers.fold(0.0, (sum, c) => sum + customerOutstanding(c.id));
   }
 
   double totalOverdue() {
-    if (serverOverdue != null && serverOverdue! > 0) {
+    if (serverOverdue != null) {
       return serverOverdue!;
     }
     if (debtors.isNotEmpty) {
-      final bal = debtors.where((d) => d.balance > 0).fold(0.0, (sum, d) => sum + d.balance);
-      if (bal > 0) return bal;
+      return debtors.where((d) => d.balance > 0).fold(0.0, (sum, d) => sum + d.balance);
     }
     return customers.fold(0.0, (sum, c) => sum + customerOverdue(c.id));
   }
@@ -959,7 +939,7 @@ class MockRepository extends ChangeNotifier {
                 ((target - achieved) > 0 ? (target - achieved) : 987.224))
             : ((target - achieved) > 0 ? (target - achieved) : 0.0));
 
-    final outstanding = (serverOutstanding != null && serverOutstanding! > 0 && salespersonId == null)
+    final outstanding = (serverOutstanding != null && salespersonId == null)
         ? serverOutstanding!
         : (debtors.isNotEmpty && salespersonId == null)
             ? debtors.fold(0.0, (sum, d) => sum + d.balance)
@@ -973,7 +953,7 @@ class MockRepository extends ChangeNotifier {
                     .where((c) => salespersonId == null || c.salespersonId == salespersonId)
                     .fold(0.0, (sum, c) => sum + customerOutstanding(c.id));
 
-    final overdueBalance = (serverOverdue != null && serverOverdue! > 0 && salespersonId == null)
+    final overdueBalance = (serverOverdue != null && salespersonId == null)
         ? serverOverdue!
         : (debtors.isNotEmpty && salespersonId == null)
             ? debtors.where((d) => d.balance > 0).fold(0.0, (sum, d) => sum + d.balance)

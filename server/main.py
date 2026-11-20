@@ -2758,10 +2758,10 @@ def get_discount_ledger():
 @app.get("/api/v1/app/version")
 def get_app_version():
     return {
-        "version_code": 9,
-        "version_name": "1.1.0",
+        "version_code": 10,
+        "version_name": "1.1.1",
         "download_url": "/api/v1/app/latest-apk",
-        "release_notes": "Multi-Excel 4-book sync (Daybook, Round Off, Discount, Trial Balance), stock entry disabler, dedicated cash/bank ledgers.",
+        "release_notes": "Authoritative debtor synchronization, zero-balance fallback fix, and cache invalidation.",
         "mandatory": False,
         "published_at": datetime.now().isoformat()
     }

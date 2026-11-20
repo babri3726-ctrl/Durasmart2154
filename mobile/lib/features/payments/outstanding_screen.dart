@@ -118,12 +118,10 @@ class _OutstandingScreenState extends State<OutstandingScreen> {
   Widget build(BuildContext context) {
     final repo = context.watch<MockRepository>();
     final rows = _rows(repo);
-    final totalOutstanding = repo.serverOutstanding != null && repo.serverOutstanding! > 0
-        ? repo.serverOutstanding!
-        : rows.fold(0.0, (sum, row) => sum + row.outstanding);
-    final totalOverdue = repo.serverOverdue != null && repo.serverOverdue! > 0
-        ? repo.serverOverdue!
-        : rows.fold(0.0, (sum, row) => sum + row.overdue);
+    final double rawOutstanding = rows.fold(0.0, (double sum, row) => sum + row.outstanding);
+    final double rawOverdue = rows.fold(0.0, (double sum, row) => sum + row.overdue);
+    final double totalOutstanding = repo.serverOutstanding ?? rawOutstanding;
+    final double totalOverdue = repo.serverOverdue ?? rawOverdue;
     final overdueCount = repo.serverActiveDealers ?? rows.where((row) => row.overdue > 0).length;
 
     return Scaffold(

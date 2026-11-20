@@ -128,14 +128,10 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
     );
     final rawOverdue = scopeRows.fold(0.0, (sum, row) => sum + row.overdue);
     final totalOutstanding = _salespersonId == null
-        ? (repo.serverOutstanding != null && repo.serverOutstanding! > 0
-            ? repo.serverOutstanding!
-            : rawOutstanding)
+        ? (repo.serverOutstanding ?? rawOutstanding)
         : rawOutstanding;
     final totalOverdue = _salespersonId == null
-        ? (repo.serverOverdue != null && repo.serverOverdue! > 0
-            ? repo.serverOverdue!
-            : rawOverdue)
+        ? (repo.serverOverdue ?? rawOverdue)
         : rawOverdue;
     final scopeName = _salespersonId == null
         ? 'Full team'
@@ -265,16 +261,12 @@ class _PaymentDashboardScreenState extends State<PaymentDashboardScreen> {
     final totalOutstanding = monthlyData != null && monthlyData['outstanding'] is num
         ? (monthlyData['outstanding'] as num).toDouble()
         : (_salespersonId == null
-            ? (repo.serverOutstanding != null && repo.serverOutstanding! > 0
-                ? repo.serverOutstanding!
-                : rawOutstanding)
+            ? (repo.serverOutstanding ?? rawOutstanding)
             : rawOutstanding);
     final totalOverdue = monthlyData != null && monthlyData['overdue'] is num
         ? (monthlyData['overdue'] as num).toDouble()
         : (_salespersonId == null
-            ? (repo.serverOverdue != null && repo.serverOverdue! > 0
-                ? repo.serverOverdue!
-                : rawOverdue)
+            ? (repo.serverOverdue ?? rawOverdue)
             : rawOverdue);
     final monthCollected = monthlyData != null && monthlyData['monthCollected'] is num
         ? (monthlyData['monthCollected'] as num).toDouble()
