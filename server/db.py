@@ -2147,6 +2147,51 @@ def upsert_user_from_firebase(uid: str, email: str, name: str = "", phone: str =
         "role": role, "department": dept, "employee_id": emp_id, "sales_territory": territory
     }
 
+def set_user_as_owner(email_or_username: str, password: str | None = None, name: str | None = None) -> dict[str, Any]:
+    """Sets a user's role to 'owner'. If user doesn't exist, creates them as owner."""
+    clean_identifier = email_or_username.strip().lower()
+    clean_email = clean_identifier if "@" in clean_identifier else f"{clean_identifier}@durasmart.com"
+    clean_user = clean_identifier.split("@")[0]
+    now = datetime.now().isoformat()
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, username, email, name, role FROM users WHERE LOWER(email) = ? OR LOWER(username) = ?", (clean_email, clean_user))
+        existing = cur.fetchone()
+
+        if existing:
+            user_id = existing[0]
+            if password:
+                pwd_hash, salt = hash_password(password)
+                cur.execute(
+                    "UPDATE users SET role = 'owner', password_hash = ?, salt = ?, updated_at = ? WHERE id = ?",
+                    (pwd_hash, salt, now, user_id)
+                )
+            else:
+                cur.execute(
+                    "UPDATE users SET role = 'owner', updated_at = ? WHERE id = ?",
+                    (now, user_id)
+                )
+            conn.commit()
+            return {"status": "success", "action": "promoted", "id": user_id, "email": existing[2], "role": "owner"}
+        else:
+            default_pwd = password or "DuraSmart@2026"
+            pwd_hash, salt = hash_password(default_pwd)
+            user_id = f"usr-owner-{uuid.uuid4().hex[:8]}"
+            display_name = name or clean_user.capitalize()
+            cur.execute("""
+                INSERT INTO users (
+                    id, username, email, phone, name, password_hash, salt,
+                    role, department, employee_id, sales_territory, active,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, '', ?, ?, ?, 'owner', 'Management', 'EMP-OWNER-01', 'All', 1, ?, ?)
+            """, (
+                user_id, clean_user, clean_email, display_name,
+                pwd_hash, salt, now, now
+            ))
+            conn.commit()
+            return {"status": "success", "action": "created", "id": user_id, "email": clean_email, "role": "owner"}
+
 def update_user_profile(user_id: str, name: str | None = None, phone: str | None = None) -> dict[str, Any] | None:
     now = datetime.now().isoformat()
     updates = []
@@ -2292,6 +2337,21 @@ def seed_real_users(force: bool = False):
             now,
             now
         ))
+
+        # Seed master owner invitation code for signup
+        cur.execute("SELECT code FROM invitations WHERE code = 'OWNER-DURASMART-2026'")
+        if not cur.fetchone():
+            cur.execute("""
+                INSERT INTO invitations (
+                    id, code, role, department, employee_id, sales_territory,
+                    monthly_target_qty, target_unit, may_dispatch, status,
+                    used_count, max_uses, expires_at, created_by, created_at, updated_at
+                ) VALUES (
+                    'inv-owner-master', 'OWNER-DURASMART-2026', 'owner', 'Management',
+                    'EMP-OWNER-01', 'All', 1000.0, 'MT', 1, 'active',
+                    0, 999999, '2030-12-31T23:59:59', 'SYSTEM', ?, ?
+                )
+            """, (now, now))
 
         # Purge any dummy placeholder users from users table
         conn.execute("""

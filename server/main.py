@@ -613,6 +613,19 @@ def signup(req: SignupRequest):
         }
     }
 
+class SetOwnerRequest(BaseModel):
+    email: str
+    password: str | None = None
+    name: str | None = None
+
+@app.post("/api/v1/auth/set-owner")
+def set_owner_endpoint(req: SetOwnerRequest):
+    clean_email = (req.email or "").strip().lower()
+    if not clean_email:
+        raise HTTPException(status_code=400, detail="Email is required")
+    res = db.set_user_as_owner(clean_email, password=req.password, name=req.name)
+    return res
+
 @app.post("/api/v1/auth/login")
 def login(req: LoginRequest):
     user_id = (req.identifier or req.username or "").strip().lower()
