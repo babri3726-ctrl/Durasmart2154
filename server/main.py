@@ -2894,7 +2894,11 @@ async def apply_multi_excel_bundle(
         try:
             f_sha = hashlib.sha256(db_file["content"]).hexdigest()
             parsed_db = parse_accounting_workbook(db_file["path"], file_sha256=f_sha)
-            db_res = db.save_vouchers_batch(parsed_db["vouchers"], file_sha=f_sha)
+            db_vchs = parsed_db["vouchers"]
+            if "journal" in by_type:
+                # Exclude incomplete single-leg Daybook journals when Master Journal Register is present
+                db_vchs = [v for v in db_vchs if v.get("voucherType", "").lower() != "journal"]
+            db_res = db.save_vouchers_batch(db_vchs, file_sha=f_sha)
             results["daybook"] = {
                 "filename": db_file["filename"],
                 "vouchersParsed": parsed_db.get("voucherCount", 0),
@@ -2904,6 +2908,26 @@ async def apply_multi_excel_bundle(
             }
         except Exception as e:
             results["daybook"] = {"error": str(e)}
+
+    # 3. Master Double-Entry Journal Register
+    if "journal" in by_type:
+        j_file = by_type["journal"]
+        try:
+            f_sha = hashlib.sha256(j_file["content"]).hexdigest()
+            from .voucher_parser import parse_journal_register_workbook
+            parsed_j = parse_journal_register_workbook(j_file["path"], file_sha256=f_sha)
+            j_res = db.save_vouchers_batch(parsed_j["vouchers"], file_sha=f_sha)
+            results["journal"] = {
+                "filename": j_file["filename"],
+                "vouchersParsed": parsed_j.get("voucherCount", 0),
+                "insertedCount": j_res.get("insertedCount", 0),
+                "skippedCount": j_res.get("skippedCount", 0),
+                "newPartiesCount": j_res.get("newPartiesCount", 0),
+                "totalDebitFormatted": parsed_j.get("totalDebitFormatted", "0.00"),
+                "totalCreditFormatted": parsed_j.get("totalCreditFormatted", "0.00")
+            }
+        except Exception as e:
+            results["journal"] = {"error": str(e)}
             
     # 3. Round Off
     if "roundoff" in by_type:

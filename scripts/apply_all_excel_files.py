@@ -42,6 +42,15 @@ def main():
     else:
         print("  -> Notice: OP.xlsx not found.")
 
+    # Check if Master Journal Register is present
+    journal_path = os.path.join(base_dir, "journal.xlsx")
+    if not os.path.exists(journal_path):
+        journal_path = os.path.join(base_dir, "JOURNAL.xlsx")
+    if not os.path.exists(journal_path):
+        journal_path = os.path.join(data_dir, "imports", "journal.xlsx")
+
+    has_journal = os.path.exists(journal_path)
+
     # 3. Apply Day Book (DAYBOOK.xlsx - Master Voucher Register)
     daybook_path = os.path.join(base_dir, "DAYBOOK.xlsx")
     if not os.path.exists(daybook_path):
@@ -55,6 +64,12 @@ def main():
         f_sha = hashlib.sha256(f_bytes).hexdigest()
         parsed_db = parse_accounting_workbook(daybook_path, file_sha256=f_sha)
         vouchers = parsed_db.get("vouchers", [])
+        
+        if has_journal:
+            orig_len = len(vouchers)
+            vouchers = [v for v in vouchers if v.get("voucherType", "").lower() != "journal"]
+            print(f"  -> Filtered out {orig_len - len(vouchers)} single-leg Daybook Journal vouchers (will be populated with full double entries from {os.path.basename(journal_path)}).")
+
         print(f"  -> Parsed {len(vouchers)} vouchers in {time.time()-t0:.2f}s.")
         
         t1 = time.time()
@@ -63,6 +78,23 @@ def main():
         print(f"     Inserted: {db_res['insertedCount']}, Skipped: {db_res['skippedCount']}, New Parties: {db_res['newPartiesCount']}")
     else:
         print("  -> Notice: DAYBOOK.xlsx not found.")
+
+    # 3.5 Apply Master Double-Entry Journal Register (journal.xlsx)
+    if has_journal:
+        print(f"\n[Step 3.5] Parsing and Ingesting Master Double-Entry Journal Register from {os.path.basename(journal_path)}...")
+        t0 = time.time()
+        with open(journal_path, "rb") as f:
+            f_bytes = f.read()
+        f_sha = hashlib.sha256(f_bytes).hexdigest()
+        from server.voucher_parser import parse_journal_register_workbook
+        parsed_j = parse_journal_register_workbook(journal_path, file_sha256=f_sha)
+        j_vchs = parsed_j.get("vouchers", [])
+        print(f"  -> Parsed {len(j_vchs)} double-entry journal vouchers in {time.time()-t0:.2f}s (Total Dr: ₹{parsed_j['totalDebitFormatted']}, Total Cr: ₹{parsed_j['totalCreditFormatted']}).")
+        
+        t1 = time.time()
+        j_res = db.save_vouchers_batch(j_vchs, file_sha=f_sha)
+        print(f"  -> Ingested Journal vouchers in {time.time()-t1:.2f}s:")
+        print(f"     Inserted: {j_res['insertedCount']}, Skipped: {j_res['skippedCount']}, New Parties: {j_res['newPartiesCount']}")
 
     # 4. Apply Dedicated Round Off Ledger (ROUNDOFF.xlsx)
     ro_path = os.path.join(base_dir, "ROUNDOFF.xlsx")

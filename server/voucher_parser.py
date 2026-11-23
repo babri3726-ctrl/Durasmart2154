@@ -119,7 +119,9 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
     customer_name = ""
     opening_balance_paise = 0
 
-    if "discount" in top_text or "discount" in fn_lower:
+    if "journal register" in top_text or ("journal" in fn_lower and "day" not in fn_lower and "stock" not in fn_lower):
+        return parse_journal_register_workbook(filepath, file_sha256=file_sha256)
+    elif "discount" in top_text or "discount" in fn_lower:
         is_discount_ledger = True
         book_source = "Discount Ledger"
     elif "round off" in top_text or "roundoff" in fn_lower or "rounoff" in fn_lower or "round off" in row2_val.lower():
@@ -442,12 +444,147 @@ def parse_opening_balance_workbook(filepath: str) -> dict[str, Any]:
     }
 
 
+def parse_journal_register_workbook(filepath: str, file_sha256: str | None = None) -> dict[str, Any]:
+    """
+    Parses Tally Master Double-Entry Journal Register (journal.xlsx).
+    Handles multi-line compound transactions with both Debit and Credit legs,
+    generating complete double-entry vouchers with counterparty narrations.
+    """
+    wb = openpyxl.load_workbook(filepath, data_only=True)
+    ws = wb.active
+
+    # Detect header row
+    header_row_idx = 4
+    for r in range(1, 10):
+        row_vals = [str(ws.cell(r, c).value or "").strip().upper() for c in range(1, 9)]
+        if "DATE" in row_vals and "PARTICULARS" in row_vals:
+            header_row_idx = r
+            break
+
+    period_text = str(ws.cell(header_row_idx - 1, 1).value or "").strip()
+    if not period_text:
+        period_text = "1-Apr-26 to 30-Nov-26"
+
+    # Group rows into transaction blocks
+    tx_blocks = []
+    current_tx = []
+    for r in range(header_row_idx + 2, ws.max_row + 1):
+        vals = [ws.cell(r, c).value for c in range(1, 9)]
+        if vals[0] is not None:
+            if current_tx:
+                tx_blocks.append(current_tx)
+            current_tx = [(r, vals)]
+        else:
+            if current_tx:
+                current_tx.append((r, vals))
+    if current_tx:
+        tx_blocks.append(current_tx)
+
+    def clean_amt(val: Any) -> float:
+        if val is None:
+            return 0.0
+        if isinstance(val, (int, float)):
+            return float(val)
+        s = str(val).replace("Cr", "").replace("Dr", "").replace(",", "").strip()
+        try:
+            return float(s)
+        except Exception:
+            return 0.0
+
+    vouchers = []
+    for tx in tx_blocks:
+        r0, v0 = tx[0]
+        date_val = v0[0]
+        vch_date = normalize_date_str(date_val)
+        vch_type = str(v0[4] or "Journal").strip()
+        vch_no = str(v0[5] or "").strip()
+
+        debits = []
+        credits = []
+        for r, vals in tx:
+            part = clean_party_name(vals[1])
+            if not part or part.lower() in ("(cancelled)", "total", "grand total"):
+                continue
+            dr = clean_amt(vals[6])
+            cr = clean_amt(vals[7])
+            if dr > 0:
+                debits.append((r, part, dr))
+            elif cr > 0:
+                credits.append((r, part, cr))
+
+        # Debit vouchers
+        for r, deb_party, dr in debits:
+            c_names = [c[1] for c in credits]
+            narration = f"To {', '.join(c_names)} {vch_no}".strip() if c_names else vch_no
+            hash_src = f"JV-DR:{r}:{vch_date}:{deb_party}:{dr}:{vch_no}"
+            vch_id = f"JV-{r}-{hashlib.md5(hash_src.encode('utf-8')).hexdigest()[:10]}"
+            vouchers.append({
+                "id": vch_id,
+                "voucherNo": vch_no or f"JV-{r}",
+                "voucherType": "Journal",
+                "voucherDate": vch_date,
+                "partyName": deb_party,
+                "partyId": "",
+                "partyType": "customer",
+                "narration": narration,
+                "debitPaise": round(dr * 100),
+                "creditPaise": 0,
+                "debitAmount": dr,
+                "creditAmount": 0.0,
+                "bookSource": "Journal Register"
+            })
+
+        # Credit vouchers
+        for r, cred_party, cr in credits:
+            d_names = [d[1] for d in debits]
+            narration = f"By {', '.join(d_names)} {vch_no}".strip() if d_names else vch_no
+            hash_src = f"JV-CR:{r}:{vch_date}:{cred_party}:{cr}:{vch_no}"
+            vch_id = f"JV-{r}-{hashlib.md5(hash_src.encode('utf-8')).hexdigest()[:10]}"
+            vouchers.append({
+                "id": vch_id,
+                "voucherNo": vch_no or f"JV-{r}",
+                "voucherType": "Journal",
+                "voucherDate": vch_date,
+                "partyName": cred_party,
+                "partyId": "",
+                "partyType": "customer",
+                "narration": narration,
+                "debitPaise": 0,
+                "creditPaise": round(cr * 100),
+                "debitAmount": 0.0,
+                "creditAmount": cr,
+                "bookSource": "Journal Register"
+            })
+
+    total_debit_paise = sum(v["debitPaise"] for v in vouchers)
+    total_credit_paise = sum(v["creditPaise"] for v in vouchers)
+
+    return {
+        "bookSource": "Journal Register",
+        "isJournalRegister": True,
+        "isCustomerLedger": False,
+        "isDiscountLedger": False,
+        "isRoundoffLedger": False,
+        "customerName": "",
+        "openingBalancePaise": 0,
+        "periodText": period_text,
+        "voucherCount": len(vouchers),
+        "totalDebitPaise": total_debit_paise,
+        "totalCreditPaise": total_credit_paise,
+        "totalDebitFormatted": f"{total_debit_paise / 100.0:,.2f}",
+        "totalCreditFormatted": f"{total_credit_paise / 100.0:,.2f}",
+        "vouchers": vouchers,
+        "fileSha256": file_sha256 or "",
+    }
+
+
 def detect_excel_type(filepath: str) -> str:
     """
     Auto-detects whether an Excel workbook is:
     - 'daybook': Day Book with vouchers (Sales, Payment, Receipt, Contra, Journal)
     - 'roundoff': Dedicated Round Off ledger
     - 'discount': Dedicated Discount ledger
+    - 'journal': Master Double-Entry Journal Register (journal.xlsx)
     - 'trialbalance': Trial Balance / Master Opening Balance register
     - 'unknown': Other/unrecognized format
     """
@@ -456,6 +593,8 @@ def detect_excel_type(filepath: str) -> str:
         return "roundoff"
     if "discount" in fn:
         return "discount"
+    if "journal" in fn and "stock" not in fn and "day" not in fn:
+        return "journal"
     if any(k in fn for k in ("trial", "opening", "tb.", "trialbalance", "trial_balance", "op.", "op_")) or fn == "op.xlsx" or fn == "op.xlsm":
         return "trialbalance"
     if any(k in fn for k in ("daybook", "day_book", "day book")):
@@ -470,6 +609,8 @@ def detect_excel_type(filepath: str) -> str:
             top_text += " ".join(row_vals) + " "
         wb.close()
 
+        if "journal register" in top_text or ("journal" in top_text and "debit" in top_text and "credit" in top_text and "day book" not in top_text):
+            return "journal"
         if "round off" in top_text or "roundoff" in top_text or "rounoff" in top_text:
             return "roundoff"
         if "discount" in top_text and "vch type" not in top_text:

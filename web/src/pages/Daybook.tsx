@@ -57,7 +57,7 @@ type LedgerTab =
   | 'debit note';
 
 interface MultiUploadSlot {
-  key: 'daybook' | 'roundoff' | 'discount' | 'trialbalance';
+  key: 'daybook' | 'roundoff' | 'discount' | 'journal' | 'trialbalance';
   title: string;
   description: string;
   hint: string;
@@ -81,7 +81,7 @@ export default function Daybook() {
   const [roundoffMeta, setRoundoffMeta] = useState<RoundoffLedgerResponse | null>(null);
   const [discountMeta, setDiscountMeta] = useState<DiscountLedgerResponse | null>(null);
 
-  // 4-Excel Unified Upload Hub Modal State
+  // 5-Excel Unified Upload Hub Modal State (Daybook, Journal, Roundoff, Discount, Trialbalance)
   const [uploadOpen, setUploadOpen] = useState(false);
   const [slots, setSlots] = useState<Record<string, MultiUploadSlot>>({
     daybook: {
@@ -90,6 +90,13 @@ export default function Daybook() {
       description: 'Master voucher register (Sales, Purchases, Payments, Receipts, Contra)',
       hint: 'Stock entries auto-disabled; Cash & Banks contra tracked',
       expectedName: 'DAYBOOK.xlsx',
+    },
+    journal: {
+      key: 'journal',
+      title: 'Journal Register',
+      description: 'Master Double-Entry Journal Book (Discounts, TDS, Transfers)',
+      hint: 'Replaces 1-sided Daybook journals with complete double entries for all parties',
+      expectedName: 'JOURNAL.xlsx',
     },
     roundoff: {
       key: 'roundoff',
@@ -181,6 +188,8 @@ export default function Daybook() {
         nextSlots.roundoff = { ...nextSlots.roundoff, file: f };
       } else if (fn.includes('disc')) {
         nextSlots.discount = { ...nextSlots.discount, file: f };
+      } else if (fn.includes('journal') && !fn.includes('stock')) {
+        nextSlots.journal = { ...nextSlots.journal, file: f };
       } else if (
         fn.includes('trial') ||
         fn.includes('open') ||
@@ -684,9 +693,9 @@ export default function Daybook() {
                   <FileSpreadsheet size={22} />
                 </div>
                 <div>
-                  <h3 className="text-base font-black text-slate-900">4-Excel Unified Accounting Hub</h3>
+                  <h3 className="text-base font-black text-slate-900">5-Excel Master Accounting Hub</h3>
                   <p className="text-xs text-slate-500">
-                    Upload DAYBOOK, ROUNDOFF, DISCOUNT & TRIAL BALANCE with automated auto-setup.
+                    Upload DAYBOOK, JOURNAL, ROUNDOFF, DISCOUNT & TRIAL BALANCE with automated sync.
                   </p>
                 </div>
               </div>
@@ -716,10 +725,10 @@ export default function Daybook() {
             >
               <Upload size={28} className="mx-auto mb-2 text-blue-600" />
               <p className="text-xs font-bold text-slate-900">
-                Drag & Drop 1 to 4 Excel files here, or click to browse
+                Drag & Drop 1 to 5 Excel files here, or click to browse
               </p>
               <p className="mt-1 text-[11px] text-slate-500">
-                Supports DAYBOOK.xlsx, ROUNDOFF.xlsx, DISCOUNT.xlsx, and TRIALBALANCE / opening.xlsx
+                Supports DAYBOOK.xlsx, JOURNAL.xlsx, ROUNDOFF.xlsx, DISCOUNT.xlsx, and TRIALBALANCE / OP.xlsx
               </p>
               <input
                 id={fileInputId}
