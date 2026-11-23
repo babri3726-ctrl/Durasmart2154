@@ -3373,10 +3373,10 @@ def get_discount_ledger():
 @app.get("/api/v1/app/version")
 def get_app_version():
     return {
-        "version_code": 11,
-        "version_name": "1.1.2",
+        "version_code": 12,
+        "version_name": "1.1.3",
         "download_url": "/api/v1/app/latest-apk",
-        "release_notes": "Firebase Authentication integration with unified backend and panel sync.",
+        "release_notes": "Updated RBAC order scoping, debtor party scoping, mobile settings synchronization, and dispatch authority.",
         "mandatory": False,
         "published_at": datetime.now().isoformat()
     }
