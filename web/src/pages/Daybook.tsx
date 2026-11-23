@@ -110,7 +110,7 @@ export default function Daybook() {
       title: 'Trial Balance / Opening',
       description: 'Master ledger baseline opening balances',
       hint: 'Auto-maps baseline opening for debtors, creditors, cash & bank',
-      expectedName: 'TRIALBALANCE.xlsx',
+      expectedName: 'OP.xlsx / TRIALBALANCE.xlsx',
     },
   });
 
@@ -181,7 +181,15 @@ export default function Daybook() {
         nextSlots.roundoff = { ...nextSlots.roundoff, file: f };
       } else if (fn.includes('disc')) {
         nextSlots.discount = { ...nextSlots.discount, file: f };
-      } else if (fn.includes('trial') || fn.includes('open') || fn.includes('tb')) {
+      } else if (
+        fn.includes('trial') ||
+        fn.includes('open') ||
+        fn.includes('tb') ||
+        fn.startsWith('op.') ||
+        fn.startsWith('op_') ||
+        fn === 'op.xlsx' ||
+        fn === 'op.xlsm'
+      ) {
         nextSlots.trialbalance = { ...nextSlots.trialbalance, file: f };
       } else if (fn.includes('day') || fn.includes('book')) {
         nextSlots.daybook = { ...nextSlots.daybook, file: f };

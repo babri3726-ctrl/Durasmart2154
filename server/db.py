@@ -308,6 +308,20 @@ def init_db(seed_state: dict[str, Any] | None = None):
             except Exception:
                 pass
 
+        for idx_query in [
+            "CREATE INDEX IF NOT EXISTS idx_parties_name ON parties (name)",
+            "CREATE INDEX IF NOT EXISTS idx_parties_party_type ON parties (party_type)",
+            "CREATE INDEX IF NOT EXISTS idx_opening_balances_cust ON opening_balances (customer_id)",
+            "CREATE INDEX IF NOT EXISTS idx_vouchers_party_date ON vouchers (party_id, voucher_date)",
+            "CREATE INDEX IF NOT EXISTS idx_vouchers_dedup ON vouchers (voucher_date, voucher_type, debit_paise, credit_paise)",
+            "CREATE INDEX IF NOT EXISTS idx_vouchers_book_source ON vouchers (book_source)",
+            "CREATE INDEX IF NOT EXISTS idx_vouchers_party_name ON vouchers (party_name)",
+        ]:
+            try:
+                conn.execute(idx_query)
+            except Exception:
+                pass
+
         # Check if parties table is empty and seed if available
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) as count FROM parties")
@@ -1066,39 +1080,71 @@ def load_opening_balances() -> dict[str, list[dict[str, Any]]]:
 
 # ----------------- Vouchers & Transaction Ledger -----------------
 
-def find_or_create_party_by_name(conn, party_name: str, party_type: str = "customer") -> tuple[str, bool]:
+def clean_party_name_for_match(s: str) -> str:
+    import re
+    s = re.sub(r"\s*\([^)]*\)", "", s)
+    s = re.sub(r"\b(?:m/s|co|corp|pvt|ltd|cash|acc|account|w)\b", "", s, flags=re.IGNORECASE)
+    return re.sub(r"[^a-zA-Z0-9]", "", s.lower())
+
+def build_party_cache(conn) -> dict[str, dict[str, str]]:
+    import re
+    cur = conn.cursor()
+    cur.execute("SELECT id, name FROM parties")
+    rows = cur.fetchall()
+    exact: dict[str, str] = {}
+    simplified: dict[str, str] = {}
+    cleaned: dict[str, str] = {}
+    for pid, pname in rows:
+        name_clean = " ".join((pname or "").strip().split()).lower()
+        exact[name_clean] = pid
+        simp = re.sub(r"[^a-zA-Z0-9]", "", name_clean)
+        if simp and simp not in simplified:
+            simplified[simp] = pid
+        cl = clean_party_name_for_match(pname or "")
+        if cl and cl not in cleaned:
+            cleaned[cl] = pid
+    return {"exact": exact, "simplified": simplified, "cleaned": cleaned}
+
+def find_or_create_party_by_name(conn, party_name: str, party_type: str = "customer", cache: dict | None = None) -> tuple[str, bool]:
     """Finds an existing party or creates a new one in SQLite. Returns (party_id, is_new)."""
     import re
     norm_name = " ".join(party_name.strip().split())
-    cur = conn.cursor()
-    
-    # 1. Exact or case-insensitive match
-    cur.execute("SELECT id FROM parties WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1", (norm_name,))
-    row = cur.fetchone()
-    if row:
-        return row[0], False
+    norm_l = norm_name.lower()
 
-    # 2. Simplified match (ignoring punctuation and spaces)
-    simplified = re.sub(r"[^a-zA-Z0-9]", "", norm_name.lower())
-    cur.execute("SELECT id, name FROM parties")
-    all_parties = cur.fetchall()
-    for pid, pname in all_parties:
-        if re.sub(r"[^a-zA-Z0-9]", "", (pname or "").lower()) == simplified:
-            return pid, False
+    # Fast O(1) in-memory cache lookup if provided
+    if cache is not None:
+        if norm_l in cache["exact"]:
+            return cache["exact"][norm_l], False
+        simp = re.sub(r"[^a-zA-Z0-9]", "", norm_l)
+        if simp in cache["simplified"]:
+            return cache["simplified"][simp], False
+        cl = clean_party_name_for_match(norm_name)
+        if cl and cl in cache["cleaned"]:
+            return cache["cleaned"][cl], False
+    else:
+        cur = conn.cursor()
+        # 1. Exact or case-insensitive match
+        cur.execute("SELECT id FROM parties WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) LIMIT 1", (norm_name,))
+        row = cur.fetchone()
+        if row:
+            return row[0], False
 
-    # 3. Cleaned fuzzy match: strip common Tally noise (Cash, Station in parens, Co., W, Acc)
-    def clean_name(s: str) -> str:
-        s = re.sub(r"\s*\([^)]*\)", "", s)
-        s = re.sub(r"\b(?:m/s|co|corp|pvt|ltd|cash|acc|account|w)\b", "", s, flags=re.IGNORECASE)
-        return re.sub(r"[^a-zA-Z0-9]", "", s.lower())
-
-    clean_target = clean_name(norm_name)
-    if len(clean_target) >= 5:
+        # 2. Simplified match (ignoring punctuation and spaces)
+        simplified = re.sub(r"[^a-zA-Z0-9]", "", norm_l)
+        cur.execute("SELECT id, name FROM parties")
+        all_parties = cur.fetchall()
         for pid, pname in all_parties:
-            clean_existing = clean_name(pname or "")
-            if len(clean_existing) >= 5:
-                if clean_existing == clean_target or clean_target.startswith(clean_existing) or clean_existing.startswith(clean_target):
-                    return pid, False
+            if re.sub(r"[^a-zA-Z0-9]", "", (pname or "").lower()) == simplified:
+                return pid, False
+
+        # 3. Cleaned fuzzy match: strip common Tally noise (Cash, Station in parens, Co., W, Acc)
+        clean_target = clean_party_name_for_match(norm_name)
+        if len(clean_target) >= 5:
+            for pid, pname in all_parties:
+                clean_existing = clean_party_name_for_match(pname or "")
+                if len(clean_existing) >= 5:
+                    if clean_existing == clean_target or clean_target.startswith(clean_existing) or clean_existing.startswith(clean_target):
+                        return pid, False
 
     # 4. Create new party
     from .ledger_classifier import classify_party_name, resolve_location
@@ -1116,6 +1162,16 @@ def find_or_create_party_by_name(conn, party_name: str, party_type: str = "custo
         """,
         (new_id, norm_name, state, city, district or city, actual_party_type, now, now)
     )
+
+    if cache is not None:
+        cache["exact"][norm_l] = new_id
+        simp = re.sub(r"[^a-zA-Z0-9]", "", norm_l)
+        if simp:
+            cache["simplified"][simp] = new_id
+        cl = clean_party_name_for_match(norm_name)
+        if cl:
+            cache["cleaned"][cl] = new_id
+
     return new_id, True
 
 def recompute_party_balance(party_id: str, conn = None):
@@ -1197,14 +1253,23 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
     claimed_cross_ids: set[str] = set()
 
     with get_connection() as conn:
+        party_cache = build_party_cache(conn)
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM vouchers")
+        existing_v_ids = set(row[0] for row in cur.fetchall())
+
         for v in vouchers:
             v_id = v["id"]
+            if v_id in existing_v_ids:
+                skipped += 1
+                continue
+
             party_name = v["partyName"]
             if v.get("partyId"):
                 party_id = v["partyId"]
                 is_new = False
             else:
-                party_id, is_new = find_or_create_party_by_name(conn, party_name, party_type=v.get("partyType", "customer"))
+                party_id, is_new = find_or_create_party_by_name(conn, party_name, party_type=v.get("partyType", "customer"), cache=party_cache)
             if is_new:
                 new_parties_count += 1
             v["partyId"] = party_id
@@ -1217,15 +1282,7 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
             cr_paise = v.get("creditPaise", 0)
             cur_book = v.get("bookSource", "")
 
-            cur = conn.cursor()
-            # 1. Exact voucher ID check (re-import idempotency for the same physical row)
-            cur.execute("SELECT id FROM vouchers WHERE id = ?", (v_id,))
-            if cur.fetchone():
-                skipped += 1
-                continue
-
-            # 2. Cross-book 1-to-1 deduplication (e.g. Day Book vs Sales/Bank Book)
-            # Only match against vouchers from a DIFFERENT book source that have not already been claimed
+            # Cross-book 1-to-1 deduplication (e.g. Day Book vs Sales/Bank Book)
             cross_match_id = None
             if cur_book:
                 if vch_no and not vch_no.startswith("DB-"):
@@ -1292,6 +1349,7 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
             )
             if cur.rowcount > 0:
                 inserted += 1
+                existing_v_ids.add(v_id)
             else:
                 skipped += 1
 
@@ -1326,12 +1384,13 @@ def reconcile_adjustment_vouchers(
     claimed_party_vids: set[str] = set()
 
     with get_connection() as conn:
+        party_cache = build_party_cache(conn)
         cur = conn.cursor()
         for v in vouchers:
             party_name = (v.get("partyName") or "").strip()
             if not party_name:
                 continue
-            party_id, _ = find_or_create_party_by_name(conn, party_name)
+            party_id, _ = find_or_create_party_by_name(conn, party_name, cache=party_cache)
             affected_party_ids.add(party_id)
 
             vdate = v.get("voucherDate", "")

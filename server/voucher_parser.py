@@ -452,7 +452,7 @@ def detect_excel_type(filepath: str) -> str:
         return "roundoff"
     if "discount" in fn:
         return "discount"
-    if any(k in fn for k in ("trial", "opening", "tb.", "trialbalance", "trial_balance")):
+    if any(k in fn for k in ("trial", "opening", "tb.", "trialbalance", "trial_balance", "op.", "op_")) or fn == "op.xlsx" or fn == "op.xlsm":
         return "trialbalance"
     if any(k in fn for k in ("daybook", "day_book", "day book")):
         return "daybook"
