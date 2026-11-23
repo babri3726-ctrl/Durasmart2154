@@ -2097,6 +2097,36 @@ export function syncHrPbTargets(): Promise<{ status: string; message: string; ro
   });
 }
 
+export interface ServerSettings {
+  companyName: string;
+  legalName: string;
+  gstin: string;
+  address: string;
+  phone: string;
+  email: string;
+  defaultCreditDays: number;
+  financialYear: string;
+  currency: string;
+  notifications: {
+    orderUpdates: boolean;
+    dispatchReminders: boolean;
+    taskDueAlerts: boolean;
+  };
+  version: string;
+  serverEndpoint?: string;
+}
+
+export function getSettings(): Promise<ServerSettings> {
+  return send<ServerSettings>('/settings');
+}
+
+export function updateSettings(body: Partial<ServerSettings>): Promise<{ status: string; settings: ServerSettings }> {
+  return send('/settings', {
+    method: 'PATCH',
+    body,
+  });
+}
+
 export interface ServerVoucher {
   id: string;
   voucher_no: string;

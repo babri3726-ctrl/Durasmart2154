@@ -1141,10 +1141,10 @@ def resolve_caller(
                 emp_id = e["id"]
                 break
 
-    if "employee" in token or "sp-" in token or role_header == "employee":
+    if "employee" in token or "sp-" in token or role_header in ["employee", "sales", "salesperson"] or emp_id:
         emp_match = next((e for e in STATE.get("employees", []) if e["id"] == emp_id), None)
         dept = emp_match.get("department", "Sales") if emp_match else "Sales"
-        is_dsp = dept == "Dispatch"
+        is_dsp = dept == "Dispatch" or role_header == "dispatch"
         return {
             "role": "employee",
             "department": dept,
@@ -1168,29 +1168,40 @@ def resolve_caller(
 
 @app.get("/api/v1/me")
 def get_current_user(authorization: str | None = Header(None)):
-    token = (authorization or "").lower()
-    is_owner = "employee" not in token and "sp-" not in token and "dsp-" not in token
+    token = (authorization or "").strip()
+    
+    # Try looking up direct user in DB
+    db_user = None
+    m = re.search(r"(usr-[\w-]+)", token, re.IGNORECASE)
+    if m:
+        db_user = db.get_user_by_id(m.group(1)) or db.get_user_by_identifier(m.group(1))
+    
+    token_lower = token.lower()
+    is_owner = "employee" not in token_lower and "sp-" not in token_lower and "dsp-" not in token_lower
     role = "owner" if is_owner else "employee"
     
     emp = None
     for e in STATE.get("employees", []):
-        if e["id"].lower() in token:
+        if e["id"].lower() in token_lower:
             emp = e
             break
 
     if is_owner:
-        name = "Managing Director (Owner)"
-        email = "owner@steeloperations.com"
+        if not db_user:
+            db_user = db.get_user_by_identifier("jindalbrothers") or db.get_user_by_identifier("ishujindal") or db.get_user_by_identifier("babri3726")
+        name = db_user["name"] if db_user else "Ishu Jindal"
+        email = db_user["email"] if db_user else "jindalbrothers@gmail.com"
         emp_id = None
         dept = "Management"
-    elif "dsp-01" in token:
+    elif "dsp-01" in token_lower:
         name = "Harpreet Singh (Yard Dispatch)"
         email = "dispatch@steeloperations.com"
         emp_id = "EMP-DSP-01"
         dept = "Dispatch"
     elif emp:
+        db_u = db.get_user_by_identifier(emp["id"]) or (db.get_user_by_identifier(emp["name"]) if emp.get("name") else None)
         name = emp["name"]
-        email = f"{emp['name'].lower().replace(' ', '')}@steeloperations.com"
+        email = db_u["email"] if db_u else f"{emp['name'].lower().replace(' ', '')}@steeloperations.com"
         emp_id = emp["id"]
         dept = emp.get("department", "Sales")
     else:
@@ -1200,7 +1211,7 @@ def get_current_user(authorization: str | None = Header(None)):
         dept = "Sales"
 
     return {
-        "id": "usr-owner" if is_owner else f"usr-{emp_id.lower() if emp_id else 'emp'}",
+        "id": (db_user["id"] if db_user else ("usr-owner" if is_owner else f"usr-{emp_id.lower() if emp_id else 'emp'}")),
         "name": name,
         "email": email,
         "role": role,
@@ -2280,17 +2291,24 @@ def get_debtors(
             or folded in (d.get("salesperson") or "").lower()
         ]
 
-    # Strictly scope to assigned debtors if caller is a Sales Officer
+    # Debtor Balance Scoping Rules:
+    # 1. Salesperson ONLY sees their assigned debtors and their respective balances.
+    # 2. Dispatch Person sees ALL debtor balances.
+    # 3. Owner sees ALL debtor balances.
+    # 4. None other sees debtor balances.
     if caller["isSales"]:
         sp_id = caller["employeeId"]
-        sp_name = caller.get("employeeName") or ""
+        sp_name = (caller.get("employeeName") or "").strip().lower()
         items = [
             d for d in items
-            if d.get("salespersonId") == sp_id
-            or (sp_name and (d.get("salesperson") or "").strip().lower() == sp_name.lower())
+            if (sp_id and d.get("salespersonId") == sp_id)
+            or (sp_name and (d.get("salesperson") or "").strip().lower() == sp_name)
         ]
-    elif salesperson:
-        items = [d for d in items if d.get("salesperson", "").lower() == salesperson.lower()]
+    elif caller["isOwner"] or caller["isDispatch"]:
+        if salesperson:
+            items = [d for d in items if (d.get("salesperson") or "").lower() == salesperson.lower()]
+    else:
+        items = []
 
     if activeOnly:
         items = [d for d in items if float(d.get("balance", 0.0) or 0.0) > 0 or int(d.get("outstandingPaise", 0) or 0) > 0]
@@ -3664,18 +3682,24 @@ def get_orders(
     caller = resolve_caller(authorization, x_user_role, x_user_id, x_employee_id)
     items = STATE["orders"]
     
-    # If caller is an Area Sales Officer (Employee in Sales), strictly scope to their assigned orders!
-    if caller["isSales"]:
+    # Order Visibility Rules:
+    # 1. Owner sees ALL orders.
+    # 2. Dispatch Person sees ALL orders (pending & complete for execution).
+    # 3. Salesperson ONLY sees orders booked for their assigned identity/account.
+    # 4. None other sees orders (returns empty list).
+    if caller["isOwner"] or caller["isDispatch"]:
+        if salespersonId:
+            items = [o for o in items if o.get("salespersonId") == salespersonId]
+    elif caller["isSales"]:
         sp_id = caller["employeeId"]
-        sp_name = caller.get("employeeName") or ""
+        sp_name = (caller.get("employeeName") or "").strip().lower()
         items = [
             o for o in items
-            if o.get("salespersonId") == sp_id
-            or (sp_name and (o.get("salespersonName") or "").strip().lower() == sp_name.lower())
+            if (sp_id and o.get("salespersonId") == sp_id)
+            or (sp_name and (o.get("salespersonName") or "").strip().lower() == sp_name)
         ]
-    elif salespersonId:
-        # Owner or Dispatch can filter by any specific salesperson if requested
-        items = [o for o in items if o.get("salespersonId") == salespersonId]
+    else:
+        items = []
 
     if q:
         q_l = q.lower().strip()
@@ -3859,7 +3883,14 @@ def get_order_dispatch_balance(order_id: str):
     }
 
 @app.post("/api/v1/orders")
-def create_order(body: dict[str, Any]):
+def create_order(
+    body: dict[str, Any],
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_employee_id: str | None = Header(None, alias="X-Employee-Id"),
+):
+    caller = resolve_caller(authorization, x_user_role, x_user_id, x_employee_id)
     new_num = db.get_next_order_number()
     new_id = db.get_next_order_id()
     
@@ -3871,6 +3902,9 @@ def create_order(body: dict[str, Any]):
     cust_name = body.get("customerName") or (cust.get("name") if cust else "Direct Dealer")
     sp_name = body.get("salespersonName") or (cust.get("salesperson") if cust else "")
     sp_id = body.get("salespersonId") or (cust.get("salespersonId") if cust else "")
+    if caller.get("isSales"):
+        sp_id = sp_id or caller.get("employeeId") or ""
+        sp_name = sp_name or caller.get("employeeName") or ""
     state_name = body.get("state") or (cust.get("state") if cust else "")
     
     raw_lines = body.get("lines", [])
@@ -4259,9 +4293,15 @@ def get_dispatches(
 @app.post("/api/v1/dispatches")
 def create_dispatch(
     body: DispatchCreate,
+    authorization: str | None = Header(None),
     x_user_role: str | None = Header(None, alias="X-User-Role"),
-    x_user_id: str | None = Header(None, alias="X-User-Id")
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_employee_id: str | None = Header(None, alias="X-Employee-Id"),
 ):
+    caller = resolve_caller(authorization, x_user_role, x_user_id, x_employee_id)
+    if not (caller["isOwner"] or caller["isDispatch"]):
+        raise HTTPException(status_code=403, detail="Authority required: Only Dispatch Person and Owner can record dispatches.")
+
     order = next((o for o in STATE["orders"] if o["id"] == body.orderId), None)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -4699,6 +4739,48 @@ def get_dispatch_detail(dispatch_id: str):
     if not dsp:
         raise HTTPException(status_code=404, detail="Dispatch not found")
     return dsp
+
+SETTINGS_STORE = {
+    "companyName": "Dura Smart Operations Suite",
+    "legalName": "Dura Smart Steel & Tubes Pvt Ltd",
+    "gstin": "03AABCD1234E1Z5",
+    "address": "Dura Ldh, Phase VII, Focal Point, Ludhiana, Punjab 141010",
+    "phone": "+91 98140 10001",
+    "email": "jindalbrothers@gmail.com",
+    "defaultCreditDays": 30,
+    "financialYear": "2026-2027",
+    "currency": "INR (₹)",
+    "notifications": {
+        "orderUpdates": True,
+        "dispatchReminders": True,
+        "taskDueAlerts": True,
+    },
+    "version": "v2.0.0 (Build 26)",
+    "serverEndpoint": "https://durasmart2154.onrender.com"
+}
+
+@app.get("/api/v1/settings")
+def get_settings():
+    return SETTINGS_STORE
+
+@app.patch("/api/v1/settings")
+@app.put("/api/v1/settings")
+def update_settings(
+    body: dict[str, Any],
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+):
+    caller = resolve_caller(authorization, x_user_role, x_user_id)
+    if not caller.get("isOwner"):
+        raise HTTPException(status_code=403, detail="Owner executive authority required to modify settings.")
+    for k, v in body.items():
+        if k in SETTINGS_STORE:
+            if isinstance(SETTINGS_STORE[k], dict) and isinstance(v, dict):
+                SETTINGS_STORE[k].update(v)
+            else:
+                SETTINGS_STORE[k] = v
+    return {"status": "success", "settings": SETTINGS_STORE}
 
 # ----------------- Employees & Products -----------------
 @app.get("/api/v1/employees")

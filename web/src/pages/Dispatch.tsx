@@ -272,6 +272,11 @@ export default function Dispatch() {
                       Detailed Consignment
                     </Link>
                   )}
+                  {!canRecord && (
+                    <span className="inline-flex items-center gap-1 rounded bg-muted/10 px-2.5 py-1 text-[11px] font-bold text-muted border border-line/60">
+                      🔒 Authority Required
+                    </span>
+                  )}
                 </div>
               </div>
             );
