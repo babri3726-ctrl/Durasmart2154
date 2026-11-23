@@ -2893,8 +2893,11 @@ async def apply_multi_excel_bundle(
         db_file = by_type["daybook"]
         try:
             f_sha = hashlib.sha256(db_file["content"]).hexdigest()
-            parsed_db = parse_accounting_workbook(db_file["path"], file_sha256=f_sha)
+            parsed_db = parse_accounting_workbook(db_file["path"], file_sha256=f_sha, disable_payment_receipt=True)
             db_vchs = parsed_db["vouchers"]
+            # STRICT USER INSTRUCTION: In Day Book, disable Payment and Receipt vouchers
+            # (Bank payments and receipts are authoritatively handled by dedicated HDFC & Yes Bank books)
+            db_vchs = [v for v in db_vchs if v.get("voucherType", "").lower() not in ("payment", "receipt")]
             if "journal" in by_type:
                 # Exclude incomplete single-leg Daybook journals when Master Journal Register is present
                 db_vchs = [v for v in db_vchs if v.get("voucherType", "").lower() != "journal"]
@@ -2908,6 +2911,46 @@ async def apply_multi_excel_bundle(
             }
         except Exception as e:
             results["daybook"] = {"error": str(e)}
+
+    # 2.5 HDFC Bank Book
+    if "hdfc" in by_type:
+        h_file = by_type["hdfc"]
+        try:
+            f_sha = hashlib.sha256(h_file["content"]).hexdigest()
+            from .voucher_parser import parse_bank_workbook
+            parsed_h = parse_bank_workbook(h_file["path"], file_sha256=f_sha)
+            h_res = db.save_vouchers_batch(parsed_h["vouchers"], file_sha=f_sha)
+            results["hdfc"] = {
+                "filename": h_file["filename"],
+                "vouchersParsed": parsed_h.get("voucherCount", 0),
+                "insertedCount": h_res.get("insertedCount", 0),
+                "skippedCount": h_res.get("skippedCount", 0),
+                "newPartiesCount": h_res.get("newPartiesCount", 0),
+                "totalDebitFormatted": parsed_h.get("totalDebitFormatted", "0.00"),
+                "totalCreditFormatted": parsed_h.get("totalCreditFormatted", "0.00")
+            }
+        except Exception as e:
+            results["hdfc"] = {"error": str(e)}
+
+    # 2.6 Yes Bank Book
+    if "yesbank" in by_type:
+        y_file = by_type["yesbank"]
+        try:
+            f_sha = hashlib.sha256(y_file["content"]).hexdigest()
+            from .voucher_parser import parse_bank_workbook
+            parsed_y = parse_bank_workbook(y_file["path"], file_sha256=f_sha)
+            y_res = db.save_vouchers_batch(parsed_y["vouchers"], file_sha=f_sha)
+            results["yesbank"] = {
+                "filename": y_file["filename"],
+                "vouchersParsed": parsed_y.get("voucherCount", 0),
+                "insertedCount": y_res.get("insertedCount", 0),
+                "skippedCount": y_res.get("skippedCount", 0),
+                "newPartiesCount": y_res.get("newPartiesCount", 0),
+                "totalDebitFormatted": parsed_y.get("totalDebitFormatted", "0.00"),
+                "totalCreditFormatted": parsed_y.get("totalCreditFormatted", "0.00")
+            }
+        except Exception as e:
+            results["yesbank"] = {"error": str(e)}
 
     # 3. Master Double-Entry Journal Register
     if "journal" in by_type:

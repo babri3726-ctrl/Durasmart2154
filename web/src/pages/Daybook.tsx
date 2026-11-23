@@ -57,7 +57,7 @@ type LedgerTab =
   | 'debit note';
 
 interface MultiUploadSlot {
-  key: 'daybook' | 'roundoff' | 'discount' | 'journal' | 'trialbalance';
+  key: 'daybook' | 'roundoff' | 'discount' | 'journal' | 'trialbalance' | 'hdfc' | 'yesbank';
   title: string;
   description: string;
   hint: string;
@@ -86,10 +86,24 @@ export default function Daybook() {
   const [slots, setSlots] = useState<Record<string, MultiUploadSlot>>({
     daybook: {
       key: 'daybook',
-      title: 'Day Book',
-      description: 'Master voucher register (Sales, Purchases, Payments, Receipts, Contra)',
-      hint: 'Stock entries auto-disabled; Cash & Banks contra tracked',
+      title: 'Day Book (Commercial)',
+      description: 'Master commercial registers (Sales, Purchases, Contra, Credit/Debit Notes)',
+      hint: 'Payment & Receipt auto-disabled to prevent duplication with dedicated Bank Books',
       expectedName: 'DAYBOOK.xlsx',
+    },
+    hdfc: {
+      key: 'hdfc',
+      title: 'HDFC Bank Book',
+      description: 'Authoritative HDFC Bank entries (Receipts & Payments with compound splits)',
+      hint: 'Reconciles all HDFC bank receipts and payments with split legs',
+      expectedName: 'hdfc.xlsx',
+    },
+    yesbank: {
+      key: 'yesbank',
+      title: 'Yes Bank Book',
+      description: 'Authoritative Yes Bank entries (Receipts & Payments with compound splits)',
+      hint: 'Reconciles all Yes Bank receipts and payments with split legs',
+      expectedName: 'yesbank.xlsx',
     },
     journal: {
       key: 'journal',
@@ -184,7 +198,11 @@ export default function Daybook() {
 
     for (const f of filesArr) {
       const fn = f.name.toLowerCase();
-      if (fn.includes('round') || fn.includes('roun')) {
+      if (fn.includes('hdfc')) {
+        nextSlots.hdfc = { ...nextSlots.hdfc, file: f };
+      } else if (fn.includes('yesbank') || fn.includes('yes_bank') || fn.includes('yes bank') || fn === 'yes.xlsx') {
+        nextSlots.yesbank = { ...nextSlots.yesbank, file: f };
+      } else if (fn.includes('round') || fn.includes('roun')) {
         nextSlots.roundoff = { ...nextSlots.roundoff, file: f };
       } else if (fn.includes('disc')) {
         nextSlots.discount = { ...nextSlots.discount, file: f };
@@ -357,7 +375,7 @@ export default function Daybook() {
               className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-blue-700 transition"
             >
               <Upload size={14} />
-              <span>4-Excel Sync Hub</span>
+              <span>Master Excel Sync Hub</span>
             </button>
           </div>
         }
@@ -693,9 +711,9 @@ export default function Daybook() {
                   <FileSpreadsheet size={22} />
                 </div>
                 <div>
-                  <h3 className="text-base font-black text-slate-900">5-Excel Master Accounting Hub</h3>
+                  <h3 className="text-base font-black text-slate-900">7-Excel Master Accounting Hub</h3>
                   <p className="text-xs text-slate-500">
-                    Upload DAYBOOK, JOURNAL, ROUNDOFF, DISCOUNT & TRIAL BALANCE with automated sync.
+                    Upload DAYBOOK (Commercial), HDFC, YESBANK, JOURNAL, ROUNDOFF, DISCOUNT & TRIAL BALANCE with automated sync.
                   </p>
                 </div>
               </div>
@@ -725,10 +743,10 @@ export default function Daybook() {
             >
               <Upload size={28} className="mx-auto mb-2 text-blue-600" />
               <p className="text-xs font-bold text-slate-900">
-                Drag & Drop 1 to 5 Excel files here, or click to browse
+                Drag & Drop 1 to 7 Excel files here, or click to browse
               </p>
               <p className="mt-1 text-[11px] text-slate-500">
-                Supports DAYBOOK.xlsx, JOURNAL.xlsx, ROUNDOFF.xlsx, DISCOUNT.xlsx, and TRIALBALANCE / OP.xlsx
+                Supports DAYBOOK (Commercial), HDFC, YESBANK, JOURNAL, ROUNDOFF, DISCOUNT, and OP.xlsx
               </p>
               <input
                 id={fileInputId}

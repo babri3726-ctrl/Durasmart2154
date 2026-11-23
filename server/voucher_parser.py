@@ -73,7 +73,12 @@ def parse_cell_amount(val: Any) -> tuple[float, str]:
         return 0.0, s
 
 
-def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, filename: str | None = None) -> dict[str, Any]:
+def parse_accounting_workbook(
+    filepath: str,
+    file_sha256: str | None = None,
+    filename: str | None = None,
+    disable_payment_receipt: bool = True
+) -> dict[str, Any]:
     """
     Parses Sales Register or Bank Book spreadsheets into a standardized transaction ledger.
     Handles variable column mappings, merged cells, and 'To'/'By' prefixes dynamically.
@@ -143,9 +148,9 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
     elif "cash" in top_text or "cash" in fn_lower:
         book_source = "Cash Book"
     elif "hdfc" in top_text or "hdfc" in fn_lower:
-        book_source = "HDFC Bank Book"
+        return parse_bank_workbook(filepath, file_sha256=file_sha256, filename=filename)
     elif "yes" in top_text or "yes" in fn_lower:
-        book_source = "Yes Bank Book"
+        return parse_bank_workbook(filepath, file_sha256=file_sha256, filename=filename)
     elif "sales" in top_text or "sales" in fn_lower:
         book_source = "Sales Register"
     elif "day book" in top_text or "daybook" in top_text or "daybook" in fn_lower or "day book" in fn_lower:
@@ -223,6 +228,12 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
         
         # STRICT USER SPECIFICATION: Stock entries strictly disabled
         if vch_type.lower() in ("stock journal", "physical stock", "material in", "material out") or "stock" in vch_type.lower():
+            skipped_count += 1
+            continue
+
+        # STRICT USER SPECIFICATION: In Day Book, disable Payment and Receipt
+        # Bank payments and receipts are authoritatively handled by dedicated bank books (HDFC & Yes Bank)
+        if book_source == "Day Book" and disable_payment_receipt and vch_type.lower() in ("payment", "receipt"):
             skipped_count += 1
             continue
 
@@ -578,10 +589,275 @@ def parse_journal_register_workbook(filepath: str, file_sha256: str | None = Non
     }
 
 
+def parse_bank_workbook(
+    filepath: str,
+    file_sha256: str | None = None,
+    filename: str | None = None
+) -> dict[str, Any]:
+    """
+    Parses dedicated Bank Books (HDFC Bank Book, Yes Bank Book).
+    Properly extracts compound transactions with child rows under '(as per details)',
+    assigning the parent Date, Voucher Type, and Voucher No to each child split leg.
+
+    Double-Entry Bank Accounting Rules:
+    - Sheet Debit (Deposits / Inflow): Party account is CREDITED (Receipt from party)
+    - Sheet Credit (Withdrawals / Outflow): Party account is DEBITED (Payment to party)
+    """
+    wb = openpyxl.load_workbook(filepath, data_only=True)
+    ws = wb.active
+
+    fn_lower = os.path.basename(filename or filepath).lower()
+    top_3_rows = " ".join(str(ws.cell(r, 1).value or "") for r in range(1, 4)).strip().lower()
+
+    if "hdfc" in top_3_rows or "hdfc" in fn_lower:
+        bank_source = "HDFC Bank Book"
+        bank_party_id = "LEDGER-HDFC"
+        bank_party_name = "HDFC Bank"
+    elif "yes" in top_3_rows or "yes" in fn_lower:
+        bank_source = "Yes Bank Book"
+        bank_party_id = "LEDGER-YESBANK"
+        bank_party_name = "Yes Bank"
+    else:
+        bank_source = "Bank Book"
+        bank_party_id = "LEDGER-BANK"
+        bank_party_name = "Bank"
+
+    # Find header row
+    h_row = None
+    for r in range(1, 15):
+        vals = [str(ws.cell(r, c).value or "").strip().upper() for c in range(1, 15)]
+        if "DATE" in vals and "PARTICULARS" in vals:
+            h_row = r
+            break
+
+    if not h_row:
+        raise ValueError(f"Could not find Date/Particulars header in bank workbook {filepath}")
+
+    period_text = str(ws.cell(h_row - 1, 1).value or "").strip()
+    if not period_text or len(period_text) > 40:
+        period_text = datetime.now().strftime("%B %Y")
+
+    vouchers = []
+    cur_parent = None
+
+    for r in range(h_row + 1, ws.max_row + 1):
+        c1 = ws.cell(r, 1).value
+        c2 = ws.cell(r, 2).value
+        c3 = ws.cell(r, 3).value
+        vtype_val = ws.cell(r, 6).value
+        vno_val = ws.cell(r, 7).value
+        dr_val = ws.cell(r, 8).value
+        cr_val = ws.cell(r, 9).value
+
+        # Parent row check (contains valid date)
+        if c1 is not None and str(c1).strip().lower() not in ("total", "grand total", "date"):
+            # Stop if another title block is hit
+            if "1-apr-26 to" in str(c1).lower():
+                break
+
+            vch_date = normalize_date_str(c1)
+            prefix = str(c2 or "").strip()
+            raw_part = str(c3 or "").strip() if prefix in ("To", "By") else str(c2 or "").strip()
+            if not raw_part:
+                raw_part = str(c3 or c2 or "").strip()
+
+            if "opening balance" in raw_part.lower():
+                continue
+
+            part = clean_party_name(raw_part)
+            vtype = str(vtype_val or "").strip()
+            vno = str(vno_val or "").strip() if vno_val is not None else ""
+
+            # Check if this is a parent row for compound split entries
+            if "(as per details)" in raw_part.lower():
+                cur_parent = {
+                    "row": r,
+                    "date": vch_date,
+                    "vtype": vtype or ("Payment" if cr_val else "Receipt"),
+                    "vno": vno,
+                    "prefix": prefix,
+                    "dr": float(dr_val or 0),
+                    "cr": float(cr_val or 0)
+                }
+                continue
+            else:
+                cur_parent = None
+
+            # Normal single row
+            p_dr = float(cr_val or 0) # Sheet Cr -> Party Dr (Payment)
+            p_cr = float(dr_val or 0) # Sheet Dr -> Party Cr (Receipt)
+
+            if p_dr == 0 and p_cr == 0:
+                continue
+
+            v_type_assigned = vtype or ("Payment" if p_dr > 0 else "Receipt")
+
+            # Party classification
+            p_lower = part.lower()
+            party_type = "customer"
+            party_id = ""
+            if p_lower in ("round off", "roundoff", "rounoff"):
+                part = "Round Off Ledger"
+                party_id = "LEDGER-ROUNDOFF"
+                party_type = "roundoff"
+            elif p_lower in ("discount", "cd discount"):
+                part = "Discount Ledger"
+                party_id = "LEDGER-DISCOUNT"
+                party_type = "discount"
+            elif p_lower in ("khan cash", "khancash"):
+                part = "KHAN CASH"
+                party_id = "LEDGER-KHANCASH"
+                party_type = "cash"
+            elif p_lower in ("cash gbd", "cashgbd"):
+                part = "Cash Gbd"
+                party_id = "LEDGER-CASHGBD"
+                party_type = "cash"
+            elif p_lower in ("cash", "cash book"):
+                part = "Cash"
+                party_id = "LEDGER-CASH"
+                party_type = "cash"
+            elif p_lower in ("yes bank", "yes bank deemand loan", "yes"):
+                part = "Yes Bank"
+                party_id = "LEDGER-YESBANK"
+                party_type = "bank"
+            elif any(k == p_lower or p_lower.startswith(k) for k in ("hdfc p.o.finance", "hdfc dura", "hdfc bank", "hdfc loan account")):
+                part = "HDFC Bank"
+                party_id = "LEDGER-HDFC"
+                party_type = "bank"
+
+            debit_paise = round(p_dr * 100)
+            credit_paise = round(p_cr * 100)
+
+            hash_src = f"{bank_source}:{r}:{vch_date}:{v_type_assigned}:{vno}:{part}:{debit_paise}:{credit_paise}"
+            vch_id = f"BNK-{hashlib.md5(hash_src.encode('utf-8')).hexdigest()[:16]}"
+
+            vouchers.append({
+                "id": vch_id,
+                "voucherNo": vno or f"{bank_party_name[:4].upper()}-{r}",
+                "voucherType": v_type_assigned,
+                "voucherDate": vch_date,
+                "partyName": part,
+                "partyId": party_id,
+                "partyType": party_type,
+                "narration": f"{prefix} {bank_party_name}".strip() if prefix else bank_party_name,
+                "debitPaise": debit_paise,
+                "creditPaise": credit_paise,
+                "debitAmount": p_dr,
+                "creditAmount": p_cr,
+                "bookSource": bank_source
+            })
+        else:
+            # Child row under (as per details)
+            if not cur_parent:
+                continue
+            raw_part = str(c3 or c2 or "").strip()
+            if not raw_part or raw_part.lower() in ("total", "grand total", "(cancelled)"):
+                continue
+
+            part = clean_party_name(raw_part)
+            amt_str = str(dr_val or cr_val or "").strip()
+            p_dr = 0.0
+            p_cr = 0.0
+            if "dr" in amt_str.lower():
+                p_dr = float(re.sub(r"[^\d.]", "", amt_str) or 0)
+            elif "cr" in amt_str.lower():
+                p_cr = float(re.sub(r"[^\d.]", "", amt_str) or 0)
+            else:
+                amt = float(re.sub(r"[^\d.]", "", amt_str) or 0)
+                if cur_parent["cr"] > 0:
+                    p_dr = amt
+                else:
+                    p_cr = amt
+
+            if p_dr == 0 and p_cr == 0:
+                continue
+
+            v_type_assigned = cur_parent["vtype"] or ("Payment" if p_dr > 0 else "Receipt")
+
+            # Party classification
+            p_lower = part.lower()
+            party_type = "customer"
+            party_id = ""
+            if p_lower in ("round off", "roundoff", "rounoff"):
+                part = "Round Off Ledger"
+                party_id = "LEDGER-ROUNDOFF"
+                party_type = "roundoff"
+            elif p_lower in ("discount", "cd discount"):
+                part = "Discount Ledger"
+                party_id = "LEDGER-DISCOUNT"
+                party_type = "discount"
+            elif p_lower in ("khan cash", "khancash"):
+                part = "KHAN CASH"
+                party_id = "LEDGER-KHANCASH"
+                party_type = "cash"
+            elif p_lower in ("cash gbd", "cashgbd"):
+                part = "Cash Gbd"
+                party_id = "LEDGER-CASHGBD"
+                party_type = "cash"
+            elif p_lower in ("cash", "cash book"):
+                part = "Cash"
+                party_id = "LEDGER-CASH"
+                party_type = "cash"
+            elif p_lower in ("yes bank", "yes bank deemand loan", "yes"):
+                part = "Yes Bank"
+                party_id = "LEDGER-YESBANK"
+                party_type = "bank"
+            elif any(k == p_lower or p_lower.startswith(k) for k in ("hdfc p.o.finance", "hdfc dura", "hdfc bank", "hdfc loan account")):
+                part = "HDFC Bank"
+                party_id = "LEDGER-HDFC"
+                party_type = "bank"
+
+            debit_paise = round(p_dr * 100)
+            credit_paise = round(p_cr * 100)
+
+            hash_src = f"{bank_source}:{cur_parent['row']}:{r}:{cur_parent['date']}:{v_type_assigned}:{cur_parent['vno']}:{part}:{debit_paise}:{credit_paise}"
+            vch_id = f"BNK-{hashlib.md5(hash_src.encode('utf-8')).hexdigest()[:16]}"
+
+            vouchers.append({
+                "id": vch_id,
+                "voucherNo": cur_parent["vno"] or f"{bank_party_name[:4].upper()}-{cur_parent['row']}-{r}",
+                "voucherType": v_type_assigned,
+                "voucherDate": cur_parent["date"],
+                "partyName": part,
+                "partyId": party_id,
+                "partyType": party_type,
+                "narration": f"{cur_parent['prefix']} {bank_party_name} (split)".strip(),
+                "debitPaise": debit_paise,
+                "creditPaise": credit_paise,
+                "debitAmount": p_dr,
+                "creditAmount": p_cr,
+                "bookSource": bank_source
+            })
+
+    total_debit_paise = sum(v["debitPaise"] for v in vouchers)
+    total_credit_paise = sum(v["creditPaise"] for v in vouchers)
+
+    return {
+        "bookSource": bank_source,
+        "isCustomerLedger": False,
+        "isDiscountLedger": False,
+        "isRoundoffLedger": False,
+        "isBankBook": True,
+        "bankName": bank_party_name,
+        "customerName": "",
+        "openingBalancePaise": 0,
+        "periodText": period_text,
+        "voucherCount": len(vouchers),
+        "totalDebitPaise": total_debit_paise,
+        "totalCreditPaise": total_credit_paise,
+        "totalDebitFormatted": f"{total_debit_paise / 100.0:,.2f}",
+        "totalCreditFormatted": f"{total_credit_paise / 100.0:,.2f}",
+        "vouchers": vouchers,
+        "fileSha256": file_sha256 or "",
+    }
+
+
 def detect_excel_type(filepath: str) -> str:
     """
     Auto-detects whether an Excel workbook is:
-    - 'daybook': Day Book with vouchers (Sales, Payment, Receipt, Contra, Journal)
+    - 'daybook': Day Book with vouchers (Sales, Purchases, Contra, Notes; Payment/Receipt disabled)
+    - 'hdfc': Dedicated HDFC Bank Book (hdfc.xlsx)
+    - 'yesbank': Dedicated Yes Bank Book (yesbank.xlsx)
     - 'roundoff': Dedicated Round Off ledger
     - 'discount': Dedicated Discount ledger
     - 'journal': Master Double-Entry Journal Register (journal.xlsx)
@@ -589,6 +865,10 @@ def detect_excel_type(filepath: str) -> str:
     - 'unknown': Other/unrecognized format
     """
     fn = os.path.basename(filepath).lower()
+    if "hdfc" in fn:
+        return "hdfc"
+    if any(k in fn for k in ("yesbank", "yes_bank", "yes bank", "yes.xlsx")):
+        return "yesbank"
     if any(k in fn for k in ("roundoff", "round_off", "round off", "rounoff")):
         return "roundoff"
     if "discount" in fn:
@@ -609,6 +889,10 @@ def detect_excel_type(filepath: str) -> str:
             top_text += " ".join(row_vals) + " "
         wb.close()
 
+        if "hdfc" in top_text:
+            return "hdfc"
+        if "yes bank" in top_text or "yesbank" in top_text:
+            return "yesbank"
         if "journal register" in top_text or ("journal" in top_text and "debit" in top_text and "credit" in top_text and "day book" not in top_text):
             return "journal"
         if "round off" in top_text or "roundoff" in top_text or "rounoff" in top_text:

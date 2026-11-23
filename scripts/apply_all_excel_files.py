@@ -62,15 +62,21 @@ def main():
         with open(daybook_path, "rb") as f:
             f_bytes = f.read()
         f_sha = hashlib.sha256(f_bytes).hexdigest()
-        parsed_db = parse_accounting_workbook(daybook_path, file_sha256=f_sha)
+        parsed_db = parse_accounting_workbook(daybook_path, file_sha256=f_sha, disable_payment_receipt=True)
         vouchers = parsed_db.get("vouchers", [])
         
-        if has_journal:
-            orig_len = len(vouchers)
-            vouchers = [v for v in vouchers if v.get("voucherType", "").lower() != "journal"]
-            print(f"  -> Filtered out {orig_len - len(vouchers)} single-leg Daybook Journal vouchers (will be populated with full double entries from {os.path.basename(journal_path)}).")
+        # STRICT USER DIRECTIVE: Disable Payment and Receipt vouchers in Daybook
+        # (These are authoritatively provided by dedicated HDFC and Yes Bank books)
+        orig_len = len(vouchers)
+        vouchers = [v for v in vouchers if v.get("voucherType", "").lower() not in ("payment", "receipt")]
+        print(f"  -> Daybook filtered: {orig_len - len(vouchers)} Payment/Receipt entries disabled.")
 
-        print(f"  -> Parsed {len(vouchers)} vouchers in {time.time()-t0:.2f}s.")
+        if has_journal:
+            orig_len_j = len(vouchers)
+            vouchers = [v for v in vouchers if v.get("voucherType", "").lower() != "journal"]
+            print(f"  -> Filtered out {orig_len_j - len(vouchers)} single-leg Daybook Journal vouchers (will be populated with full double entries from {os.path.basename(journal_path)}).")
+
+        print(f"  -> Clean commercial Day Book vouchers to import: {len(vouchers)} (parsed in {time.time()-t0:.2f}s).")
         
         t1 = time.time()
         db_res = db.save_vouchers_batch(vouchers, file_sha=f_sha)
@@ -95,6 +101,52 @@ def main():
         j_res = db.save_vouchers_batch(j_vchs, file_sha=f_sha)
         print(f"  -> Ingested Journal vouchers in {time.time()-t1:.2f}s:")
         print(f"     Inserted: {j_res['insertedCount']}, Skipped: {j_res['skippedCount']}, New Parties: {j_res['newPartiesCount']}")
+
+    # 3.6 Apply Dedicated HDFC Bank Book (hdfc.xlsx)
+    hdfc_path = os.path.join(base_dir, "hdfc.xlsx")
+    if not os.path.exists(hdfc_path):
+        hdfc_path = os.path.join(base_dir, "HDFC.xlsx")
+    if not os.path.exists(hdfc_path):
+        hdfc_path = os.path.join(data_dir, "imports", "hdfc.xlsx")
+
+    if os.path.exists(hdfc_path):
+        print(f"\n[Step 3.6] Parsing and Ingesting HDFC Bank Book from {os.path.basename(hdfc_path)}...")
+        t0 = time.time()
+        with open(hdfc_path, "rb") as f:
+            f_bytes = f.read()
+        f_sha = hashlib.sha256(f_bytes).hexdigest()
+        from server.voucher_parser import parse_bank_workbook
+        parsed_h = parse_bank_workbook(hdfc_path, file_sha256=f_sha)
+        h_vchs = parsed_h.get("vouchers", [])
+        print(f"  -> Parsed {len(h_vchs)} HDFC bank vouchers (including split detail rows) in {time.time()-t0:.2f}s (Total Dr: ₹{parsed_h['totalDebitFormatted']}, Total Cr: ₹{parsed_h['totalCreditFormatted']}).")
+        
+        t1 = time.time()
+        h_res = db.save_vouchers_batch(h_vchs, file_sha=f_sha)
+        print(f"  -> Ingested HDFC vouchers in {time.time()-t1:.2f}s:")
+        print(f"     Inserted: {h_res['insertedCount']}, Skipped: {h_res['skippedCount']}, New Parties: {h_res['newPartiesCount']}")
+
+    # 3.7 Apply Dedicated Yes Bank Book (yesbank.xlsx)
+    yes_path = os.path.join(base_dir, "yesbank.xlsx")
+    if not os.path.exists(yes_path):
+        yes_path = os.path.join(base_dir, "YESBANK.xlsx")
+    if not os.path.exists(yes_path):
+        yes_path = os.path.join(data_dir, "imports", "yesbank.xlsx")
+
+    if os.path.exists(yes_path):
+        print(f"\n[Step 3.7] Parsing and Ingesting Yes Bank Book from {os.path.basename(yes_path)}...")
+        t0 = time.time()
+        with open(yes_path, "rb") as f:
+            f_bytes = f.read()
+        f_sha = hashlib.sha256(f_bytes).hexdigest()
+        from server.voucher_parser import parse_bank_workbook
+        parsed_y = parse_bank_workbook(yes_path, file_sha256=f_sha)
+        y_vchs = parsed_y.get("vouchers", [])
+        print(f"  -> Parsed {len(y_vchs)} Yes Bank vouchers (including split detail rows) in {time.time()-t0:.2f}s (Total Dr: ₹{parsed_y['totalDebitFormatted']}, Total Cr: ₹{parsed_y['totalCreditFormatted']}).")
+        
+        t1 = time.time()
+        y_res = db.save_vouchers_batch(y_vchs, file_sha=f_sha)
+        print(f"  -> Ingested Yes Bank vouchers in {time.time()-t1:.2f}s:")
+        print(f"     Inserted: {y_res['insertedCount']}, Skipped: {y_res['skippedCount']}, New Parties: {y_res['newPartiesCount']}")
 
     # 4. Apply Dedicated Round Off Ledger (ROUNDOFF.xlsx)
     ro_path = os.path.join(base_dir, "ROUNDOFF.xlsx")
