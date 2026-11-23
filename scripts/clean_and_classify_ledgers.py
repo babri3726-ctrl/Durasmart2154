@@ -123,31 +123,23 @@ def run_cleanup():
         else:
             ob_paise = 0
 
-        # Sales & Debit notes (+)
+        # All vouchers: Debits (+) and Credits (-)
         cur.execute("""
-            SELECT COALESCE(SUM(debit_paise - credit_paise), 0)
+            SELECT COALESCE(SUM(debit_paise), 0) - COALESCE(SUM(credit_paise), 0)
             FROM vouchers
-            WHERE party_id = ? AND (LOWER(voucher_type) = 'sales' OR LOWER(voucher_type) LIKE '%debit note%')
+            WHERE party_id = ?
         """, (cid,))
-        sales_net = cur.fetchone()[0]
+        voucher_net_paise = cur.fetchone()[0]
 
-        # Receipts & Credit notes (-)
+        # Direct customer payments
         cur.execute("""
-            SELECT COALESCE(SUM(credit_paise - debit_paise), 0)
-            FROM vouchers
-            WHERE party_id = ? AND (LOWER(voucher_type) = 'receipt' OR LOWER(voucher_type) LIKE '%credit note%')
+            SELECT COALESCE(SUM(amount_paise), 0)
+            FROM payments
+            WHERE customer_id = ? AND voided_at IS NULL
         """, (cid,))
-        receipts_net = cur.fetchone()[0]
+        direct_payment_paise = cur.fetchone()[0]
 
-        # Journals & adjustments
-        cur.execute("""
-            SELECT COALESCE(SUM(debit_paise - credit_paise), 0)
-            FROM vouchers
-            WHERE party_id = ? AND LOWER(voucher_type) = 'journal'
-        """, (cid,))
-        journal_net = cur.fetchone()[0]
-
-        final_bal = ob_paise + sales_net - receipts_net + journal_net
+        final_bal = ob_paise + voucher_net_paise - direct_payment_paise
         cur.execute("UPDATE parties SET balance_paise = ? WHERE id = ?", (final_bal, cid))
 
     conn.commit()

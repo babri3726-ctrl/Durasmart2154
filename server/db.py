@@ -1175,7 +1175,7 @@ def find_or_create_party_by_name(conn, party_name: str, party_type: str = "custo
     return new_id, True
 
 def recompute_party_balance(party_id: str, conn = None):
-    """Recomputes party balance directly from Opening Balance + Sales - Receipts - Payments."""
+    """Recomputes party balance directly from Opening Balance + Net Vouchers (Debits - Credits) - Direct Payments."""
     def _run(c):
         cur = c.cursor()
         # Opening balance
@@ -1186,27 +1186,16 @@ def recompute_party_balance(party_id: str, conn = None):
         else:
             ob_paise = 0
 
-        # Sales & Debit Notes debits
+        # All vouchers: Debits (+) and Credits (-)
         cur.execute(
             """
-            SELECT COALESCE(SUM(CASE WHEN debit_paise > 0 THEN debit_paise - credit_paise ELSE 0 END), 0)
+            SELECT COALESCE(SUM(debit_paise), 0) - COALESCE(SUM(credit_paise), 0)
             FROM vouchers
-            WHERE party_id = ? AND (LOWER(voucher_type) = 'sales' OR LOWER(voucher_type) LIKE '%debit note%')
+            WHERE party_id = ?
             """,
             (party_id,)
         )
-        sales_paise = cur.fetchone()[0]
-
-        # Receipts & Credit Notes (money in from customer or returns reduce debtor balance)
-        cur.execute(
-            """
-            SELECT COALESCE(SUM(credit_paise), 0)
-            FROM vouchers
-            WHERE party_id = ? AND (LOWER(voucher_type) = 'receipt' OR LOWER(voucher_type) LIKE '%credit note%')
-            """,
-            (party_id,)
-        )
-        receipt_paise = cur.fetchone()[0]
+        voucher_net_paise = cur.fetchone()[0]
 
         # Direct customer payments
         cur.execute(
@@ -1219,18 +1208,7 @@ def recompute_party_balance(party_id: str, conn = None):
         )
         direct_payment_paise = cur.fetchone()[0]
 
-        # Journal vouchers (debit notes increase balance, credit notes deduct)
-        cur.execute(
-            """
-            SELECT COALESCE(SUM(debit_paise - credit_paise), 0)
-            FROM vouchers
-            WHERE party_id = ? AND LOWER(voucher_type) = 'journal'
-            """,
-            (party_id,)
-        )
-        journal_paise = cur.fetchone()[0]
-
-        new_balance_paise = max(0, ob_paise + sales_paise + journal_paise - receipt_paise - direct_payment_paise)
+        new_balance_paise = ob_paise + voucher_net_paise - direct_payment_paise
         c.execute(
             "UPDATE parties SET balance_paise = ?, updated_at = ? WHERE id = ?",
             (new_balance_paise, datetime.now().isoformat(), party_id)
@@ -1282,36 +1260,21 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
             cr_paise = v.get("creditPaise", 0)
             cur_book = v.get("bookSource", "")
 
-            # Cross-book 1-to-1 deduplication (e.g. Day Book vs Sales/Bank Book)
+            # Cross-book 1-to-1 deduplication (e.g. Day Book vs Sales/Bank Book / Ledger statements)
             cross_match_id = None
             if cur_book:
-                if vch_no and not vch_no.startswith("DB-"):
-                    cur.execute(
-                        """
-                        SELECT id FROM vouchers
-                        WHERE voucher_date = ?
-                          AND LOWER(voucher_type) = LOWER(?)
-                          AND (LOWER(TRIM(party_name)) = LOWER(TRIM(?)) OR party_id = ?)
-                          AND debit_paise = ?
-                          AND credit_paise = ?
-                          AND book_source != ?
-                          AND (voucher_no = ? OR voucher_no LIKE 'DB-%' OR voucher_no = '')
-                        """,
-                        (vch_date, vch_type, party_name, party_id, dr_paise, cr_paise, cur_book, vch_no)
-                    )
-                else:
-                    cur.execute(
-                        """
-                        SELECT id FROM vouchers
-                        WHERE voucher_date = ?
-                          AND LOWER(voucher_type) = LOWER(?)
-                          AND (LOWER(TRIM(party_name)) = LOWER(TRIM(?)) OR party_id = ?)
-                          AND debit_paise = ?
-                          AND credit_paise = ?
-                          AND book_source != ?
-                        """,
-                        (vch_date, vch_type, party_name, party_id, dr_paise, cr_paise, cur_book)
-                    )
+                cur.execute(
+                    """
+                    SELECT id FROM vouchers
+                    WHERE voucher_date = ?
+                      AND LOWER(voucher_type) = LOWER(?)
+                      AND (LOWER(TRIM(party_name)) = LOWER(TRIM(?)) OR party_id = ?)
+                      AND debit_paise = ?
+                      AND credit_paise = ?
+                      AND book_source != ?
+                    """,
+                    (vch_date, vch_type, party_name, party_id, dr_paise, cr_paise, cur_book)
+                )
                 candidates = cur.fetchall()
                 cross_match_id = next((row[0] for row in candidates if row[0] not in claimed_cross_ids), None)
 
@@ -1323,6 +1286,11 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
                     cur.execute(
                         "UPDATE vouchers SET narration = ? WHERE id = ? AND (narration IS NULL OR narration = '')",
                         (incoming_narration, cross_match_id)
+                    )
+                if vch_no and not vch_no.startswith("DB-") and not "-" in vch_no:
+                    cur.execute(
+                        "UPDATE vouchers SET voucher_no = ? WHERE id = ? AND (voucher_no LIKE 'DB-%' OR voucher_no LIKE '%-%')",
+                        (vch_no, cross_match_id)
                     )
                 continue
 
@@ -1897,8 +1865,6 @@ def import_opening_balances(filepath: str, as_of: str = "") -> dict[str, Any]:
 
         for e in entries:
             name = e["name"]
-            if not is_sundry_debtor(name or ""):
-                continue
             norm_name = norm(name)
             party_id = p_by_exact.get(name.lower()) or p_by_norm.get(norm_name)
 
@@ -1908,34 +1874,8 @@ def import_opening_balances(filepath: str, as_of: str = "") -> dict[str, Any]:
                 p_by_exact[name.lower()] = party_id
                 created_party_count += 1
 
-            # Compute existing voucher net movement for this party
-            cur.execute(
-                """
-                SELECT
-                    COALESCE(SUM(CASE WHEN (LOWER(voucher_type) = 'sales' OR LOWER(voucher_type) LIKE '%debit note%') AND debit_paise > 0 THEN debit_paise - credit_paise ELSE 0 END), 0) -
-                    COALESCE(SUM(CASE WHEN LOWER(voucher_type) = 'receipt' OR LOWER(voucher_type) LIKE '%credit note%' THEN credit_paise ELSE 0 END), 0) +
-                    COALESCE(SUM(CASE WHEN LOWER(voucher_type) = 'journal' THEN debit_paise - credit_paise ELSE 0 END), 0)
-                FROM vouchers
-                WHERE party_id = ?
-                """,
-                (party_id,)
-            )
-            v_row = cur.fetchone()
-            vch_net = v_row[0] if v_row else 0
-
-            # If party has vouchers during the period, Closing C = Opening + vch_net => Opening = C - vch_net
-            target_paise = e["amountPaise"] if e["direction"] == "debit" else -e["amountPaise"]
-            if vch_net != 0:
-                diff = target_paise - vch_net
-                if diff >= 0:
-                    ob_paise = diff
-                    direction = "debit"
-                else:
-                    ob_paise = abs(diff)
-                    direction = "credit"
-            else:
-                ob_paise = abs(target_paise)
-                direction = e["direction"]
+            ob_paise = e["amountPaise"]
+            direction = e["direction"]
 
             cur.execute(
                 "DELETE FROM opening_balances WHERE customer_id = ? AND source LIKE 'Import: %'",

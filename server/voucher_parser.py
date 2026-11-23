@@ -167,6 +167,10 @@ def parse_accounting_workbook(filepath: str, file_sha256: str | None = None, fil
         if date_str_raw.startswith(("total", "amount", "date", "grand total")):
             continue
 
+        # Stop parsing if a secondary concatenated book header is encountered (e.g. DAYBOOK duplicated block)
+        if "1-apr-26 to 30-nov-27" in date_str_raw or (r > 100 and date_str_raw.startswith("dura ldh")):
+            break
+
         # Extract particulars
         p_col = col_map["particulars"]
         raw_part = ws.cell(r, p_col).value

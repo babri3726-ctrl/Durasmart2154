@@ -197,29 +197,10 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
     reloadVouchers();
   }, [reloadVouchers]);
 
-  const totalSalesDebit = vouchers
-    .filter((v) => {
-      const t = v.voucher_type.toLowerCase();
-      return t === 'sales' || t.includes('debit note');
-    })
-    .reduce((sum, v) => sum + (v.debit_paise || 0), 0);
+  const totalDebits = vouchers.reduce((sum, v) => sum + (v.debit_paise || 0), 0);
+  const totalCredits = vouchers.reduce((sum, v) => sum + (v.credit_paise || 0), 0);
 
-  const totalReceipts = vouchers
-    .filter((v) => {
-      const t = v.voucher_type.toLowerCase();
-      return t === 'receipt' || t.includes('credit note');
-    })
-    .reduce((sum, v) => sum + (v.credit_paise || v.debit_paise || 0), 0);
-
-  const totalJournalCredit = vouchers
-    .filter((v) => v.voucher_type.toLowerCase() === 'journal')
-    .reduce((sum, v) => sum + (v.credit_paise || 0), 0);
-
-  const totalJournalDebit = vouchers
-    .filter((v) => v.voucher_type.toLowerCase() === 'journal')
-    .reduce((sum, v) => sum + (v.debit_paise || 0), 0);
-
-  const calculatedOutstandingPaise = Math.max(0, currentOpeningPaise + totalSalesDebit + totalJournalDebit - totalReceipts - totalJournalCredit);
+  const calculatedOutstandingPaise = currentOpeningPaise + totalDebits - totalCredits;
   const currentOutstandingPaise = vouchers.length > 0 || currentOpeningPaise !== 0
     ? calculatedOutstandingPaise
     : (debtor.balance !== undefined ? Math.round(Number(debtor.balance) * 100) : 0);
@@ -237,13 +218,8 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
       return buckets;
     }
 
-    // Credits pool: receipts, credit notes, and credit journal entries
-    let remainingCredits = vouchers
-      .filter((v) => {
-        const t = v.voucher_type.toLowerCase();
-        return t === 'receipt' || t.includes('credit note') || (t === 'journal' && v.credit_paise > 0);
-      })
-      .reduce((sum, v) => sum + (v.credit_paise || v.debit_paise || 0), 0);
+    // Credits pool: all credit vouchers
+    let remainingCredits = vouchers.reduce((sum, v) => sum + (v.credit_paise || 0), 0);
 
     // 1. Opening balance: debit increases oldest obligation, credit increases remaining credits buffer
     if (currentOpeningPaise > 0) {
@@ -259,10 +235,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
 
     // 2. Debit vouchers sorted chronologically oldest first
     const debitVouchers = vouchers
-      .filter((v) => {
-        const t = v.voucher_type.toLowerCase();
-        return t === 'sales' || t.includes('debit note') || (t === 'journal' && v.debit_paise > 0);
-      })
+      .filter((v) => (v.debit_paise || 0) > 0)
       .slice()
       .sort((a, b) => parseVoucherDate(a.voucher_date).getTime() - parseVoucherDate(b.voucher_date).getTime());
 
@@ -310,14 +283,16 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
   }, [vouchers, debtor, currentOpeningPaise, currentOutstandingPaise]);
 
   const filteredVouchers = vouchers.filter((v) => {
-    if (filterType === 'SALES') return v.voucher_type.toLowerCase() === 'sales';
-    if (filterType === 'RECEIPT') return v.voucher_type.toLowerCase() === 'receipt';
+    if (filterType === 'SALES') return (v.debit_paise || 0) > 0;
+    if (filterType === 'RECEIPT') return (v.credit_paise || 0) > 0;
     return true;
   });
 
   const handleShareWhatsApp = () => {
     const partyName = debtor.name || debtor.customerName || 'Customer';
-    const currentBal = rupees(currentOutstandingPaise);
+    const currentBal = currentOutstandingPaise < 0
+      ? `${rupees(Math.abs(currentOutstandingPaise))} Cr`
+      : `${rupees(currentOutstandingPaise)} Dr`;
 
     const phone = (debtor.mobile || '').replace(/[^0-9]/g, '');
     const cleanPhone = phone.length === 10 ? `91${phone}` : phone;
@@ -327,10 +302,10 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
       `--------------------------------`,
       `*Party:* ${partyName}`,
       `*City:* ${debtor.city || debtor.state || 'Punjab'}`,
-      `*Opening Balance:* ${currentOpeningPaise < 0 ? `${rupees(Math.abs(currentOpeningPaise))} Cr` : rupees(currentOpeningPaise)}`,
-      `*Total Billed Sales:* ${rupees(totalSalesDebit)}`,
-      `*Total Credits / Receipts:* ${rupees(totalReceipts + totalJournalCredit)}`,
-      `*Current Outstanding:* ${currentBal}`,
+      `*Opening Balance:* ${currentOpeningPaise < 0 ? `${rupees(Math.abs(currentOpeningPaise))} Cr` : `${rupees(currentOpeningPaise)} Dr`}`,
+      `*Total Debits / Billed:* ${rupees(totalDebits)}`,
+      `*Total Credits / Receipts:* ${rupees(totalCredits)}`,
+      `*Current Balance:* ${currentBal}`,
       ``,
       `*Aging Breakdown:*`,
       `• 0-30 Days: ${rupees(aging.bucket0_30)}`,
@@ -511,17 +486,17 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
             </p>
           </div>
           <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Total Billed Sales</span>
-            <p className="font-mono text-base font-extrabold text-blue-700">{rupees(totalSalesDebit)}</p>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Total Debits / Billed</span>
+            <p className="font-mono text-base font-extrabold text-blue-700">{rupees(totalDebits)}</p>
           </div>
           <div>
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Total Credits / Receipts</span>
-            <p className="font-mono text-base font-extrabold text-emerald-700">{rupees(totalReceipts + totalJournalCredit)}</p>
+            <p className="font-mono text-base font-extrabold text-emerald-700">{rupees(totalCredits)}</p>
           </div>
           <div>
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Current Outstanding</span>
-            <p className="font-mono text-base font-extrabold text-slate-900">
-              {rupees(currentOutstandingPaise)}
+            <p className={`font-mono text-base font-extrabold ${currentOutstandingPaise < 0 ? 'text-emerald-700' : 'text-slate-900'}`}>
+              {currentOutstandingPaise < 0 ? `${rupees(Math.abs(currentOutstandingPaise))} Cr` : rupees(currentOutstandingPaise)}
             </p>
           </div>
         </div>
@@ -571,7 +546,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
                   filterType === t ? 'bg-slate-900 text-white shadow-xs' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
                 }`}
               >
-                {t === 'ALL' ? 'All Vouchers' : t === 'SALES' ? 'Sales Bills' : 'Bank Receipts'}
+                {t === 'ALL' ? 'All Vouchers' : t === 'SALES' ? 'Debits / Bills' : 'Credits / Receipts'}
               </button>
             ))}
           </div>

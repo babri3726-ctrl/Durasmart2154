@@ -104,18 +104,12 @@ def main():
         )
         print(f"  -> Reconciled Discount vouchers in {time.time()-t0:.2f}s: {disc_res}")
 
-    # 6. Apply Additional Cash and Bank Books if present
-    additional_books = [
-        os.path.join(data_dir, "cash.xlsx"),
-        os.path.join(data_dir, "cash gbd.xlsx"),
-        os.path.join(data_dir, "khan cash.xlsx"),
-        os.path.join(data_dir, "hdfc.xlsx"),
-        os.path.join(data_dir, "yes.xlsx"),
-        os.path.join(data_dir, "sales.xlsx"),
+    # 6. Apply individual party ledger statements if present in data/ (e.g. S S Kalra Zira.xlsx)
+    statement_books = [
         os.path.join(data_dir, "S S Kalra Zira.xlsx"),
     ]
-    print("\n[Step 6] Ingesting auxiliary cash and bank registers with cross-deduplication...")
-    for bpath in additional_books:
+    print("\n[Step 6] Reconciling individual party ledger statements with cross-deduplication...")
+    for bpath in statement_books:
         if os.path.exists(bpath):
             fname = os.path.basename(bpath)
             with open(bpath, "rb") as f:
