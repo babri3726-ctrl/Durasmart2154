@@ -173,6 +173,30 @@ def main():
                 print(f"  -> {fname}: Authoritative Tally ledger applied ({res['insertedCount']} vouchers).")
             break
 
+    # JHS ISPAT: Ground-truth ledger statement provided by user
+    for jhs_p in [
+        os.path.join(base_dir, "jhs.xlsx"),
+        os.path.join(base_dir, "Jhs Ispat.xlsx"),
+        os.path.join(data_dir, "jhs.xlsx"),
+        os.path.join(data_dir, "Jhs Ispat.xlsx"),
+    ]:
+        if os.path.exists(jhs_p):
+            fname = os.path.basename(jhs_p)
+            with open(jhs_p, "rb") as f:
+                f_bytes = f.read()
+            f_sha = hashlib.sha256(f_bytes).hexdigest()
+            parsed = parse_accounting_workbook(jhs_p, file_sha256=f_sha, filename=fname)
+            vchs = parsed.get("vouchers", [])
+            if vchs:
+                pname = parsed.get("customerName") or vchs[0]["partyName"]
+                with db.get_connection() as conn:
+                    pid, _ = db.find_or_create_party_by_name(conn, pname)
+                    conn.execute("DELETE FROM vouchers WHERE party_id = ?", (pid,))
+                    conn.commit()
+                res = db.save_vouchers_batch(vchs, file_sha=f_sha)
+                print(f"  -> {fname}: Authoritative Tally ledger applied ({res['insertedCount']} vouchers).")
+            break
+
     # 7. Ingest HR-PB Sales Targets & Dealers Master
     hrpb_path = os.path.join(data_dir, "HR-PB.xlsx")
     if os.path.exists(hrpb_path):
