@@ -104,20 +104,42 @@ def main():
         )
         print(f"  -> Reconciled Discount vouchers in {time.time()-t0:.2f}s: {disc_res}")
 
-    # 6. Apply individual party ledger statements if present in data/ (e.g. S S Kalra Zira.xlsx)
-    statement_books = [
-        os.path.join(data_dir, "S S Kalra Zira.xlsx"),
-    ]
+    # 6. Apply individual party ledger statements if present
     print("\n[Step 6] Reconciling individual party ledger statements with cross-deduplication...")
-    for bpath in statement_books:
-        if os.path.exists(bpath):
-            fname = os.path.basename(bpath)
-            with open(bpath, "rb") as f:
+    
+    # S S Kalra Zira: Ingest missing journal vouchers with cross-deduplication
+    ss_path = os.path.join(data_dir, "S S Kalra Zira.xlsx")
+    if os.path.exists(ss_path):
+        fname = os.path.basename(ss_path)
+        with open(ss_path, "rb") as f:
+            f_bytes = f.read()
+        f_sha = hashlib.sha256(f_bytes).hexdigest()
+        parsed = parse_accounting_workbook(ss_path, file_sha256=f_sha, filename=fname)
+        res = db.save_vouchers_batch(parsed.get("vouchers", []), file_sha=f_sha)
+        print(f"  -> {fname} ({parsed.get('bookSource', 'Book')}): {res['insertedCount']} inserted, {res['skippedCount']} skipped")
+
+    # PROMPT ENTERPRISES: Ground-truth ledger statement provided by user
+    for prompt_path in [
+        os.path.join(base_dir, "PROMPT ENTERPRISES PRIVATE LIMITED BALLABGARH.xlsx"),
+        os.path.join(data_dir, "PROMPT ENTERPRISES PRIVATE LIMITED BALLABGARH.xlsx"),
+    ]:
+        if os.path.exists(prompt_path):
+            fname = os.path.basename(prompt_path)
+            with open(prompt_path, "rb") as f:
                 f_bytes = f.read()
             f_sha = hashlib.sha256(f_bytes).hexdigest()
-            parsed = parse_accounting_workbook(bpath, file_sha256=f_sha, filename=fname)
-            res = db.save_vouchers_batch(parsed.get("vouchers", []), file_sha=f_sha)
-            print(f"  -> {fname} ({parsed.get('bookSource', 'Book')}): {res['insertedCount']} inserted, {res['skippedCount']} skipped")
+            parsed = parse_accounting_workbook(prompt_path, file_sha256=f_sha, filename=fname)
+            vchs = parsed.get("vouchers", [])
+            if vchs:
+                pname = vchs[0]["partyName"]
+                with db.get_connection() as conn:
+                    pid, _ = db.find_or_create_party_by_name(conn, pname)
+                    # Replace incomplete Daybook entries for Prompt with their authoritative Tally ledger
+                    conn.execute("DELETE FROM vouchers WHERE party_id = ?", (pid,))
+                    conn.commit()
+                res = db.save_vouchers_batch(vchs, file_sha=f_sha)
+                print(f"  -> {fname}: Authoritative Tally ledger applied ({res['insertedCount']} vouchers).")
+            break
 
     # 7. Ingest HR-PB Sales Targets & Dealers Master
     hrpb_path = os.path.join(data_dir, "HR-PB.xlsx")
