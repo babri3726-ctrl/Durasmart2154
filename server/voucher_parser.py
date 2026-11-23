@@ -617,6 +617,18 @@ def parse_bank_workbook(
         bank_source = "Yes Bank Book"
         bank_party_id = "LEDGER-YESBANK"
         bank_party_name = "Yes Bank"
+    elif any(k in top_3_rows or k in fn_lower for k in ("khan cash", "khancash")):
+        bank_source = "Khan Cash Book"
+        bank_party_id = "LEDGER-KHANCASH"
+        bank_party_name = "KHAN CASH"
+    elif any(k in top_3_rows or k in fn_lower for k in ("cash gbd", "cashgbd")):
+        bank_source = "Cash GBD Book"
+        bank_party_id = "LEDGER-CASHGBD"
+        bank_party_name = "Cash Gbd"
+    elif "cash" in top_3_rows or "cash" in fn_lower:
+        bank_source = "Cash Book"
+        bank_party_id = "LEDGER-CASH"
+        bank_party_name = "Cash"
     else:
         bank_source = "Bank Book"
         bank_party_id = "LEDGER-BANK"
@@ -624,14 +636,33 @@ def parse_bank_workbook(
 
     # Find header row
     h_row = None
+    col_map = {}
     for r in range(1, 15):
         vals = [str(ws.cell(r, c).value or "").strip().upper() for c in range(1, 15)]
         if "DATE" in vals and "PARTICULARS" in vals:
             h_row = r
+            for c_idx, val in enumerate(vals, start=1):
+                if val == "DATE":
+                    col_map["date"] = c_idx
+                elif val == "PARTICULARS":
+                    col_map["particulars"] = c_idx
+                elif val in ("VCH TYPE", "VOUCHER TYPE"):
+                    col_map["vch_type"] = c_idx
+                elif val in ("VCH NO.", "VCH NO", "VOUCHER NO", "VCH NO ."):
+                    col_map["vch_no"] = c_idx
+                elif val.startswith("DEBIT"):
+                    col_map["debit"] = c_idx
+                elif val.startswith("CREDIT"):
+                    col_map["credit"] = c_idx
             break
 
-    if not h_row:
-        raise ValueError(f"Could not find Date/Particulars header in bank workbook {filepath}")
+    if not h_row or "debit" not in col_map or "credit" not in col_map:
+        raise ValueError(f"Could not find Date/Particulars header in liquid workbook {filepath}")
+
+    dr_col = col_map["debit"]
+    cr_col = col_map["credit"]
+    vtype_col = col_map.get("vch_type")
+    vno_col = col_map.get("vch_no")
 
     period_text = str(ws.cell(h_row - 1, 1).value or "").strip()
     if not period_text or len(period_text) > 40:
@@ -639,15 +670,24 @@ def parse_bank_workbook(
 
     vouchers = []
     cur_parent = None
+    opening_balance_paise = 0
 
     for r in range(h_row + 1, ws.max_row + 1):
         c1 = ws.cell(r, 1).value
         c2 = ws.cell(r, 2).value
         c3 = ws.cell(r, 3).value
-        vtype_val = ws.cell(r, 6).value
-        vno_val = ws.cell(r, 7).value
-        dr_val = ws.cell(r, 8).value
-        cr_val = ws.cell(r, 9).value
+        vtype_val = ws.cell(r, vtype_col).value if vtype_col else None
+        vno_val = ws.cell(r, vno_col).value if vno_col else None
+        dr_val = ws.cell(r, dr_col).value
+        cr_val = ws.cell(r, cr_col).value
+
+        # Check for Opening Balance row
+        row_str = f"{c1} {c2} {c3}".lower()
+        if "opening balance" in row_str:
+            dr_amt = float(dr_val or 0)
+            cr_amt = float(cr_val or 0)
+            opening_balance_paise = round((dr_amt - cr_amt) * 100)
+            continue
 
         # Parent row check (contains valid date)
         if c1 is not None and str(c1).strip().lower() not in ("total", "grand total", "date"):
@@ -840,7 +880,7 @@ def parse_bank_workbook(
         "isBankBook": True,
         "bankName": bank_party_name,
         "customerName": "",
-        "openingBalancePaise": 0,
+        "openingBalancePaise": opening_balance_paise,
         "periodText": period_text,
         "voucherCount": len(vouchers),
         "totalDebitPaise": total_debit_paise,
@@ -858,6 +898,9 @@ def detect_excel_type(filepath: str) -> str:
     - 'daybook': Day Book with vouchers (Sales, Purchases, Contra, Notes, Cash payments/receipts)
     - 'hdfc': Dedicated HDFC Bank Book (hdfc.xlsx)
     - 'yesbank': Dedicated Yes Bank Book (yesbank.xlsx)
+    - 'cash': Dedicated Cash Book (cash.xlsx)
+    - 'khancash': Dedicated Khan Cash Book (khancash.xlsx)
+    - 'cashgbd': Dedicated Cash GBD Book (cashgbd.xlsx)
     - 'roundoff': Dedicated Round Off ledger
     - 'discount': Dedicated Discount ledger
     - 'journal': Master Double-Entry Journal Register (journal.xlsx)
@@ -870,6 +913,12 @@ def detect_excel_type(filepath: str) -> str:
         return "hdfc"
     if any(k in fn for k in ("yesbank", "yes_bank", "yes bank", "yes.xlsx")):
         return "yesbank"
+    if any(k in fn for k in ("khancash", "khan_cash", "khan cash")):
+        return "khancash"
+    if any(k in fn for k in ("cashgbd", "cash_gbd", "cash gbd")):
+        return "cashgbd"
+    if "cash" in fn and "day" not in fn and "khan" not in fn and "gbd" not in fn:
+        return "cash"
     if any(k in fn for k in ("roundoff", "round_off", "round off", "rounoff")):
         return "roundoff"
     if "discount" in fn:
@@ -903,6 +952,12 @@ def detect_excel_type(filepath: str) -> str:
             return "hdfc"
         if "yes bank" in r2:
             return "yesbank"
+        if "khan cash" in r2 or "khancash" in r2:
+            return "khancash"
+        if "cash gbd" in r2 or "cashgbd" in r2:
+            return "cashgbd"
+        if "cash" in r2 and "day" not in r2:
+            return "cash"
         if "ledger account" in r3 or "ledger account" in r2 or "ledger:" in r2 or "ledger:" in r3:
             return "customer_ledger"
     except Exception:

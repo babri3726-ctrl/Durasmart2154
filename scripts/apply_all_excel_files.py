@@ -51,71 +51,63 @@ def main():
 
     has_journal = os.path.exists(journal_path)
 
-    # 3. Apply Dedicated Bank Books (HDFC & Yes Bank) first for Smart Liquid Deduplication
+    # 3. Apply Dedicated Liquid Books (HDFC, Yes Bank, Cash, Khan Cash, Cash GBD) for Universal Liquid Deduplication Pool
     from collections import Counter
     from server.voucher_parser import parse_bank_workbook, clean_party_name
     
-    bank_lookup = Counter()
-    h_vchs = []
-    y_vchs = []
+    liquid_lookup = Counter()
+    total_liquid_vchs = 0
 
-    # 3.1 HDFC Bank Book
-    hdfc_path = os.path.join(base_dir, "hdfc.xlsx")
-    if not os.path.exists(hdfc_path):
-        hdfc_path = os.path.join(base_dir, "HDFC.xlsx")
-    if not os.path.exists(hdfc_path):
-        hdfc_path = os.path.join(data_dir, "imports", "hdfc.xlsx")
+    liquid_definitions = [
+        ("hdfc", ["hdfc.xlsx", "HDFC.xlsx"], "HDFC Bank Book"),
+        ("yesbank", ["yesbank.xlsx", "YESBANK.xlsx"], "Yes Bank Book"),
+        ("cash", ["cash.xlsx", "CASH.xlsx"], "Cash Book"),
+        ("khancash", ["khancash.xlsx", "KHANCASH.xlsx", "khan cash.xlsx", "KHAN CASH.xlsx"], "Khan Cash Book"),
+        ("cashgbd", ["cashgbd.xlsx", "CASHGBD.xlsx", "cash gbd.xlsx", "CASH GBD.xlsx"], "Cash GBD Book"),
+    ]
 
-    if os.path.exists(hdfc_path):
-        print(f"\n[Step 3.1] Parsing and Ingesting HDFC Bank Book from {os.path.basename(hdfc_path)}...")
-        t0 = time.time()
-        with open(hdfc_path, "rb") as f:
-            f_bytes = f.read()
-        f_sha = hashlib.sha256(f_bytes).hexdigest()
-        parsed_h = parse_bank_workbook(hdfc_path, file_sha256=f_sha)
-        h_vchs = parsed_h.get("vouchers", [])
-        print(f"  -> Parsed {len(h_vchs)} HDFC bank vouchers in {time.time()-t0:.2f}s (Dr: ₹{parsed_h['totalDebitFormatted']}, Cr: ₹{parsed_h['totalCreditFormatted']}).")
-        h_res = db.save_vouchers_batch(h_vchs, file_sha=f_sha)
-        print(f"  -> Ingested HDFC vouchers: {h_res['insertedCount']} inserted, {h_res['skippedCount']} skipped.")
-        for b_vch in h_vchs:
-            key = (
-                b_vch.get("voucherDate"),
-                clean_party_name(b_vch.get("partyName", "")).lower().strip(),
-                b_vch.get("debitPaise", 0),
-                b_vch.get("creditPaise", 0)
-            )
-            bank_lookup[key] += 1
+    for key, fnames, label in liquid_definitions:
+        found_path = None
+        for candidate_name in fnames:
+            p1 = os.path.join(base_dir, candidate_name)
+            p2 = os.path.join(data_dir, candidate_name)
+            p3 = os.path.join(data_dir, "imports", candidate_name)
+            if os.path.exists(p1):
+                found_path = p1
+                break
+            elif os.path.exists(p2):
+                found_path = p2
+                break
+            elif os.path.exists(p3):
+                found_path = p3
+                break
 
-    # 3.2 Yes Bank Book
-    yes_path = os.path.join(base_dir, "yesbank.xlsx")
-    if not os.path.exists(yes_path):
-        yes_path = os.path.join(base_dir, "YESBANK.xlsx")
-    if not os.path.exists(yes_path):
-        yes_path = os.path.join(data_dir, "imports", "yesbank.xlsx")
+        if found_path:
+            print(f"\n[Step 3.{key}] Parsing and Ingesting {label} from {os.path.basename(found_path)}...")
+            t0 = time.time()
+            with open(found_path, "rb") as f:
+                f_bytes = f.read()
+            f_sha = hashlib.sha256(f_bytes).hexdigest()
+            parsed_l = parse_bank_workbook(found_path, file_sha256=f_sha)
+            l_vchs = parsed_l.get("vouchers", [])
+            print(f"  -> Parsed {len(l_vchs)} {label} vouchers in {time.time()-t0:.2f}s (Dr: ₹{parsed_l['totalDebitFormatted']}, Cr: ₹{parsed_l['totalCreditFormatted']}).")
+            l_res = db.save_vouchers_batch(l_vchs, file_sha=f_sha)
+            print(f"  -> Ingested {label} vouchers: {l_res['insertedCount']} inserted, {l_res['skippedCount']} skipped.")
+            total_liquid_vchs += len(l_vchs)
+            for b_vch in l_vchs:
+                k = (
+                    b_vch.get("voucherDate"),
+                    clean_party_name(b_vch.get("partyName", "")).lower().strip(),
+                    b_vch.get("debitPaise", 0),
+                    b_vch.get("creditPaise", 0)
+                )
+                liquid_lookup[k] += 1
+        else:
+            print(f"  -> Notice: {label} ({fnames[0]}) not found.")
 
-    if os.path.exists(yes_path):
-        print(f"\n[Step 3.2] Parsing and Ingesting Yes Bank Book from {os.path.basename(yes_path)}...")
-        t0 = time.time()
-        with open(yes_path, "rb") as f:
-            f_bytes = f.read()
-        f_sha = hashlib.sha256(f_bytes).hexdigest()
-        parsed_y = parse_bank_workbook(yes_path, file_sha256=f_sha)
-        y_vchs = parsed_y.get("vouchers", [])
-        print(f"  -> Parsed {len(y_vchs)} Yes Bank vouchers in {time.time()-t0:.2f}s (Dr: ₹{parsed_y['totalDebitFormatted']}, Cr: ₹{parsed_y['totalCreditFormatted']}).")
-        y_res = db.save_vouchers_batch(y_vchs, file_sha=f_sha)
-        print(f"  -> Ingested Yes Bank vouchers: {y_res['insertedCount']} inserted, {y_res['skippedCount']} skipped.")
-        for b_vch in y_vchs:
-            key = (
-                b_vch.get("voucherDate"),
-                clean_party_name(b_vch.get("partyName", "")).lower().strip(),
-                b_vch.get("debitPaise", 0),
-                b_vch.get("creditPaise", 0)
-            )
-            bank_lookup[key] += 1
+    print(f"\n  -> Total authoritative Liquid vouchers in deduplication pool: {total_liquid_vchs} across {len(liquid_lookup)} unique keys")
 
-    print(f"  -> Total authoritative Bank vouchers in deduplication pool: {sum(bank_lookup.values())}")
-
-    # 4. Apply Day Book (DAYBOOK.xlsx - Master Voucher Register) with Smart Deduplication
+    # 4. Apply Day Book (DAYBOOK.xlsx - Master Voucher Register) with Universal Liquid Deduplication
     daybook_path = os.path.join(base_dir, "DAYBOOK.xlsx")
     if not os.path.exists(daybook_path):
         daybook_path = os.path.join(base_dir, "daybook.xlsx")
@@ -123,7 +115,7 @@ def main():
         daybook_path = os.path.join(data_dir, "imports", "daybook.xlsx")
 
     if os.path.exists(daybook_path):
-        print(f"\n[Step 4] Parsing Day Book from {os.path.basename(daybook_path)} with Smart Deduplication...")
+        print(f"\n[Step 4] Parsing Day Book from {os.path.basename(daybook_path)} with Universal Liquid Deduplication...")
         t0 = time.time()
         with open(daybook_path, "rb") as f:
             f_bytes = f.read()
@@ -132,10 +124,10 @@ def main():
         all_db_vchs = parsed_db.get("vouchers", [])
         
         clean_vouchers = []
-        skipped_bank_duplicates = 0
+        skipped_liquid_duplicates = 0
         skipped_stock = 0
         skipped_journals = 0
-        retained_cash_pmt_rcpt = 0
+        retained_pmt_rcpt_contra = 0
 
         for v in all_db_vchs:
             vt = (v.get("voucherType") or "").lower()
@@ -145,27 +137,27 @@ def main():
             if has_journal and vt == "journal":
                 skipped_journals += 1
                 continue
-            if vt in ("payment", "receipt"):
+            if vt in ("payment", "receipt", "contra"):
                 key = (
                     v.get("voucherDate"),
                     clean_party_name(v.get("partyName", "")).lower().strip(),
                     v.get("debitPaise", 0),
                     v.get("creditPaise", 0)
                 )
-                if bank_lookup[key] > 0:
-                    bank_lookup[key] -= 1
-                    skipped_bank_duplicates += 1
+                if liquid_lookup[key] > 0:
+                    liquid_lookup[key] -= 1
+                    skipped_liquid_duplicates += 1
                     continue
                 else:
-                    retained_cash_pmt_rcpt += 1
+                    retained_pmt_rcpt_contra += 1
             clean_vouchers.append(v)
 
         print(f"  -> Daybook Processing Statistics:")
         print(f"     Total Raw Daybook: {len(all_db_vchs)}")
         print(f"     Skipped Stock Vouchers: {skipped_stock}")
         print(f"     Skipped Single-Leg Journals: {skipped_journals}")
-        print(f"     Skipped Bank Duplicates (present in HDFC/Yes Bank): {skipped_bank_duplicates}")
-        print(f"     Retained Non-Bank/Cash Payments & Receipts (Khan Cash, etc.): {retained_cash_pmt_rcpt}")
+        print(f"     Skipped Liquid Duplicates (present in Bank/Cash Books): {skipped_liquid_duplicates}")
+        print(f"     Retained Non-Liquid / Standalone Payments & Receipts: {retained_pmt_rcpt_contra}")
         print(f"     Final Daybook Vouchers to Ingest: {len(clean_vouchers)}")
         
         t1 = time.time()

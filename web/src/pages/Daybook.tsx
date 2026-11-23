@@ -57,7 +57,7 @@ type LedgerTab =
   | 'debit note';
 
 interface MultiUploadSlot {
-  key: 'daybook' | 'roundoff' | 'discount' | 'journal' | 'trialbalance' | 'hdfc' | 'yesbank';
+  key: 'daybook' | 'roundoff' | 'discount' | 'journal' | 'trialbalance' | 'hdfc' | 'yesbank' | 'cash' | 'khancash' | 'cashgbd';
   title: string;
   description: string;
   hint: string;
@@ -81,14 +81,14 @@ export default function Daybook() {
   const [roundoffMeta, setRoundoffMeta] = useState<RoundoffLedgerResponse | null>(null);
   const [discountMeta, setDiscountMeta] = useState<DiscountLedgerResponse | null>(null);
 
-  // 5-Excel Unified Upload Hub Modal State (Daybook, Journal, Roundoff, Discount, Trialbalance)
+  // 8-Excel Unified Upload Hub Modal State
   const [uploadOpen, setUploadOpen] = useState(false);
   const [slots, setSlots] = useState<Record<string, MultiUploadSlot>>({
     daybook: {
       key: 'daybook',
       title: 'Day Book (Commercial)',
       description: 'Master commercial registers (Sales, Purchases, Contra, Credit/Debit Notes)',
-      hint: 'Payment & Receipt auto-disabled to prevent duplication with dedicated Bank Books',
+      hint: 'Liquid payments, receipts & contra auto-deduplicated against dedicated Bank & Cash Books',
       expectedName: 'DAYBOOK.xlsx',
     },
     hdfc: {
@@ -104,6 +104,27 @@ export default function Daybook() {
       description: 'Authoritative Yes Bank entries (Receipts & Payments with compound splits)',
       hint: 'Reconciles all Yes Bank receipts and payments with split legs',
       expectedName: 'yesbank.xlsx',
+    },
+    cash: {
+      key: 'cash',
+      title: 'Cash Book',
+      description: 'Authoritative Main Cash in Hand entries (Receipts & Payments)',
+      hint: 'Reconciles physical Cash in Hand receipts and payments',
+      expectedName: 'cash.xlsx',
+    },
+    khancash: {
+      key: 'khancash',
+      title: 'Khan Cash Book',
+      description: 'Authoritative Khan Cash account entries with split details',
+      hint: 'Reconciles Khan Cash collection receipts and payments',
+      expectedName: 'khancash.xlsx',
+    },
+    cashgbd: {
+      key: 'cashgbd',
+      title: 'Cash GBD Book',
+      description: 'Authoritative Gobindgarh Cash entries with split details',
+      hint: 'Reconciles Cash Gbd receipts and payments',
+      expectedName: 'cashgbd.xlsx',
     },
     journal: {
       key: 'journal',
