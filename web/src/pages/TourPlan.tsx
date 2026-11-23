@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { Card, PageHeader } from '../components/ui/Card';
 import LeafletTourMap from '../components/map/LeafletTourMap';
+import { getCoordinates } from '../lib/geoCoordinates';
 import {
   listTourPlans,
   createTourPlan,
@@ -192,6 +193,7 @@ export default function TourPlan() {
       toast.error('Dealer shop already in this tour beat');
       return;
     }
+    const coords = getCoordinates(cust.city, cust.district);
     setNewStops([
       ...newStops,
       {
@@ -199,6 +201,8 @@ export default function TourPlan() {
         customerName: cust.name,
         city: cust.city,
         district: cust.district,
+        gpsLat: coords[0],
+        gpsLng: coords[1],
         sequence: nextSeq,
         purpose: 'Payment collection & order booking',
         status: 'planned',
@@ -324,7 +328,12 @@ export default function TourPlan() {
           <LeafletTourMap
             visits={activePlan?.visits || []}
             selectedVisitId={selectedVisitId}
+            allCustomers={customers}
             onSelectVisit={(v) => setSelectedVisitId(v.id)}
+            onAddShopToBeat={(cust) => {
+              handleAddStopToNewPlan(cust);
+              setIsNewPlanOpen(true);
+            }}
             onUpdateStatus={(visitId, status) => {
               if (activePlan) handleToggleVisitStatus(activePlan.id, visitId, status);
             }}

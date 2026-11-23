@@ -7,6 +7,12 @@ import re
 from typing import Tuple, Optional
 
 # Non-debtor keywords and patterns
+PNL_PATTERNS = [
+    r"\bprofit\s*(?:&|and)?\s*loss\b",
+    r"\bp\s*&\s*l\b",
+    r"\bpnl\b",
+]
+
 EXPENSE_PATTERNS = [
     r"\bexp(?:enses?|s)?\b",
     r"\bselery\b|\bsalary\b",
@@ -28,6 +34,8 @@ CASH_PATTERNS = [
     r"^cash\s+[a-z]+$",
     r"^[a-z]+\s+cash$",
     r"^petty\s+cash$",
+    r"khan\s*cash",
+    r"cash\s*gbd",
 ]
 
 BANK_LOAN_PATTERNS = [
@@ -47,15 +55,19 @@ ASSET_INVESTMENT_PATTERNS = [
 
 CAPITAL_PERSONAL_PATTERNS = [
     r"\bhuf\b",
-    r"\bcapital\s*acc\b|\bcapital\s*account\b",
+    r"\bcapital\s*acc\b|\bcapital\s*account\b|\bcapital\b",
     r"\bdrawings?\b",
     r"^dharam\s*pal\s+[a-z]+\s*\(cash\)$",
+    r"\bjindal\s*(?:acc|cash|i|personal|\d+)\b",
+    r"\bdes\s*raj\b",
+    r"\bpardeep\s*naman\b",
+    r"\bvijay\s*goel\b",
 ]
 
 TAX_PATTERNS = [
     r"\badvance\s*income\s*tax\b",
-    r"^gst\b|^\bgst\s*payable\b|^\bigst\b|^\bcgst\b|^\bsgst\b",
-    r"\btds\b|\btcs\b",
+    r"^gst\b|^\bgst\s*payable\b|^\bigst\b|^\bcgst\b|^\bsgst\b|\bbill\s*gst\b|\bgst\b",
+    r"\btds\b|\btcs\b|\btax\b",
 ]
 
 PURCHASE_SUPPLIER_PATTERNS = [
@@ -64,6 +76,7 @@ PURCHASE_SUPPLIER_PATTERNS = [
     r"^import\s+bill\b",
 ]
 
+RE_PNL = re.compile("|".join(PNL_PATTERNS), re.IGNORECASE)
 RE_EXPENSE = re.compile("|".join(EXPENSE_PATTERNS), re.IGNORECASE)
 RE_CASH = re.compile("|".join(CASH_PATTERNS), re.IGNORECASE)
 RE_BANK_LOAN = re.compile("|".join(BANK_LOAN_PATTERNS), re.IGNORECASE)
@@ -99,6 +112,9 @@ def classify_party_name(name: str) -> str:
     if not norm or norm_lower in ("total", "grand total", "(as per details)"):
         return "expense"
 
+    if RE_PNL.search(norm_lower):
+        return "pnl"
+
     if "round" in norm_lower and "off" in norm_lower:
         return "roundoff"
     if norm_lower == "discount":
@@ -124,7 +140,8 @@ def classify_party_name(name: str) -> str:
         return "asset"
 
     if RE_CAPITAL.search(norm_lower):
-        return "capital"
+        if not DEALER_KEYWORDS.search(norm_lower):
+            return "capital"
 
     if RE_TAX.search(norm_lower):
         if not DEALER_KEYWORDS.search(norm_lower):

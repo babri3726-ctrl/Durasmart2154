@@ -82,6 +82,37 @@ export default function Payment() {
   const [bankFilter, setBankFilter] = useState<'all' | 'day' | 'hdfc' | 'yes' | 'cash' | 'khan' | 'gbd'>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'receipt' | 'payment'>('all');
   const [bankSearch, setBankSearch] = useState('');
+  const [intervalType, setIntervalType] = useState<'all' | 'monthly' | 'quarterly' | 'custom'>('all');
+  const [fromDate, setFromDate] = useState<string>('');
+  const [toDate, setToDate] = useState<string>('');
+
+  const setMonthPeriod = () => {
+    const now = new Date();
+    const start = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const end = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+    setIntervalType('monthly');
+    setFromDate(start);
+    setToDate(end);
+  };
+
+  const setQuarterPeriod = () => {
+    const now = new Date();
+    const qMonth = Math.floor(now.getMonth() / 3) * 3;
+    const start = `${now.getFullYear()}-${String(qMonth + 1).padStart(2, '0')}-01`;
+    const endQMonth = qMonth + 3;
+    const lastDay = new Date(now.getFullYear(), endQMonth, 0).getDate();
+    const end = `${now.getFullYear()}-${String(endQMonth).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+    setIntervalType('quarterly');
+    setFromDate(start);
+    setToDate(end);
+  };
+
+  const setAllTimePeriod = () => {
+    setIntervalType('all');
+    setFromDate('');
+    setToDate('');
+  };
 
   // Bank file upload & preview state
   const [bankPhase, setBankPhase] = useState<
@@ -120,6 +151,9 @@ export default function Payment() {
       voucherType: typeFilter === 'all' ? undefined : typeFilter,
       q: bankSearch.trim() || undefined,
       limit: 300,
+      from: fromDate || undefined,
+      to: toDate || undefined,
+      interval: intervalType,
     })
       .then((res) => {
         setBankVouchers(res.items);
@@ -130,7 +164,7 @@ export default function Payment() {
         toast.error(`Failed to load bank statement: ${err.message || 'Network error'}`);
         setLoadingBank(false);
       });
-  }, [bankFilter, typeFilter, bankSearch]);
+  }, [bankFilter, typeFilter, bankSearch, fromDate, toDate, intervalType]);
 
   useEffect(() => {
     if (activeTab === 'bank') {
@@ -427,30 +461,118 @@ export default function Payment() {
       {/* ── TAB 1: BANK & CASH STATEMENT LEDGER ────────────────────────────────────── */}
       {activeTab === 'bank' && (
         <div className="space-y-4">
-          {/* Summary KPI Cards */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div className="rounded-xl border border-line bg-surface p-4 shadow-sm">
+          {/* Period Filter & Balance Controller */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-surface p-3 shadow-sm">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs font-bold text-muted mr-1">Period:</span>
+              <button
+                type="button"
+                onClick={setAllTimePeriod}
+                className={`rounded-lg px-3 py-1 text-xs font-bold transition ${
+                  intervalType === 'all'
+                    ? 'bg-ink text-white shadow-sm'
+                    : 'bg-canvas text-muted hover:bg-line/40 hover:text-ink'
+                }`}
+              >
+                All Time
+              </button>
+              <button
+                type="button"
+                onClick={setMonthPeriod}
+                className={`rounded-lg px-3 py-1 text-xs font-bold transition ${
+                  intervalType === 'monthly'
+                    ? 'bg-brand-blue text-white shadow-sm'
+                    : 'bg-canvas text-muted hover:bg-line/40 hover:text-ink'
+                }`}
+              >
+                This Month
+              </button>
+              <button
+                type="button"
+                onClick={setQuarterPeriod}
+                className={`rounded-lg px-3 py-1 text-xs font-bold transition ${
+                  intervalType === 'quarterly'
+                    ? 'bg-purple-600 text-white shadow-sm'
+                    : 'bg-canvas text-muted hover:bg-line/40 hover:text-ink'
+                }`}
+              >
+                This Quarter
+              </button>
+              <button
+                type="button"
+                onClick={() => setIntervalType('custom')}
+                className={`rounded-lg px-3 py-1 text-xs font-bold transition ${
+                  intervalType === 'custom'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'bg-canvas text-muted hover:bg-line/40 hover:text-ink'
+                }`}
+              >
+                Custom Range
+              </button>
+            </div>
+
+            {intervalType === 'custom' && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="rounded-lg border border-line bg-canvas px-2.5 py-1 text-xs font-medium text-ink"
+                />
+                <span className="text-xs text-muted">to</span>
+                <input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="rounded-lg border border-line bg-canvas px-2.5 py-1 text-xs font-medium text-ink"
+                />
+              </div>
+            )}
+
+            <div className="text-xs font-semibold text-muted">
+              Active: <span className="font-bold text-ink">{bankSummary.ledgerTitle || 'All Accounts'}</span>
+              {bankSummary.periodStart && bankSummary.periodStart !== 'All Time' && (
+                <span className="ml-1 text-[11px] text-faint">
+                  ({bankSummary.periodStart} to {bankSummary.periodEnd})
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Dedicated 5-Card Financial Ledger Summary Grid */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+            <div className="rounded-xl border border-line bg-surface p-3.5 shadow-sm">
+              <span className="text-[11px] font-extrabold uppercase tracking-wide text-muted">Opening Balance</span>
+              <p className="mt-1 font-mono text-base font-black text-ink">
+                {bankSummary.openingBalancePaise !== undefined ? rupees(bankSummary.openingBalancePaise) : '—'}
+              </p>
+              <span className="text-[10px] text-faint">Baseline start of period</span>
+            </div>
+
+            <div className="rounded-xl border border-line bg-surface p-3.5 shadow-sm">
               <span className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-muted">
-                <ArrowDownLeft size={14} className="text-emerald-600" /> Total Bank Receipts (Cr)
+                <ArrowDownLeft size={14} className="text-emerald-600" /> Total Receipts (Cr)
               </span>
-              <p className="mt-1 font-mono text-lg font-black text-emerald-600">
+              <p className="mt-1 font-mono text-base font-black text-emerald-600">
                 {rupees(bankSummary.totalReceiptsPaise)}
               </p>
-              <span className="text-[10px] text-faint">Bank deposits (all books &amp; transfers)</span>
+              <span className="text-[10px] text-faint">Deposits / collections in window</span>
             </div>
-            <div className="rounded-xl border border-line bg-surface p-4 shadow-sm">
+
+            <div className="rounded-xl border border-line bg-surface p-3.5 shadow-sm">
               <span className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-muted">
                 <ArrowUpRight size={14} className="text-rose-600" /> Total Payments (Dr)
               </span>
-              <p className="mt-1 font-mono text-lg font-black text-rose-600">
+              <p className="mt-1 font-mono text-base font-black text-rose-600">
                 {rupees(bankSummary.totalPaymentsPaise)}
               </p>
-              <span className="text-[10px] text-faint">Withdrawals, payouts &amp; expenses</span>
+              <span className="text-[10px] text-faint">Withdrawals &amp; payouts</span>
             </div>
-            <div className="rounded-xl border border-line bg-surface p-4 shadow-sm">
-              <span className="text-[11px] font-extrabold uppercase tracking-wide text-muted">Net Cash &amp; Bank Flow</span>
+
+            <div className="rounded-xl border border-line bg-surface p-3.5 shadow-sm">
+              <span className="text-[11px] font-extrabold uppercase tracking-wide text-muted">Net Movement</span>
               <p
-                className={`mt-1 font-mono text-lg font-black ${
+                className={`mt-1 font-mono text-base font-black ${
                   bankSummary.netPaise >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-600'
                 }`}
               >
@@ -459,10 +581,15 @@ export default function Payment() {
               </p>
               <span className="text-[10px] text-faint">Receipts minus payments</span>
             </div>
-            <div className="rounded-xl border border-line bg-surface p-4 shadow-sm">
-              <span className="text-[11px] font-extrabold uppercase tracking-wide text-muted">Total Vouchers</span>
-              <p className="mt-1 font-mono text-lg font-black text-ink">{bankSummary.totalVouchers}</p>
-              <span className="text-[10px] text-faint">Chronological statement entries</span>
+
+            <div className="rounded-xl border-2 border-emerald-500/40 bg-emerald-50/20 p-3.5 shadow-sm">
+              <span className="text-[11px] font-black uppercase tracking-wide text-emerald-800 dark:text-emerald-400">
+                Closing Balance
+              </span>
+              <p className="mt-1 font-mono text-lg font-black text-emerald-800 dark:text-emerald-300">
+                {bankSummary.closingBalancePaise !== undefined ? rupees(bankSummary.closingBalancePaise) : '—'}
+              </p>
+              <span className="text-[10px] font-medium text-emerald-700/80">Live calculated position</span>
             </div>
           </div>
 

@@ -698,6 +698,10 @@ class DebtorItem {
     this.balance = 0.0,
     this.openingBalance = 0.0,
     this.status = 'active',
+    this.tallyStatus = 'unbenchmarked',
+    this.tallyClosing,
+    this.tallyDiff,
+    this.hasAuthoritativeLedger = false,
   });
 
   final String id;
@@ -709,8 +713,23 @@ class DebtorItem {
   double balance;
   double openingBalance;
   String status;
+  String tallyStatus;
+  double? tallyClosing;
+  double? tallyDiff;
+  bool hasAuthoritativeLedger;
+
+  bool get isVerified => tallyStatus == 'verified';
+  bool get isMismatch => tallyStatus == 'mismatch';
+  bool get isUnbenchmarked => tallyStatus == 'unbenchmarked';
 
   String get balanceFormatted => '₹${balance.toStringAsFixed(2)}';
+  String get tallyClosingFormatted =>
+      tallyClosing != null ? '₹${tallyClosing!.toStringAsFixed(2)}' : '';
+  String get tallyDiffFormatted {
+    if (tallyDiff == null) return '';
+    final sign = tallyDiff! > 0 ? '+' : '';
+    return '$sign₹${tallyDiff!.toStringAsFixed(2)}';
+  }
 
   factory DebtorItem.fromJson(Map<String, dynamic> json) {
     double parsedBal = parseDoubleSafe(json['balance']);
@@ -729,6 +748,19 @@ class DebtorItem {
       parsedOpenBal = parseDoubleSafe(json['openingPaise']) / 100.0;
     }
 
+    final tallyStatus = json['tallyStatus']?.toString() ?? 'unbenchmarked';
+    final tallyClosing = json['tallyClosing'] != null
+        ? parseDoubleSafe(json['tallyClosing'])
+        : (json['tallyClosingPaise'] != null
+            ? parseDoubleSafe(json['tallyClosingPaise']) / 100.0
+            : null);
+    final tallyDiff = json['tallyDiff'] != null
+        ? parseDoubleSafe(json['tallyDiff'])
+        : (json['tallyDiffPaise'] != null
+            ? parseDoubleSafe(json['tallyDiffPaise']) / 100.0
+            : null);
+    final hasAuthLedger = json['hasAuthoritativeLedger'] == true;
+
     return DebtorItem(
       id: json['id']?.toString() ?? json['customerId']?.toString() ?? '',
       name: json['name']?.toString() ?? json['customerName']?.toString() ?? '',
@@ -739,6 +771,10 @@ class DebtorItem {
       balance: parsedBal,
       openingBalance: parsedOpenBal,
       status: json['status']?.toString() ?? 'active',
+      tallyStatus: tallyStatus,
+      tallyClosing: tallyClosing,
+      tallyDiff: tallyDiff,
+      hasAuthoritativeLedger: hasAuthLedger,
     );
   }
 
@@ -752,6 +788,10 @@ class DebtorItem {
     'balance': balance,
     'openingBalance': openingBalance,
     'status': status,
+    'tallyStatus': tallyStatus,
+    'tallyClosing': tallyClosing,
+    'tallyDiff': tallyDiff,
+    'hasAuthoritativeLedger': hasAuthoritativeLedger,
   };
 }
 

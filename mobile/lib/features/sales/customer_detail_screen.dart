@@ -36,6 +36,7 @@ class CustomerDetailScreen extends StatelessWidget {
     final overdueDays = repo.overdueDaysFor(customerId);
     final orders = repo.ordersFor(customerId);
     final payments = repo.paymentsFor(customerId);
+    final debtor = repo.debtors.where((d) => d.id == customerId || d.name.toLowerCase().trim() == customer.name.toLowerCase().trim()).firstOrNull;
 
     final now = DateTime.now();
     final monthOrders = orders
@@ -108,6 +109,16 @@ class CustomerDetailScreen extends StatelessWidget {
                       label: repo.salespersonName(customer.salespersonId),
                       color: Colors.white38,
                     ),
+                    if (debtor != null && debtor.isVerified)
+                      StatusChip(
+                        label: debtor.hasAuthoritativeLedger ? '✓ Verified (Party Ledger)' : '✓ Verified with Tally',
+                        color: Colors.greenAccent,
+                      ),
+                    if (debtor != null && debtor.isMismatch)
+                      StatusChip(
+                        label: '⚠ Tally Mismatch (${debtor.tallyDiffFormatted})',
+                        color: Colors.amberAccent,
+                      ),
                   ],
                 ),
               ],
@@ -117,6 +128,11 @@ class CustomerDetailScreen extends StatelessWidget {
           WhitePanel(
             child: Column(
               children: [
+                if (debtor != null && debtor.isMismatch && debtor.tallyClosing != null)
+                  InfoRow(
+                    label: 'Tally Benchmark',
+                    value: '₹${debtor.tallyClosing!.toStringAsFixed(2)} (Diff: ${debtor.tallyDiffFormatted})',
+                  ),
                 InfoRow(
                   label: 'Contact Person',
                   value: customer.contactPerson.isEmpty

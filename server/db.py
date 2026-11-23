@@ -1670,7 +1670,9 @@ def load_vouchers(
     voucher_type: str | None = None,
     q: str | None = None,
     limit: int = 200,
-    offset: int = 0
+    offset: int = 0,
+    from_date: str | None = None,
+    to_date: str | None = None,
 ) -> list[dict[str, Any]]:
     with get_connection() as conn:
         cur = conn.cursor()
@@ -1679,6 +1681,12 @@ def load_vouchers(
         if party_id:
             clauses.append("party_id = ?")
             params.append(party_id)
+        if from_date:
+            clauses.append("voucher_date >= ?")
+            params.append(from_date)
+        if to_date:
+            clauses.append("voucher_date <= ?")
+            params.append(to_date)
         if book_source:
             bs_lower = book_source.lower().strip()
             if bs_lower in ("all", "liquid"):
@@ -1717,110 +1725,104 @@ def load_vouchers(
         return [dict(r) for r in cur.fetchall()]
 
 
-def get_bank_summary(book_source: str | None = None) -> dict[str, Any]:
-    """Calculates total receipts, total payments, and net movement for bank and cash books."""
+def get_bank_summary(
+    book_source: str | None = None,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    interval: str | None = None,
+) -> dict[str, Any]:
+    """Calculates Opening Balance, Total Receipts, Total Payments, Net Flow, and Closing Balance for bank/cash books."""
     with get_connection() as conn:
         cur = conn.cursor()
         bs_lower = (book_source or "").lower().strip()
-        if bs_lower and bs_lower not in ("all", "liquid", ""):
-            if bs_lower == "bank":
-                cur.execute("""
-                    SELECT 
-                        COUNT(*) as total_vouchers,
-                        COALESCE(SUM(credit_paise), 0) as total_receipts_paise,
-                        COALESCE(SUM(debit_paise), 0) as total_payments_paise
-                    FROM vouchers 
-                    WHERE book_source IN ('HDFC Bank Book', 'Yes Bank Book')
-                """)
-            elif bs_lower == "cash":
-                cur.execute("""
-                    SELECT 
-                        COUNT(*) as total_vouchers,
-                        COALESCE(SUM(credit_paise), 0) as total_receipts_paise,
-                        COALESCE(SUM(debit_paise), 0) as total_payments_paise
-                    FROM vouchers 
-                    WHERE book_source IN ('Cash Book', 'Khan Cash Book', 'Cash GBD Book')
-                """)
-            elif "khan" in bs_lower:
-                cur.execute("""
-                    SELECT 
-                        COUNT(*) as total_vouchers,
-                        COALESCE(SUM(credit_paise), 0) as total_receipts_paise,
-                        COALESCE(SUM(debit_paise), 0) as total_payments_paise
-                    FROM vouchers 
-                    WHERE book_source = 'Khan Cash Book'
-                """)
-            elif "gbd" in bs_lower:
-                cur.execute("""
-                    SELECT 
-                        COUNT(*) as total_vouchers,
-                        COALESCE(SUM(credit_paise), 0) as total_receipts_paise,
-                        COALESCE(SUM(debit_paise), 0) as total_payments_paise
-                    FROM vouchers 
-                    WHERE book_source = 'Cash GBD Book'
-                """)
-            elif "cash" in bs_lower:
-                cur.execute("""
-                    SELECT 
-                        COUNT(*) as total_vouchers,
-                        COALESCE(SUM(credit_paise), 0) as total_receipts_paise,
-                        COALESCE(SUM(debit_paise), 0) as total_payments_paise
-                    FROM vouchers 
-                    WHERE book_source = 'Cash Book'
-                """)
-            elif "day" in bs_lower:
-                cur.execute("""
-                    SELECT 
-                        COUNT(*) as total_vouchers,
-                        COALESCE(SUM(credit_paise), 0) as total_receipts_paise,
-                        COALESCE(SUM(debit_paise), 0) as total_payments_paise
-                    FROM vouchers 
-                    WHERE book_source = 'Day Book'
-                """)
-            elif "hdfc" in bs_lower:
-                cur.execute("""
-                    SELECT 
-                        COUNT(*) as total_vouchers,
-                        COALESCE(SUM(credit_paise), 0) as total_receipts_paise,
-                        COALESCE(SUM(debit_paise), 0) as total_payments_paise
-                    FROM vouchers 
-                    WHERE book_source = 'HDFC Bank Book'
-                """)
-            elif "yes" in bs_lower:
-                cur.execute("""
-                    SELECT 
-                        COUNT(*) as total_vouchers,
-                        COALESCE(SUM(credit_paise), 0) as total_receipts_paise,
-                        COALESCE(SUM(debit_paise), 0) as total_payments_paise
-                    FROM vouchers 
-                    WHERE book_source = 'Yes Bank Book'
-                """)
-            else:
-                cur.execute("""
-                    SELECT 
-                        COUNT(*) as total_vouchers,
-                        COALESCE(SUM(credit_paise), 0) as total_receipts_paise,
-                        COALESCE(SUM(debit_paise), 0) as total_payments_paise
-                    FROM vouchers 
-                    WHERE book_source = ?
-                """, (book_source,))
+
+        if "hdfc" in bs_lower:
+            sources = ['HDFC Bank Book']
+            party_names = ['Hdfc Dura']
+            title = "HDFC Bank Book"
+        elif "yes" in bs_lower:
+            sources = ['Yes Bank Book']
+            party_names = ['Yes Bank']
+            title = "Yes Bank Book"
+        elif "khan" in bs_lower:
+            sources = ['Khan Cash Book']
+            party_names = ['KHAN CASH']
+            title = "Khan Cash Book"
+        elif "gbd" in bs_lower:
+            sources = ['Cash GBD Book']
+            party_names = ['Cash Gbd']
+            title = "Cash GBD Book"
+        elif "cash" in bs_lower:
+            sources = ['Cash Book']
+            party_names = ['Cash']
+            title = "Cash Book"
+        elif "day" in bs_lower:
+            sources = ['Day Book']
+            party_names = []
+            title = "Day Book Vouchers"
         else:
-            cur.execute("""
-                SELECT 
-                    COUNT(*) as total_vouchers,
-                    COALESCE(SUM(credit_paise), 0) as total_receipts_paise,
-                    COALESCE(SUM(debit_paise), 0) as total_payments_paise
-                FROM vouchers 
-                WHERE book_source IN ('HDFC Bank Book', 'Yes Bank Book', 'Cash Book', 'Khan Cash Book', 'Cash GBD Book', 'Day Book')
-            """)
+            sources = ['HDFC Bank Book', 'Yes Bank Book', 'Cash Book', 'Khan Cash Book', 'Cash GBD Book', 'Day Book']
+            party_names = ['Hdfc Dura', 'Yes Bank', 'Cash', 'KHAN CASH', 'Cash Gbd']
+            title = "All Accounts (Bank, Cash & Day Book)"
+
+        src_placeholders = ",".join("?" for _ in sources)
+
+        # Base opening balance from opening_balances or parties
+        init_open = 0
+        if party_names:
+            p_placeholders = ",".join("?" for _ in party_names)
+            cur.execute(f"""
+                SELECT COALESCE(SUM(
+                    CASE WHEN direction = 'credit' THEN -amount_paise ELSE amount_paise END
+                ), 0)
+                FROM opening_balances
+                WHERE customer_id IN (SELECT id FROM parties WHERE name IN ({p_placeholders}))
+            """, party_names)
+            ob_row = cur.fetchone()
+            init_open = ob_row[0] if ob_row else 0
+
+        # Prior net vouchers before from_date
+        prior_net = 0
+        if from_date:
+            cur.execute(f"""
+                SELECT COALESCE(SUM(credit_paise - debit_paise), 0)
+                FROM vouchers
+                WHERE book_source IN ({src_placeholders})
+                  AND voucher_date < ?
+            """, sources + [from_date])
+            pn_row = cur.fetchone()
+            prior_net = pn_row[0] if pn_row else 0
+
+        opening_paise = init_open + prior_net
+
+        # Period transactions
+        cur.execute(f"""
+            SELECT 
+                COUNT(*) as total_vouchers,
+                COALESCE(SUM(credit_paise), 0) as total_receipts_paise,
+                COALESCE(SUM(debit_paise), 0) as total_payments_paise
+            FROM vouchers
+            WHERE book_source IN ({src_placeholders})
+              AND (? IS NULL OR voucher_date >= ?)
+              AND (? IS NULL OR voucher_date <= ?)
+        """, sources + [from_date, from_date, to_date, to_date])
         row = cur.fetchone()
         receipts = row["total_receipts_paise"] if row else 0
         payments = row["total_payments_paise"] if row else 0
+        net = receipts - payments
+        closing_paise = opening_paise + net
+
         return {
+            "ledgerKey": bs_lower or "all",
+            "ledgerTitle": title,
             "totalVouchers": row["total_vouchers"] if row else 0,
+            "openingBalancePaise": opening_paise,
             "totalReceiptsPaise": receipts,
             "totalPaymentsPaise": payments,
-            "netPaise": receipts - payments
+            "netPaise": net,
+            "closingBalancePaise": closing_paise,
+            "periodStart": from_date or "All Time",
+            "periodEnd": to_date or "All Time",
         }
 
 def update_voucher(voucher_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:

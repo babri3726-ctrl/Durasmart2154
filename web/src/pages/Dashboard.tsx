@@ -114,23 +114,23 @@ function CockpitSummary({ from, to }: { from: string; to: string }) {
             <KpiCard
               label="Orders Booked"
               value={String(data.summary.orderCount)}
-              hint={`${rupees(data.summary.ordersValuePaise)} in period`}
+              hint={`${rupees(data.summary.ordersValuePaise)} in window`}
               gradient="from-blue-600 to-indigo-600"
               icon={<ClipboardList size={20} />}
               to="/orders"
             />
             <KpiCard
-              label="Collections"
+              label="Collections (Inflow)"
               value={rupees(data.summary.collectedPaise)}
-              hint="Verified receipts in window"
+              hint={`Receipts in window (${data.summary.periodStart.slice(5)} to ${data.summary.periodEnd.slice(5)})`}
               gradient="from-emerald-600 to-teal-600"
               icon={<IndianRupee size={20} />}
               to="/payment"
             />
             <KpiCard
-              label="Receivables"
+              label="Receivables (Market Debt)"
               value={rupees(data.summary.outstandingPaise)}
-              hint="Across 137 verified dealers"
+              hint={`Owed by ${data.summary.activeDealers || data.summary.dealersCount || 588} active trade dealers`}
               gradient="from-amber-600 to-orange-600"
               icon={<AlertTriangle size={20} />}
               to="/debtors"
@@ -138,7 +138,7 @@ function CockpitSummary({ from, to }: { from: string; to: string }) {
             <KpiCard
               label="Overdue Balance"
               value={rupees(data.summary.overduePaise)}
-              hint="Past agreed credit terms"
+              hint="Debtors past agreed credit terms"
               gradient="from-red-600 to-rose-600"
               icon={<ShieldAlert size={20} />}
               to="/debtors"

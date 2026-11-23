@@ -138,6 +138,7 @@ export interface ServerCustomer {
   openingPaise: number;
   outstandingPaise: number;
   advancePaise: number;
+  balance?: number;
   unbilledValuePaise: number;
   overduePaise: number;
   isOverdue: boolean;
@@ -626,9 +627,12 @@ export interface ServerDashboardSummary {
   ordersValuePaise: number;
   collectedPaise: number;
   outstandingPaise: number;
+  advancesPaise?: number;
   overduePaise: number;
   pendingApprovalCustomers: number;
   delayedOrderCount: number;
+  dealersCount?: number;
+  activeDealers?: number;
   dispatched: ServerDashboardUnit[];
 }
 
@@ -656,7 +660,24 @@ export interface ServerPerformance {
   productCategory: string | null;
   targetSource: 'targets' | 'legacy' | 'none';
   excludedTargetRows: number;
+  dealersCount?: number;
+  receivablesPaise?: number;
+  overduePaise?: number;
+  collectedPaise?: number;
+  collectionEfficiency?: number;
+  dsoDays?: number;
   units: ServerUnitProgress[];
+}
+
+export interface BusinessVelocityMetrics {
+  salesGrowthMoM: number;
+  dispatchesGrowthMoM: number;
+  turnaroundCycleDays: number;
+  collectionEfficiency: number;
+  totalReceivablesPaise: number;
+  totalCollectedPaise: number;
+  totalTargetMT: number;
+  totalAchievedMT: number;
 }
 
 export interface ServerSalespersonPerformance {
@@ -664,6 +685,7 @@ export interface ServerSalespersonPerformance {
   periodEnd: string;
   productCategory: string | null;
   rows: ServerPerformance[];
+  velocity?: BusinessVelocityMetrics;
 }
 
 function windowQuery(params: ReportingWindowParams): string {
@@ -2464,10 +2486,16 @@ export async function applyPaymentWorkbook(
 }
 
 export interface BankSummary {
+  ledgerKey?: string;
+  ledgerTitle?: string;
   totalVouchers: number;
+  openingBalancePaise?: number;
   totalReceiptsPaise: number;
   totalPaymentsPaise: number;
   netPaise: number;
+  closingBalancePaise?: number;
+  periodStart?: string;
+  periodEnd?: string;
 }
 
 export interface BankTransactionsResponse {
@@ -2481,6 +2509,9 @@ export async function listBankTransactions(params: {
   q?: string;
   limit?: number;
   offset?: number;
+  from?: string;
+  to?: string;
+  interval?: string;
 } = {}): Promise<BankTransactionsResponse> {
   const query = new URLSearchParams();
   if (params.bank) query.set('bank', params.bank);
@@ -2488,6 +2519,9 @@ export async function listBankTransactions(params: {
   if (params.q) query.set('q', params.q);
   if (params.limit) query.set('limit', String(params.limit));
   if (params.offset) query.set('offset', String(params.offset));
+  if (params.from) query.set('from', params.from);
+  if (params.to) query.set('to', params.to);
+  if (params.interval) query.set('interval', params.interval);
   return send<BankTransactionsResponse>(`/bank-transactions?${query.toString()}`);
 }
 

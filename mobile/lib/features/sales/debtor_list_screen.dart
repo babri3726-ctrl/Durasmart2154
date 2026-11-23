@@ -18,6 +18,65 @@ class DebtorListScreen extends StatefulWidget {
 class _DebtorListScreenState extends State<DebtorListScreen> {
   String _query = '';
   String _selectedTerritory = 'All';
+  String _selectedStatus = 'All'; // 'All', 'Verified', 'Mismatches'
+
+  Widget _statusFilterChip(String key, String label, {bool isSuccess = false, bool isWarning = false}) {
+    final isSelected = _selectedStatus == key;
+    Color bg;
+    Color border;
+    Color text;
+
+    if (isSelected) {
+      if (isSuccess) {
+        bg = const Color(0xFF16A34A);
+        border = const Color(0xFF15803D);
+        text = Colors.white;
+      } else if (isWarning) {
+        bg = const Color(0xFFD97706);
+        border = const Color(0xFFB45309);
+        text = Colors.white;
+      } else {
+        bg = const Color(0xFF0F172A);
+        border = const Color(0xFF0F172A);
+        text = Colors.white;
+      }
+    } else {
+      if (isSuccess) {
+        bg = const Color(0xFFF0FDF4);
+        border = const Color(0xFFBBF7D0);
+        text = const Color(0xFF15803D);
+      } else if (isWarning) {
+        bg = const Color(0xFFFEF3C7);
+        border = const Color(0xFFFDE68A);
+        text = const Color(0xFFB45309);
+      } else {
+        bg = Colors.white;
+        border = const Color(0xFFE2E8F0);
+        text = const Color(0xFF64748B);
+      }
+    }
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: () => setState(() => _selectedStatus = key),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: border),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+            color: text,
+          ),
+        ),
+      ),
+    );
+  }
 
   void _showAddDebtorDialog(BuildContext context) {
     final repo = context.read<MockRepository>();
@@ -291,21 +350,38 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
   @override
   Widget build(BuildContext context) {
     final repo = context.watch<MockRepository>();
+    final int verifiedTotal = repo.debtors.where((d) => d.isVerified).length;
+    final int mismatchTotal = repo.debtors.where((d) => d.isMismatch).length;
+    final int punjabCount = repo.debtors.where((d) => d.state.toLowerCase() == 'punjab').length;
+    final int haryanaCount = repo.debtors.where((d) => d.state.toLowerCase() == 'haryana').length;
+
     final items = repo.debtors.where((d) {
       if (_selectedTerritory != 'All' &&
           d.state.toLowerCase() != _selectedTerritory.toLowerCase()) {
+        return false;
+      }
+      if (_selectedStatus == 'Verified' && !d.isVerified) {
+        return false;
+      }
+      if (_selectedStatus == 'Mismatches' && !d.isMismatch) {
         return false;
       }
       if (_query.isNotEmpty) {
         final q = _query.toLowerCase();
         return d.name.toLowerCase().contains(q) ||
             d.city.toLowerCase().contains(q) ||
+            d.id.toLowerCase().contains(q) ||
             d.salesperson.toLowerCase().contains(q);
       }
       return true;
     }).toList();
 
     items.sort((a, b) {
+      // Prioritize mismatches first if not filtered, then balances
+      if (_selectedStatus == 'All') {
+        if (a.isMismatch && !b.isMismatch) return -1;
+        if (b.isMismatch && !a.isMismatch) return 1;
+      }
       if (a.balance > 0 && b.balance <= 0) return -1;
       if (b.balance > 0 && a.balance <= 0) return 1;
       final cmp = b.balance.compareTo(a.balance);
@@ -313,11 +389,9 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
       return a.name.compareTo(b.name);
     });
 
-    final double totalReceivables = (_query.isEmpty && _selectedTerritory == 'All' && repo.serverOutstanding != null)
+    final double totalReceivables = (_query.isEmpty && _selectedTerritory == 'All' && _selectedStatus == 'All' && repo.serverOutstanding != null)
         ? repo.serverOutstanding!
         : items.fold(0.0, (sum, d) => sum + d.balance);
-    final int punjabCount = repo.debtors.where((d) => d.state.toLowerCase() == 'punjab').length;
-    final int haryanaCount = repo.debtors.where((d) => d.state.toLowerCase() == 'haryana').length;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -365,7 +439,7 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
       ),
       body: Column(
         children: [
-          // KPI Summary Row
+          // KPI Summary & Filters Container
           Container(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
             decoration: const BoxDecoration(
@@ -380,6 +454,7 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                   onChanged: (v) => setState(() => _query = v),
                 ),
                 const SizedBox(height: 10),
+                // Territory Filters
                 HybridPillFilter(
                   options: [
                     'All (${repo.debtors.length})',
@@ -403,15 +478,31 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                     });
                   },
                 ),
+                const SizedBox(height: 8),
+                // Verification Status Filter Pills
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      _statusFilterChip('All', 'All (${repo.debtors.length})'),
+                      const SizedBox(width: 6),
+                      _statusFilterChip('Verified', '✓ Verified ($verifiedTotal)', isSuccess: true),
+                      const SizedBox(width: 6),
+                      _statusFilterChip('Mismatches', '⚠ Mismatches ($mismatchTotal)', isWarning: true),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 12),
+                // KPI Metric Cards
                 Row(
                   children: [
                     Expanded(
+                      flex: 6,
                       child: Container(
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
                           color: const Color(0xFFFFFBEB),
-                          borderRadius: BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: const Color(0xFFFDE68A)),
                         ),
                         child: Column(
@@ -420,7 +511,7 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                             const Text(
                               'TOTAL RECEIVABLES',
                               style: TextStyle(
-                                fontSize: 10,
+                                fontSize: 9.5,
                                 fontWeight: FontWeight.w800,
                                 color: Color(0xFF92400E),
                                 letterSpacing: 0.5,
@@ -432,7 +523,7 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                fontSize: 16,
+                                fontSize: 14.5,
                                 fontWeight: FontWeight.w900,
                                 color: Color(0xFFB45309),
                               ),
@@ -441,22 +532,23 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 6),
                     Expanded(
+                      flex: 5,
                       child: Container(
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
                           color: const Color(0xFFF0FDF4),
-                          borderRadius: BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: const Color(0xFFBBF7D0)),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text(
-                              'VERIFIED DEALERS',
+                              '✓ VERIFIED',
                               style: TextStyle(
-                                fontSize: 10,
+                                fontSize: 9.5,
                                 fontWeight: FontWeight.w800,
                                 color: Color(0xFF166534),
                                 letterSpacing: 0.5,
@@ -464,11 +556,11 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              '${items.length} accounts',
+                              '$verifiedTotal accounts',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                fontSize: 16,
+                                fontSize: 14.5,
                                 fontWeight: FontWeight.w900,
                                 color: Color(0xFF15803D),
                               ),
@@ -477,6 +569,45 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                         ),
                       ),
                     ),
+                    if (mismatchTotal > 0) ...[
+                      const SizedBox(width: 6),
+                      Expanded(
+                        flex: 5,
+                        child: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF2F2),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFFECACA)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                '⚠ MISMATCH',
+                                style: TextStyle(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFF991B1B),
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '$mismatchTotal alerts',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.w900,
+                                  color: Color(0xFFDC2626),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ],
@@ -508,9 +639,14 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
 
                         return Container(
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: item.isMismatch ? const Color(0xFFFFFDF5) : Colors.white,
                             borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                            border: Border.all(
+                              color: item.isMismatch
+                                  ? const Color(0xFFFDE68A)
+                                  : const Color(0xFFE2E8F0),
+                              width: item.isMismatch ? 1.5 : 1.0,
+                            ),
                             boxShadow: const [
                               BoxShadow(
                                 color: Color(0x060F172A),
@@ -545,7 +681,18 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                                               color: Color(0xFF0F172A),
                                             ),
                                           ),
-                                          const SizedBox(height: 4),
+                                          if (item.id.isNotEmpty) ...[
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              item.id,
+                                              style: const TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w500,
+                                                color: Color(0xFF94A3B8),
+                                              ),
+                                            ),
+                                          ],
+                                          const SizedBox(height: 3),
                                           Text(
                                             '${item.city.isNotEmpty ? item.city : item.district} (${item.state}) • Rep: ${item.salesperson}',
                                             style: const TextStyle(
@@ -554,34 +701,129 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                                               color: Color(0xFF64748B),
                                             ),
                                           ),
-                                          const SizedBox(height: 8),
+                                          // Tally Verification Badge
+                                          if (item.isMismatch) ...[
+                                            const SizedBox(height: 6),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                horizontal: 7,
+                                                vertical: 3,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFFFEF3C7),
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(
+                                                  color: const Color(0xFFFDE68A),
+                                                ),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(
+                                                    Icons.warning_amber_rounded,
+                                                    size: 13,
+                                                    color: Color(0xFFD97706),
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Flexible(
+                                                    child: Text(
+                                                      'Tally Mismatch • Tally: ${item.tallyClosingFormatted} (${item.tallyDiffFormatted})',
+                                                      style: const TextStyle(
+                                                        fontSize: 10.5,
+                                                        fontWeight: FontWeight.w800,
+                                                        color: Color(0xFFB45309),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ] else if (item.isVerified) ...[
+                                            const SizedBox(height: 6),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                horizontal: 7,
+                                                vertical: 3,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFFF0FDF4),
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(
+                                                  color: const Color(0xFFBBF7D0),
+                                                ),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(
+                                                    Icons.check_circle_rounded,
+                                                    size: 13,
+                                                    color: Color(0xFF16A34A),
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    item.hasAuthoritativeLedger
+                                                        ? 'Verified (Party Ledger)'
+                                                        : 'Verified with Tally',
+                                                    style: const TextStyle(
+                                                      fontSize: 10.5,
+                                                      fontWeight: FontWeight.w800,
+                                                      color: Color(0xFF15803D),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                          const SizedBox(height: 6),
+                                          // Balance Pill with Tally detail
                                           Container(
                                             padding: const EdgeInsets.symmetric(
                                               horizontal: 8,
                                               vertical: 3,
                                             ),
                                             decoration: BoxDecoration(
-                                              color: hasBalance
-                                                  ? const Color(0xFFFEF2F2)
-                                                  : const Color(0xFFF0FDF4),
+                                              color: item.isMismatch
+                                                  ? const Color(0xFFFFFBEB)
+                                                  : hasBalance
+                                                      ? const Color(0xFFFEF2F2)
+                                                      : const Color(0xFFF0FDF4),
                                               borderRadius: BorderRadius.circular(6),
                                               border: Border.all(
-                                                color: hasBalance
-                                                    ? const Color(0xFFFECACA)
-                                                    : const Color(0xFFBBF7D0),
+                                                color: item.isMismatch
+                                                    ? const Color(0xFFFDE68A)
+                                                    : hasBalance
+                                                        ? const Color(0xFFFECACA)
+                                                        : const Color(0xFFBBF7D0),
                                               ),
                                             ),
-                                            child: Text(
-                                              hasBalance
-                                                  ? 'Balance: ${item.balanceFormatted}'
-                                                  : 'Balance: ₹0.00 (Cleared)',
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.w800,
-                                                color: hasBalance
-                                                    ? const Color(0xFFDC2626)
-                                                    : const Color(0xFF166534),
-                                              ),
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  hasBalance
+                                                      ? 'Balance: ${item.balanceFormatted}'
+                                                      : 'Balance: ₹0.00 (Cleared)',
+                                                  style: TextStyle(
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: item.isMismatch
+                                                        ? const Color(0xFF92400E)
+                                                        : hasBalance
+                                                            ? const Color(0xFFDC2626)
+                                                            : const Color(0xFF166534),
+                                                  ),
+                                                ),
+                                                if (item.isMismatch && item.tallyClosing != null)
+                                                  Text(
+                                                    'Tally Closing: ${item.tallyClosingFormatted}',
+                                                    style: const TextStyle(
+                                                      fontSize: 9.5,
+                                                      fontWeight: FontWeight.w700,
+                                                      color: Color(0xFFB45309),
+                                                    ),
+                                                  ),
+                                              ],
                                             ),
                                           ),
                                         ],
