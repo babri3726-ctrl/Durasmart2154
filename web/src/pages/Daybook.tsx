@@ -57,7 +57,7 @@ type LedgerTab =
   | 'debit note';
 
 interface MultiUploadSlot {
-  key: 'daybook' | 'roundoff' | 'discount' | 'journal' | 'trialbalance' | 'hdfc' | 'yesbank' | 'cash' | 'khancash' | 'cashgbd';
+  key: 'daybook' | 'roundoff' | 'discount' | 'journal' | 'trialbalance' | 'hdfc' | 'yesbank' | 'cash' | 'khancash' | 'cashgbd' | 'debtor_balance';
   title: string;
   description: string;
   hint: string;
@@ -153,6 +153,13 @@ export default function Daybook() {
       description: 'Master ledger baseline opening balances',
       hint: 'Auto-maps baseline opening for debtors, creditors, cash & bank',
       expectedName: 'OP.xlsx / TRIALBALANCE.xlsx',
+    },
+    debtor_balance: {
+      key: 'debtor_balance',
+      title: 'Debtor Balance Benchmarks (Tally)',
+      description: 'Master Sundry Debtors Ground-Truth export from Tally Prime',
+      hint: 'Reconciles and verifies all customer balances, surfacing mismatches automatically',
+      expectedName: 'debtor balance.xlsx',
     },
   });
 

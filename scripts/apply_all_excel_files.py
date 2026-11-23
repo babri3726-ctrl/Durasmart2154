@@ -271,6 +271,13 @@ def main():
                 """, (pid, abs(ob_paise), "debit" if ob_paise >= 0 else "credit"))
             # Replace previous vouchers for this party with the authoritative Tally ledger
             conn.execute("DELETE FROM vouchers WHERE party_id = ?", (pid,))
+            conn.execute("""
+                UPDATE parties
+                SET has_authoritative_ledger = 1,
+                    tally_status = 'verified',
+                    tally_diff_paise = 0
+                WHERE id = ?
+            """, (pid,))
             conn.commit()
         res = db.save_vouchers_batch(vchs, file_sha=f_sha)
         print(f"  -> {fname} ({c_name}): Applied {res['insertedCount']} authoritative vouchers.")
@@ -303,6 +310,30 @@ def main():
     # 9. Ledger Reclassification & Final Balance Recomputation
     print("\n[Step 9] Running Ledger Classifier and Final Party Balance Recomputation...")
     run_cleanup()
+
+    # 10. Reconcile Ground-Truth Tally Debtor Balances (debtor balance.xlsx)
+    debtor_bal_path = None
+    for cand in ["debtor balance.xlsx", "debtor_balance.xlsx", "DEBTOR BALANCE.xlsx"]:
+        for p in [os.path.join(base_dir, cand), os.path.join(data_dir, cand), os.path.join(data_dir, "imports", cand)]:
+            if os.path.exists(p):
+                debtor_bal_path = p
+                break
+        if debtor_bal_path:
+            break
+
+    if debtor_bal_path:
+        print(f"\n[Step 10] Reconciling Ground-Truth Debtor Balances from {os.path.basename(debtor_bal_path)}...")
+        from server.voucher_parser import parse_debtor_balance_workbook
+        parsed_db_bench = parse_debtor_balance_workbook(debtor_bal_path)
+        bm_res = db.apply_debtor_balance_benchmarks(parsed_db_bench)
+        print(f"  -> Applied {bm_res['totalBenchmarks']} Tally Debtor Benchmarks:")
+        print(f"     Matched: {bm_res['matchedCount']}/{bm_res['totalCustomers']}")
+        print(f"     100% Exact Matches: {bm_res['exactCount']}")
+        print(f"     Authoritative Ledger Verified: {bm_res['verifiedByLedgerCount']}")
+        print(f"     Total Verified: {bm_res['totalVerified']}")
+        print(f"     Balance Mismatches: {bm_res['mismatchCount']}")
+    else:
+        print("\n[Step 10] Notice: debtor balance.xlsx not found.")
 
     total_time = time.time() - start_time
     print("\n" + "=" * 70)

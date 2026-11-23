@@ -2243,6 +2243,7 @@ def get_debtors(
     q: str | None = None,
     state: str | None = None,
     salesperson: str | None = None,
+    statusFilter: str | None = None,
     activeOnly: bool = False,
     page: int = 1,
     pageSize: int = 50,
@@ -2266,6 +2267,19 @@ def get_debtors(
         if is_sundry_debtor(d.get("name", ""), d.get("party_type"))
     ]
 
+    # Search filter by party name, city, station, or id
+    if q and q.strip():
+        folded = q.strip().lower()
+        items = [
+            d for d in items
+            if folded in (d.get("name") or "").lower()
+            or folded in (d.get("city") or "").lower()
+            or folded in (d.get("district") or "").lower()
+            or folded in (d.get("state") or "").lower()
+            or folded in (d.get("id") or "").lower()
+            or folded in (d.get("salesperson") or "").lower()
+        ]
+
     # Strictly scope to assigned debtors if caller is a Sales Officer
     if caller["isSales"]:
         sp_id = caller["employeeId"]
@@ -2277,8 +2291,18 @@ def get_debtors(
         ]
     elif salesperson:
         items = [d for d in items if d.get("salesperson", "").lower() == salesperson.lower()]
+
     if activeOnly:
         items = [d for d in items if float(d.get("balance", 0.0) or 0.0) > 0 or int(d.get("outstandingPaise", 0) or 0) > 0]
+
+    # Status summary counts before statusFilter
+    mismatch_total = sum(1 for d in items if d.get("tallyStatus") == "mismatch")
+    verified_total = sum(1 for d in items if d.get("tallyStatus") == "verified")
+    unbenchmarked_total = sum(1 for d in items if (d.get("tallyStatus") or "unbenchmarked") == "unbenchmarked")
+
+    if statusFilter and statusFilter.lower() != "all":
+        sf = statusFilter.lower().strip()
+        items = [d for d in items if (d.get("tallyStatus") or "unbenchmarked").lower() == sf]
 
     # Sort so that debtors with outstanding balances appear first (highest balance to lowest), followed by name
     items.sort(
@@ -2310,6 +2334,14 @@ def get_debtors(
         row["balance"] = bal_flt
         row["balance_formatted"] = f"{bal_flt:.2f}"
         row["importedAt"] = STATE.get("hrpb_snapshot", {}).get("synced_at", "2026-10-23T20:00:00+05:30")
+        row["tallyClosing"] = d.get("tallyClosing")
+        row["tallyClosingPaise"] = d.get("tallyClosingPaise")
+        row["tallyOpening"] = d.get("tallyOpening")
+        row["tallyOpeningPaise"] = d.get("tallyOpeningPaise")
+        row["tallyStatus"] = d.get("tallyStatus") or "unbenchmarked"
+        row["tallyDiff"] = d.get("tallyDiff", 0.0)
+        row["tallyDiffPaise"] = d.get("tallyDiffPaise", 0)
+        row["hasAuthoritativeLedger"] = d.get("hasAuthoritativeLedger", False)
         enriched.append(row)
 
     return {
@@ -2317,7 +2349,13 @@ def get_debtors(
         "page": page,
         "pageSize": pageSize,
         "total": total,
-        "nextCursor": None
+        "nextCursor": None,
+        "summary": {
+            "mismatchCount": mismatch_total,
+            "verifiedCount": verified_total,
+            "unbenchmarkedCount": unbenchmarked_total,
+            "totalCount": total
+        }
     }
 
 @app.post("/api/v1/debtors")
@@ -2751,6 +2789,60 @@ def reset_accounting_balances_endpoint():
         "details": res
     }
 
+@app.post("/api/v1/debtors/sync-benchmarks")
+def sync_debtor_benchmarks():
+    """Reconciles debtor balances against debtor balance.xlsx benchmarks."""
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(base_dir, "data")
+    debtor_bal_path = None
+    for cand in ["debtor balance.xlsx", "debtor_balance.xlsx", "DEBTOR BALANCE.xlsx"]:
+        for p in [os.path.join(base_dir, cand), os.path.join(data_dir, cand), os.path.join(data_dir, "imports", cand)]:
+            if os.path.exists(p):
+                debtor_bal_path = p
+                break
+        if debtor_bal_path:
+            break
+
+    if not debtor_bal_path:
+        raise HTTPException(status_code=404, detail="debtor balance.xlsx benchmark file not found")
+
+    from .voucher_parser import parse_debtor_balance_workbook
+    parsed = parse_debtor_balance_workbook(debtor_bal_path)
+    res = db.apply_debtor_balance_benchmarks(parsed)
+
+    # Refresh in-memory state
+    persisted = db.load_all_persisted_state()
+    for k in ["debtors", "customers"]:
+        if k in persisted:
+            STATE[k] = persisted[k]
+
+    return {
+        "status": "success",
+        "message": f"Successfully synced {res['totalBenchmarks']} Tally debtor benchmarks! {res['totalVerified']} verified, {res['mismatchCount']} mismatches.",
+        "details": res
+    }
+
+@app.post("/api/v1/debtors/{debtor_id}/upload-ledger")
+async def upload_single_party_ledger(debtor_id: str, file: UploadFile = File(...)):
+    """
+    Uploads an authoritative Tally Excel ledger for an individual party.
+    Imports vouchers, marks party as authoritative and verified with Tally,
+    clearing any previous mismatch warning immediately.
+    """
+    if not file.filename.endswith((".xlsx", ".xlsm")):
+        raise HTTPException(status_code=400, detail="Only Excel .xlsx/.xlsm files are supported")
+    content = await file.read()
+    try:
+        res = db.apply_single_party_ledger(debtor_id, content, file.filename)
+        # Refresh in-memory state
+        persisted = db.load_all_persisted_state()
+        for k in ["debtors", "customers"]:
+            if k in persisted:
+                STATE[k] = persisted[k]
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to apply party ledger: {e}")
+
 # ============================================================================
 # MULTI-EXCEL 4-BOOK SYNC HUB (Daybook, Round Off, Discount, Trial Balance)
 # ============================================================================
@@ -2797,6 +2889,21 @@ async def preview_multi_excel_bundle(files: list[UploadFile] = File(...)):
                     "totalDebitPaise": tb_res["totalDebitPaise"],
                     "totalCreditPaise": tb_res["totalCreditPaise"],
                     "sample": tb_res["entries"][:5]
+                }
+            except Exception as e:
+                file_info["error"] = str(e)
+        elif detected_type == "debtor_balance":
+            try:
+                from .voucher_parser import parse_debtor_balance_workbook
+                db_res = parse_debtor_balance_workbook(temp_path, file_sha256=file_sha)
+                file_info["details"] = {
+                    "voucherCount": db_res.get("totalBenchmarks", 0),
+                    "benchmarkCount": db_res.get("totalBenchmarks", 0),
+                    "bookSource": "Tally Debtor Ground-Truth Benchmarks",
+                    "periodText": "Sundry Debtors Group Summary",
+                    "totalDebitPaise": 0,
+                    "totalCreditPaise": 0,
+                    "sample": db_res.get("benchmarks", [])[:5]
                 }
             except Exception as e:
                 file_info["error"] = str(e)
@@ -3103,6 +3210,17 @@ async def apply_multi_excel_bundle(
         run_cleanup()
     except Exception as e:
         results["cleanupError"] = str(e)
+
+    # 5.5 Reconcile Debtor Balance Benchmarks if present
+    if "debtor_balance" in by_type:
+        db_file = by_type["debtor_balance"]
+        try:
+            from .voucher_parser import parse_debtor_balance_workbook
+            parsed_db = parse_debtor_balance_workbook(db_file["path"])
+            bm_res = db.apply_debtor_balance_benchmarks(parsed_db)
+            results["debtorBalance"] = bm_res
+        except Exception as e:
+            results["debtorBalance"] = {"error": str(e)}
         
     # 6. Refresh in-memory state
     persisted = db.load_all_persisted_state()

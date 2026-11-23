@@ -78,6 +78,8 @@ import {
   updateOpeningBalance,
   uploadOpeningBalances,
   resetAccountingBalances,
+  syncDebtorBenchmarks,
+  uploadPartyLedger,
   listEmployees,
   serverHost,
   ServerError,
@@ -167,6 +169,10 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
   const [editingOpening, setEditingOpening] = useState(false);
   const [openingAmount, setOpeningAmount] = useState('');
   const [openingBusy, setOpeningBusy] = useState(false);
+
+  // Authoritative party ledger upload state
+  const [uploadingLedger, setUploadingLedger] = useState(false);
+  const [ledgerUploadMsg, setLedgerUploadMsg] = useState<string | null>(null);
 
   const debtorId = debtor.id || debtor.customerId;
   const initialOpeningPaise = debtor.openingPaise !== undefined && debtor.openingPaise !== null
@@ -418,6 +424,28 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
     }
   };
 
+  const handleUploadPartyLedger = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingLedger(true);
+    setLedgerUploadMsg(null);
+    try {
+      const res = await uploadPartyLedger(debtorId, file);
+      setLedgerUploadMsg(`✅ Authoritative ledger applied (${res.vouchersApplied || 0} vouchers). Tally mismatch cleared!`);
+      debtor.tallyStatus = 'verified';
+      debtor.hasAuthoritativeLedger = true;
+      debtor.tallyDiff = 0;
+      debtor.tallyDiffPaise = 0;
+      reloadVouchers();
+      invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
+    } catch (err: any) {
+      alert(err.message || 'Failed to upload party ledger');
+    } finally {
+      setUploadingLedger(false);
+      e.target.value = '';
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-md">
       <style>{`
@@ -463,6 +491,54 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
             </button>
           </div>
         </div>
+
+        {/* Tally Ground Truth Benchmark Status Banner */}
+        {debtor.tallyStatus === 'mismatch' ? (
+          <div className="border-b border-amber-300 bg-amber-50 px-6 py-3 no-print">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="text-amber-600 shrink-0" size={16} />
+                  <span className="text-xs font-bold text-amber-900">
+                    Tally Ground Truth Mismatch: Current {rupees(currentOutstandingPaise)} vs Tally {debtor.tallyClosing !== null && debtor.tallyClosing !== undefined ? rupees(Math.round(debtor.tallyClosing * 100)) : '—'}
+                  </span>
+                  {debtor.tallyDiff !== undefined && (
+                    <span className="font-mono text-xs font-bold text-amber-800">
+                      (Diff: {debtor.tallyDiff > 0 ? '+' : ''}₹{debtor.tallyDiff.toLocaleString('en-IN', { minimumFractionDigits: 2 })})
+                    </span>
+                  )}
+                </div>
+                <p className="mt-0.5 text-[11px] text-amber-700">
+                  Upload this party's individual Tally Excel ledger to verify transactions and automatically clear this mismatch warning.
+                </p>
+                {ledgerUploadMsg && (
+                  <p className="mt-1 text-[11px] font-bold text-emerald-700">{ledgerUploadMsg}</p>
+                )}
+              </div>
+              <label className="cursor-pointer shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white shadow hover:bg-amber-700 transition">
+                <Upload size={13} />
+                {uploadingLedger ? 'Applying Ledger...' : 'Upload Party Ledger (.xlsx)'}
+                <input type="file" accept=".xlsx,.xlsm" className="hidden" disabled={uploadingLedger} onChange={handleUploadPartyLedger} />
+              </label>
+            </div>
+          </div>
+        ) : debtor.tallyStatus === 'verified' ? (
+          <div className="border-b border-emerald-200 bg-emerald-50 px-6 py-2.5 no-print flex items-center justify-between">
+            <div className="flex items-center gap-2 text-emerald-800 text-xs font-semibold">
+              <CheckCircle2 className="text-emerald-600 shrink-0" size={15} />
+              <span>
+                {debtor.hasAuthoritativeLedger
+                  ? '✅ Verified with Authoritative Individual Party Ledger'
+                  : `✅ 100% Matches Tally Prime Sundry Debtors Benchmark (Closing: ₹${debtor.tallyClosing?.toLocaleString('en-IN', { minimumFractionDigits: 2 })})`}
+              </span>
+            </div>
+            <label className="cursor-pointer text-[11px] font-bold text-emerald-700 hover:underline inline-flex items-center gap-1">
+              <Upload size={12} />
+              {uploadingLedger ? 'Uploading...' : 'Re-upload Ledger'}
+              <input type="file" accept=".xlsx,.xlsm" className="hidden" disabled={uploadingLedger} onChange={handleUploadPartyLedger} />
+            </label>
+          </div>
+        ) : null}
 
         {/* Balance Tiles */}
         <div className="grid grid-cols-4 gap-3 border-b border-slate-200 bg-white px-6 py-4">
@@ -915,6 +991,9 @@ function DebtorListCard() {
   const [term, setTerm] = useState('');
   const [page, setPage] = useState(1);
   const [activeOnly, setActiveOnly] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'mismatch' | 'verified' | 'unbenchmarked'>('all');
+  const [syncingBenchmarks, setSyncingBenchmarks] = useState(false);
+  const [benchmarksMessage, setBenchmarksMessage] = useState<string | null>(null);
   const [syncingHrPb, setSyncingHrPb] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [selectedDebtorLedger, setSelectedDebtorLedger] = useState<ServerDebtor | null>(null);
@@ -1004,11 +1083,27 @@ function DebtorListCard() {
       listDebtors({
         q: folded || undefined,
         activeOnly: activeOnly ? true : undefined,
+        statusFilter: statusFilter !== 'all' ? statusFilter : undefined,
         page: p,
         pageSize: PAGE_SIZE,
       }),
-    [activeOnly],
+    [activeOnly, statusFilter],
   );
+
+  const handleSyncBenchmarks = async () => {
+    setSyncingBenchmarks(true);
+    setBenchmarksMessage(null);
+    try {
+      const res = await syncDebtorBenchmarks();
+      setBenchmarksMessage(res.message);
+      invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
+      retry();
+    } catch (e: any) {
+      setBenchmarksMessage(e.message || 'Failed to reconcile Tally benchmarks');
+    } finally {
+      setSyncingBenchmarks(false);
+    }
+  };
 
   const refreshToken = useSyncToken(syncKeys.debtors);
   const { state, rows, total, error, retry, sync } = useLiveList(load, term, page, refreshToken);
@@ -1298,28 +1393,78 @@ function DebtorListCard() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* Tally Ground-Truth Benchmark Filter Segment */}
           <div className="flex items-center rounded-lg border border-line bg-canvas/40 p-0.5">
             <button
               type="button"
               onClick={() => {
-                setActiveOnly(false);
+                setStatusFilter('all');
                 setPage(1);
               }}
-              className={`rounded px-2.5 py-1 text-[11px] font-bold transition ${!activeOnly ? 'bg-brand-blue text-white shadow-sm' : 'text-muted hover:text-ink'}`}
+              className={`rounded px-2.5 py-1 text-[11px] font-bold transition ${statusFilter === 'all' ? 'bg-brand-blue text-white shadow-sm' : 'text-muted hover:text-ink'}`}
             >
-              All Debtors
+              All
             </button>
             <button
               type="button"
               onClick={() => {
-                setActiveOnly(true);
+                setStatusFilter('mismatch');
                 setPage(1);
               }}
-              className={`rounded px-2.5 py-1 text-[11px] font-bold transition ${activeOnly ? 'bg-brand-blue text-white shadow-sm' : 'text-muted hover:text-ink'}`}
+              className={`rounded px-2.5 py-1 text-[11px] font-bold transition flex items-center gap-1 ${statusFilter === 'mismatch' ? 'bg-amber-600 text-white shadow-sm' : 'text-amber-700 hover:text-amber-900'}`}
+              title="Filter debtors whose panel balance does not match Tally Ground Truth"
             >
-              With Balance Only
+              <AlertTriangle size={11} />
+              Mismatches
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setStatusFilter('verified');
+                setPage(1);
+              }}
+              className={`rounded px-2.5 py-1 text-[11px] font-bold transition flex items-center gap-1 ${statusFilter === 'verified' ? 'bg-emerald-600 text-white shadow-sm' : 'text-emerald-700 hover:text-emerald-900'}`}
+              title="Filter debtors 100% verified with Tally Ground Truth or authoritative ledger"
+            >
+              <CheckCircle2 size={11} />
+              Verified
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setStatusFilter('unbenchmarked');
+                setPage(1);
+              }}
+              className={`rounded px-2.5 py-1 text-[11px] font-bold transition ${statusFilter === 'unbenchmarked' ? 'bg-slate-700 text-white shadow-sm' : 'text-muted hover:text-ink'}`}
+            >
+              Unbenchmarked
             </button>
           </div>
+
+          <div className="flex items-center rounded-lg border border-line bg-canvas/40 p-0.5">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveOnly(!activeOnly);
+                setPage(1);
+              }}
+              className={`rounded px-2.5 py-1 text-[11px] font-bold transition ${activeOnly ? 'bg-indigo-600 text-white shadow-sm' : 'text-muted hover:text-ink'}`}
+            >
+              {activeOnly ? '✓ Dues Only' : 'Dues Only'}
+            </button>
+          </div>
+
+          <button
+            type="button"
+            disabled={syncingBenchmarks}
+            onClick={handleSyncBenchmarks}
+            className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[11px] font-bold text-amber-800 hover:bg-amber-100 transition shadow-sm"
+            title="Reconcile debtor balances with debtor balance.xlsx Tally export"
+          >
+            <RefreshCw size={12} className={syncingBenchmarks ? "animate-spin" : ""} />
+            {syncingBenchmarks ? "Reconciling..." : "Reconcile with Tally"}
+          </button>
+
           <button
             type="button"
             disabled={isResetting}
@@ -1328,8 +1473,9 @@ function DebtorListCard() {
             title="Clean up existing balances to ₹0.00 so you can upload a fresh Excel file"
           >
             <RefreshCw size={12} className={isResetting ? "animate-spin" : ""} />
-            {isResetting ? "Zeroing..." : "Zero All Balances"}
+            {isResetting ? "Zeroing..." : "Zero Balances"}
           </button>
+
           <input
             className="input !w-auto !py-2"
             value={term}
@@ -1341,6 +1487,15 @@ function DebtorListCard() {
           />
         </div>
       </div>
+
+      {benchmarksMessage && (
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900 flex items-center justify-between">
+          <span>{benchmarksMessage}</span>
+          <button type="button" onClick={() => setBenchmarksMessage(null)} className="text-amber-700 hover:text-amber-950">
+            <X size={14} />
+          </button>
+        </div>
+      )}
       <div className="mb-3">
         <LiveSyncBar sync={sync} busy={state === 'loading'} />
       </div>
@@ -1380,22 +1535,59 @@ function DebtorListCard() {
                   const sp = row.salesperson || 'Unassigned';
                   const balPaise = Math.round((row.balance !== undefined ? parseFloat(String(row.balance)) : (row.debitPaise || 0) / 100) * 100);
                   const isPos = balPaise > 0;
+                  const isMismatch = row.tallyStatus === 'mismatch';
                   return (
-                    <tr key={row.id || row.customerId} className="border-b border-line/60 last:border-b-0 hover:bg-canvas/50">
+                    <tr
+                      key={row.id || row.customerId}
+                      className={`border-b border-line/60 last:border-b-0 hover:bg-canvas/50 ${
+                        isMismatch ? 'bg-amber-50/50 dark:bg-amber-950/20' : ''
+                      }`}
+                    >
                       <td className="px-3 py-2 align-middle">
-                        <span className="font-bold text-ink">{partyTitle}</span>
-                        <span className="ml-2 text-[10px] text-faint">{row.id || row.customerId}</span>
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-ink">{partyTitle}</span>
+                            <span className="text-[10px] text-faint">{row.id || row.customerId}</span>
+                          </div>
+                          {isMismatch ? (
+                            <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                              <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-300">
+                                <AlertTriangle size={10} className="text-amber-600 shrink-0" />
+                                Tally Mismatch · Tally: ₹{row.tallyClosing?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                <span className="font-mono">
+                                  ({row.tallyDiff! > 0 ? '+' : ''}₹{row.tallyDiff?.toLocaleString('en-IN', { minimumFractionDigits: 2 })})
+                                </span>
+                              </span>
+                            </div>
+                          ) : row.tallyStatus === 'verified' ? (
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-400">
+                                <CheckCircle2 size={10} className="text-emerald-600 shrink-0" />
+                                {row.hasAuthoritativeLedger ? 'Verified (Party Ledger)' : 'Verified with Tally'}
+                              </span>
+                            </div>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="px-3 py-2 align-middle text-muted">{cityStation}</td>
                       <td className="px-3 py-2 align-middle font-medium text-ink">{sp}</td>
                       <td className="px-3 py-2 text-right align-middle font-semibold tabular-nums text-ink">
-                        <span className={`rounded px-2 py-0.5 border font-mono text-[11px] font-bold ${
-                          isPos
-                            ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                            : 'bg-canvas border-line text-slate-400'
-                        }`}>
-                          {rupees(balPaise)}
-                        </span>
+                        <div className="flex flex-col items-end">
+                          <span className={`rounded px-2 py-0.5 border font-mono text-[11px] font-bold ${
+                            isMismatch
+                              ? 'bg-amber-100 border-amber-300 text-amber-900 font-black'
+                              : isPos
+                                ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                                : 'bg-canvas border-line text-slate-400'
+                          }`}>
+                            {rupees(balPaise)}
+                          </span>
+                          {isMismatch && row.tallyClosing !== null && row.tallyClosing !== undefined && (
+                            <span className="text-[10px] text-slate-500 font-mono mt-0.5">
+                              Tally: ₹{row.tallyClosing.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-3 py-2 text-center align-middle">
                         <div className="flex items-center justify-center gap-1.5">

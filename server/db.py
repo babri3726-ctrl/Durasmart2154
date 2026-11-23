@@ -302,6 +302,12 @@ def init_db(seed_state: dict[str, Any] | None = None):
             "ALTER TABLE dispatch_lines ADD COLUMN batch_no TEXT DEFAULT ''",
             "ALTER TABLE dispatch_lines ADD COLUMN warehouse TEXT DEFAULT ''",
             "ALTER TABLE vouchers ADD COLUMN narration TEXT DEFAULT ''",
+            "ALTER TABLE parties ADD COLUMN party_type TEXT DEFAULT 'customer'",
+            "ALTER TABLE parties ADD COLUMN tally_closing_paise INTEGER DEFAULT NULL",
+            "ALTER TABLE parties ADD COLUMN tally_opening_paise INTEGER DEFAULT NULL",
+            "ALTER TABLE parties ADD COLUMN tally_status TEXT DEFAULT 'unbenchmarked'",
+            "ALTER TABLE parties ADD COLUMN tally_diff_paise INTEGER DEFAULT 0",
+            "ALTER TABLE parties ADD COLUMN has_authoritative_ledger INTEGER DEFAULT 0",
         ]:
             try:
                 conn.execute(query)
@@ -316,6 +322,7 @@ def init_db(seed_state: dict[str, Any] | None = None):
             "CREATE INDEX IF NOT EXISTS idx_vouchers_dedup ON vouchers (voucher_date, voucher_type, debit_paise, credit_paise)",
             "CREATE INDEX IF NOT EXISTS idx_vouchers_book_source ON vouchers (book_source)",
             "CREATE INDEX IF NOT EXISTS idx_vouchers_party_name ON vouchers (party_name)",
+            "CREATE INDEX IF NOT EXISTS idx_parties_tally_status ON parties (tally_status)",
         ]:
             try:
                 conn.execute(idx_query)
@@ -656,13 +663,174 @@ def clean_accounting_balances() -> dict[str, int]:
         v_count = cur.rowcount
         cur.execute("DELETE FROM opening_balances")
         ob_count = cur.rowcount
-        cur.execute("UPDATE parties SET balance_paise = 0")
+        cur.execute("UPDATE parties SET balance_paise = 0, tally_status = 'unbenchmarked', tally_diff_paise = 0, has_authoritative_ledger = 0")
         p_count = cur.rowcount
         conn.commit()
     return {
         "vouchersPurged": v_count,
         "openingBalancesPurged": ob_count,
         "partiesReset": p_count
+    }
+
+
+def apply_debtor_balance_benchmarks(benchmarks_data: list[dict] | dict) -> dict[str, Any]:
+    """
+    Applies Tally debtor balance benchmarks to the parties table.
+    - Matches parties by name / normalized clean name.
+    - Sets tally_closing_paise and tally_opening_paise.
+    - Computes tally_diff_paise and sets tally_status:
+      - 'verified' if has_authoritative_ledger == 1 or abs(balance_paise - tally_closing_paise) <= 100
+      - 'mismatch' if diff > 100 paise
+      - 'unbenchmarked' if no benchmark exists in Tally sundry debtors
+    """
+    if isinstance(benchmarks_data, dict):
+        benchmarks = benchmarks_data.get("benchmarks", [])
+    else:
+        benchmarks = benchmarks_data
+
+    from .voucher_parser import clean_party_name
+
+    bm_lookup = {}
+    for bm in benchmarks:
+        k = clean_party_name(bm.get("partyName") or bm.get("rawName") or "").lower().strip()
+        if k:
+            bm_lookup[k] = bm
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name, balance_paise, has_authoritative_ledger FROM parties WHERE party_type = 'customer'")
+        customers = cur.fetchall()
+
+        matched_count = 0
+        exact_count = 0
+        mismatch_count = 0
+        verified_by_ledger_count = 0
+
+        for cid, cname, bal_paise, has_auth in customers:
+            bal_paise = bal_paise or 0
+            k = clean_party_name(cname or "").lower().strip()
+
+            if k in bm_lookup:
+                matched_count += 1
+                bm = bm_lookup[k]
+                t_cl = bm["closingPaise"]
+                t_op = bm["openingPaise"]
+                diff = bal_paise - t_cl
+
+                if has_auth == 1:
+                    verified_by_ledger_count += 1
+                    status = "verified"
+                    diff_paise = 0
+                elif abs(diff) <= 100:  # <= Rs 1 roundoff tolerance
+                    exact_count += 1
+                    status = "verified"
+                    diff_paise = 0
+                else:
+                    mismatch_count += 1
+                    status = "mismatch"
+                    diff_paise = diff
+
+                cur.execute("""
+                    UPDATE parties
+                    SET tally_closing_paise = ?,
+                        tally_opening_paise = ?,
+                        tally_status = ?,
+                        tally_diff_paise = ?
+                    WHERE id = ?
+                """, (t_cl, t_op, status, diff_paise, cid))
+            else:
+                status = "verified" if has_auth == 1 else "unbenchmarked"
+                cur.execute("""
+                    UPDATE parties
+                    SET tally_status = ?,
+                        tally_diff_paise = 0
+                    WHERE id = ?
+                """, (status, cid))
+
+        conn.commit()
+
+    return {
+        "totalBenchmarks": len(benchmarks),
+        "totalCustomers": len(customers),
+        "matchedCount": matched_count,
+        "exactCount": exact_count,
+        "mismatchCount": mismatch_count,
+        "verifiedByLedgerCount": verified_by_ledger_count,
+        "totalVerified": exact_count + verified_by_ledger_count,
+    }
+
+
+def apply_single_party_ledger(party_id: str, filepath_or_bytes: str | bytes, filename: str) -> dict[str, Any]:
+    """
+    Applies an individual authoritative Tally customer ledger (.xlsx) for a specific party.
+    Replaces/updates the party's vouchers, updates opening balance,
+    marks has_authoritative_ledger = 1, and marks tally_status = 'verified' with 0 diff.
+    """
+    from .voucher_parser import parse_accounting_workbook
+    import hashlib
+
+    if isinstance(filepath_or_bytes, bytes):
+        f_sha = hashlib.sha256(filepath_or_bytes).hexdigest()
+        parsed = parse_accounting_workbook(filepath_or_bytes, file_sha256=f_sha, filename=filename)
+    else:
+        with open(filepath_or_bytes, "rb") as f:
+            content = f.read()
+        f_sha = hashlib.sha256(content).hexdigest()
+        parsed = parse_accounting_workbook(filepath_or_bytes, file_sha256=f_sha, filename=filename)
+
+    vchs = parsed.get("vouchers", [])
+    ob_paise = parsed.get("openingBalancePaise", 0)
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name FROM parties WHERE id = ?", (party_id,))
+        p_row = cur.fetchone()
+        if not p_row:
+            raise ValueError(f"Party ID {party_id} not found")
+        party_name = p_row[1]
+
+        # Update opening balance if present in the ledger
+        if ob_paise != 0:
+            conn.execute("""
+                INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)
+                VALUES (?, '2026-04-01', ?, ?, 'Authoritative Party Ledger', datetime('now'))
+            """, (party_id, abs(ob_paise), "debit" if ob_paise >= 0 else "credit"))
+
+        # Delete previous vouchers for this party
+        conn.execute("DELETE FROM vouchers WHERE party_id = ?", (party_id,))
+
+        # Force all parsed vouchers to have this party's ID and name
+        for v in vchs:
+            v["partyId"] = party_id
+            v["partyName"] = party_name
+
+        # Mark authoritative ledger = 1, tally_status = 'verified', diff = 0
+        conn.execute("""
+            UPDATE parties
+            SET has_authoritative_ledger = 1,
+                tally_status = 'verified',
+                tally_diff_paise = 0
+            WHERE id = ?
+        """, (party_id,))
+        conn.commit()
+
+    res = save_vouchers_batch(vchs, file_sha=f_sha)
+    recompute_party_balance(party_id)
+
+    # Re-fetch new balance
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT balance_paise FROM parties WHERE id = ?", (party_id,))
+        new_bal = cur.fetchone()[0] or 0
+
+    return {
+        "status": "success",
+        "partyId": party_id,
+        "partyName": party_name,
+        "vouchersApplied": res.get("insertedCount", len(vchs)),
+        "newBalancePaise": new_bal,
+        "newBalanceFormatted": f"{new_bal / 100.0:,.2f}",
+        "tallyStatus": "verified"
     }
 
 
@@ -794,6 +962,14 @@ def load_all_persisted_state() -> dict[str, Any]:
                     "invoiceCount": 0,
                     "orderCount": 0,
                     "lastPaymentDate": None,
+                    "tallyClosingPaise": p["tally_closing_paise"] if "tally_closing_paise" in p.keys() else None,
+                    "tallyClosing": round(p["tally_closing_paise"] / 100.0, 2) if ("tally_closing_paise" in p.keys() and p["tally_closing_paise"] is not None) else None,
+                    "tallyOpeningPaise": p["tally_opening_paise"] if "tally_opening_paise" in p.keys() else None,
+                    "tallyOpening": round(p["tally_opening_paise"] / 100.0, 2) if ("tally_opening_paise" in p.keys() and p["tally_opening_paise"] is not None) else None,
+                    "tallyStatus": p["tally_status"] if ("tally_status" in p.keys() and p["tally_status"]) else "unbenchmarked",
+                    "tallyDiffPaise": p["tally_diff_paise"] if ("tally_diff_paise" in p.keys() and p["tally_diff_paise"] is not None) else 0,
+                    "tallyDiff": round((p["tally_diff_paise"] or 0) / 100.0, 2) if "tally_diff_paise" in p.keys() else 0.0,
+                    "hasAuthoritativeLedger": bool(p["has_authoritative_ledger"]) if "has_authoritative_ledger" in p.keys() else False,
                 }
                 debtors.append(d_row)
 
@@ -1209,10 +1385,28 @@ def recompute_party_balance(party_id: str, conn = None):
         direct_payment_paise = cur.fetchone()[0]
 
         new_balance_paise = ob_paise + voucher_net_paise - direct_payment_paise
-        c.execute(
-            "UPDATE parties SET balance_paise = ?, updated_at = ? WHERE id = ?",
-            (new_balance_paise, datetime.now().isoformat(), party_id)
-        )
+        
+        cur.execute("SELECT tally_closing_paise, has_authoritative_ledger FROM parties WHERE id = ?", (party_id,))
+        t_row = cur.fetchone()
+        if t_row and t_row[0] is not None:
+            t_cl = t_row[0]
+            has_auth = t_row[1] or 0
+            diff = new_balance_paise - t_cl
+            if has_auth == 1 or abs(diff) <= 100:
+                t_status = 'verified'
+                t_diff = 0
+            else:
+                t_status = 'mismatch'
+                t_diff = diff
+            c.execute(
+                "UPDATE parties SET balance_paise = ?, tally_status = ?, tally_diff_paise = ?, updated_at = ? WHERE id = ?",
+                (new_balance_paise, t_status, t_diff, datetime.now().isoformat(), party_id)
+            )
+        else:
+            c.execute(
+                "UPDATE parties SET balance_paise = ?, updated_at = ? WHERE id = ?",
+                (new_balance_paise, datetime.now().isoformat(), party_id)
+            )
 
     if conn is not None:
         _run(conn)

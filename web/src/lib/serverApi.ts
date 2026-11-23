@@ -2017,6 +2017,14 @@ export interface ServerDebtor {
   debitPaise: number;
   creditPaise: number;
   importedAt: string;
+  tallyClosing?: number | null;
+  tallyClosingPaise?: number | null;
+  tallyOpening?: number | null;
+  tallyOpeningPaise?: number | null;
+  tallyStatus?: 'verified' | 'mismatch' | 'unbenchmarked';
+  tallyDiff?: number;
+  tallyDiffPaise?: number;
+  hasAuthoritativeLedger?: boolean;
 }
 
 export interface ListDebtorsParams {
@@ -2024,6 +2032,7 @@ export interface ListDebtorsParams {
   asOf?: string;
   state?: string;
   salesperson?: string;
+  statusFilter?: 'all' | 'mismatch' | 'verified' | 'unbenchmarked' | string;
   activeOnly?: boolean;
   page?: number;
   pageSize?: number;
@@ -2035,10 +2044,31 @@ export function listDebtors(params: ListDebtorsParams = {}): Promise<ServerPage<
   if (params.asOf) query.set('asOf', params.asOf);
   if (params.state) query.set('state', params.state);
   if (params.salesperson) query.set('salesperson', params.salesperson);
+  if (params.statusFilter) query.set('statusFilter', params.statusFilter);
   if (params.activeOnly) query.set('activeOnly', 'true');
   if (params.page) query.set('page', String(params.page));
   query.set('pageSize', String(params.pageSize ?? 50));
   return send<ServerPage<ServerDebtor>>(`/debtors?${query.toString()}`);
+}
+
+export function syncDebtorBenchmarks(): Promise<{ status: string; message: string; details: any }> {
+  return send('/debtors/sync-benchmarks', { method: 'POST' });
+}
+
+export async function uploadPartyLedger(debtorId: string, file: File): Promise<any> {
+  const form = new FormData();
+  form.append('file', file);
+  const token = localStorage.getItem('durasmart_access_token');
+  const res = await fetch(`${serverHost()}/api/v1/debtors/${encodeURIComponent(debtorId)}/upload-ledger`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(txt || 'Failed to upload party ledger');
+  }
+  return res.json();
 }
 
 export function createDebtor(body: { name: string; state?: string; city?: string; district?: string; salesperson?: string; balance?: number }): Promise<ServerDebtor> {

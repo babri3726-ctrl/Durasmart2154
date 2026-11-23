@@ -892,6 +892,73 @@ def parse_bank_workbook(
     }
 
 
+def parse_debtor_balance_workbook(
+    filepath_or_bytes: str | bytes,
+    file_sha256: str | None = None
+) -> dict[str, Any]:
+    """
+    Parses Tally Prime 'Sundry Debtors Group Summary' export (e.g. debtor balance.xlsx).
+    Extracts Opening Balance, Debit, Credit, and Closing Balance ground truth benchmarks.
+    """
+    import io
+    if isinstance(filepath_or_bytes, bytes):
+        wb = openpyxl.load_workbook(io.BytesIO(filepath_or_bytes), data_only=True)
+    else:
+        wb = openpyxl.load_workbook(filepath_or_bytes, data_only=True)
+    
+    ws = wb.active
+    
+    def _parse_amt(val):
+        if not val:
+            return 0, 'debit'
+        s = str(val).strip().lower()
+        num = float(re.sub(r'[^\d.]', '', s) or 0)
+        paise = int(round(num * 100))
+        if 'cr' in s:
+            return -paise, 'credit'
+        return paise, 'debit'
+
+    benchmarks = []
+    for r in range(1, ws.max_row + 1):
+        c1 = ws.cell(r, 1).value
+        if not c1:
+            continue
+        s = str(c1).strip()
+        s_low = s.lower()
+        if s_low.startswith(('total', 'grand total', 'closing balance', 'particulars', 'dura ldh', 'sundry debtors', 'group summary')) or '1-apr' in s_low:
+            continue
+        if not any(c.isalpha() for c in s):
+            continue
+        # Avoid corrupted binary lines (e.g. trailing row in some exports)
+        ascii_ratio = sum(1 for c in s if ord(c) < 128) / len(s)
+        if ascii_ratio < 0.7:
+            continue
+        
+        pname = clean_party_name(s)
+        op_paise, op_dir = _parse_amt(ws.cell(r, 2).value)
+        dr_paise, _ = _parse_amt(ws.cell(r, 3).value)
+        cr_paise, _ = _parse_amt(ws.cell(r, 4).value)
+        cl_paise, cl_dir = _parse_amt(ws.cell(r, 5).value)
+
+        benchmarks.append({
+            "partyName": pname,
+            "rawName": s,
+            "openingPaise": op_paise,
+            "debitPaise": dr_paise,
+            "creditPaise": cr_paise,
+            "closingPaise": cl_paise,
+            "closingFormatted": f"{cl_paise / 100.0:,.2f}",
+            "direction": cl_dir
+        })
+
+    wb.close()
+    return {
+        "fileSha256": file_sha256 or "",
+        "totalBenchmarks": len(benchmarks),
+        "benchmarks": benchmarks
+    }
+
+
 def detect_excel_type(filepath: str) -> str:
     """
     Auto-detects whether an Excel workbook is:
@@ -909,6 +976,8 @@ def detect_excel_type(filepath: str) -> str:
     - 'unknown': Other/unrecognized format
     """
     fn = os.path.basename(filepath).lower()
+    if any(k in fn for k in ("debtor balance", "debtor_balance", "debtorbalance", "sundry debtors", "sundry_debtors")):
+        return "debtor_balance"
     if "hdfc" in fn:
         return "hdfc"
     if any(k in fn for k in ("yesbank", "yes_bank", "yes bank", "yes.xlsx")):
@@ -938,6 +1007,8 @@ def detect_excel_type(filepath: str) -> str:
         r3 = str(ws.cell(3, 1).value or "").strip().lower()
         wb.close()
 
+        if "sundry debtors" in r2 or "sundry debtors" in r1 or "sundry debtors" in r3:
+            return "debtor_balance"
         if "day book" in r2:
             return "daybook"
         if "journal register" in r2:

@@ -16,14 +16,21 @@ def run_cleanup():
     # 1. Ensure party_type column exists
     cur.execute("PRAGMA table_info(parties)")
     cols = [c[1] for c in cur.fetchall()]
-    if "party_type" not in cols:
-        print("Adding party_type column to parties table...")
-        cur.execute("ALTER TABLE parties ADD COLUMN party_type TEXT DEFAULT 'customer'")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_parties_party_type ON parties(party_type)")
-        conn.commit()
-        print("Column party_type added successfully.")
-    else:
-        print("Column party_type already exists.")
+    for col_name, col_type in [
+        ("party_type", "TEXT DEFAULT 'customer'"),
+        ("tally_closing_paise", "INTEGER DEFAULT NULL"),
+        ("tally_opening_paise", "INTEGER DEFAULT NULL"),
+        ("tally_status", "TEXT DEFAULT 'unbenchmarked'"),
+        ("tally_diff_paise", "INTEGER DEFAULT 0"),
+        ("has_authoritative_ledger", "INTEGER DEFAULT 0"),
+    ]:
+        if col_name not in cols:
+            print(f"Adding {col_name} column to parties table...")
+            cur.execute(f"ALTER TABLE parties ADD COLUMN {col_name} {col_type}")
+            conn.commit()
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_parties_party_type ON parties(party_type)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_parties_tally_status ON parties(tally_status)")
+    conn.commit()
 
     # 2. Drop Stock Journal and Physical Stock vouchers
     cur.execute("SELECT COUNT(*) FROM vouchers WHERE LOWER(voucher_type) IN ('stock journal', 'physical stock') OR LOWER(voucher_type) LIKE '%stock%'")
@@ -140,7 +147,22 @@ def run_cleanup():
         direct_payment_paise = cur.fetchone()[0]
 
         final_bal = ob_paise + voucher_net_paise - direct_payment_paise
-        cur.execute("UPDATE parties SET balance_paise = ? WHERE id = ?", (final_bal, cid))
+        
+        cur.execute("SELECT tally_closing_paise, has_authoritative_ledger FROM parties WHERE id = ?", (cid,))
+        t_row = cur.fetchone()
+        if t_row and t_row[0] is not None:
+            t_cl = t_row[0]
+            has_auth = t_row[1] or 0
+            diff = final_bal - t_cl
+            if has_auth == 1 or abs(diff) <= 100:
+                t_status = 'verified'
+                t_diff = 0
+            else:
+                t_status = 'mismatch'
+                t_diff = diff
+            cur.execute("UPDATE parties SET balance_paise = ?, tally_status = ?, tally_diff_paise = ? WHERE id = ?", (final_bal, t_status, t_diff, cid))
+        else:
+            cur.execute("UPDATE parties SET balance_paise = ? WHERE id = ?", (final_bal, cid))
 
     conn.commit()
     print(f"Successfully recomputed balances for {len(customers)} pure customer accounts.")
