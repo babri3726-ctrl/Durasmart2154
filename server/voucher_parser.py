@@ -855,13 +855,14 @@ def parse_bank_workbook(
 def detect_excel_type(filepath: str) -> str:
     """
     Auto-detects whether an Excel workbook is:
-    - 'daybook': Day Book with vouchers (Sales, Purchases, Contra, Notes; Payment/Receipt disabled)
+    - 'daybook': Day Book with vouchers (Sales, Purchases, Contra, Notes, Cash payments/receipts)
     - 'hdfc': Dedicated HDFC Bank Book (hdfc.xlsx)
     - 'yesbank': Dedicated Yes Bank Book (yesbank.xlsx)
     - 'roundoff': Dedicated Round Off ledger
     - 'discount': Dedicated Discount ledger
     - 'journal': Master Double-Entry Journal Register (journal.xlsx)
     - 'trialbalance': Trial Balance / Master Opening Balance register
+    - 'customer_ledger': Individual party/customer ledger statement exported from Tally
     - 'unknown': Other/unrecognized format
     """
     fn = os.path.basename(filepath).lower()
@@ -875,7 +876,7 @@ def detect_excel_type(filepath: str) -> str:
         return "discount"
     if "journal" in fn and "stock" not in fn and "day" not in fn:
         return "journal"
-    if any(k in fn for k in ("trial", "opening", "tb.", "trialbalance", "trial_balance", "op.", "op_")) or fn == "op.xlsx" or fn == "op.xlsm":
+    if any(k in fn for k in ("trial", "opening", "tb.", "trialbalance", "trial_balance", "op.", "op_")) or fn in ("op.xlsx", "op.xlsm"):
         return "trialbalance"
     if any(k in fn for k in ("daybook", "day_book", "day book")):
         return "daybook"
@@ -883,26 +884,27 @@ def detect_excel_type(filepath: str) -> str:
     try:
         wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
         ws = wb.active
-        top_text = ""
-        for r in range(1, 10):
-            row_vals = [str(ws.cell(r, c).value or "").lower() for c in range(1, 10)]
-            top_text += " ".join(row_vals) + " "
+        r1 = str(ws.cell(1, 1).value or "").strip().lower()
+        r2 = str(ws.cell(2, 1).value or "").strip().lower()
+        r3 = str(ws.cell(3, 1).value or "").strip().lower()
         wb.close()
 
-        if "hdfc" in top_text:
-            return "hdfc"
-        if "yes bank" in top_text or "yesbank" in top_text:
-            return "yesbank"
-        if "journal register" in top_text or ("journal" in top_text and "debit" in top_text and "credit" in top_text and "day book" not in top_text):
-            return "journal"
-        if "round off" in top_text or "roundoff" in top_text or "rounoff" in top_text:
-            return "roundoff"
-        if "discount" in top_text and "vch type" not in top_text:
-            return "discount"
-        if "trial balance" in top_text or ("particulars" in top_text and "closing balance" in top_text):
-            return "trialbalance"
-        if "day book" in top_text or "vch type" in top_text or "contra" in top_text:
+        if "day book" in r2:
             return "daybook"
+        if "journal register" in r2:
+            return "journal"
+        if "trial balance" in r2:
+            return "trialbalance"
+        if "round off" in r2 or "roundoff" in r2:
+            return "roundoff"
+        if "discount" in r2:
+            return "discount"
+        if "hdfc" in r2:
+            return "hdfc"
+        if "yes bank" in r2:
+            return "yesbank"
+        if "ledger account" in r3 or "ledger account" in r2 or "ledger:" in r2 or "ledger:" in r3:
+            return "customer_ledger"
     except Exception:
         pass
 

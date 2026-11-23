@@ -2888,38 +2888,19 @@ async def apply_multi_excel_bundle(
         except Exception as e:
             results["trialBalance"] = {"error": str(e)}
             
-    # 2. Daybook
-    if "daybook" in by_type:
-        db_file = by_type["daybook"]
-        try:
-            f_sha = hashlib.sha256(db_file["content"]).hexdigest()
-            parsed_db = parse_accounting_workbook(db_file["path"], file_sha256=f_sha, disable_payment_receipt=True)
-            db_vchs = parsed_db["vouchers"]
-            # STRICT USER INSTRUCTION: In Day Book, disable Payment and Receipt vouchers
-            # (Bank payments and receipts are authoritatively handled by dedicated HDFC & Yes Bank books)
-            db_vchs = [v for v in db_vchs if v.get("voucherType", "").lower() not in ("payment", "receipt")]
-            if "journal" in by_type:
-                # Exclude incomplete single-leg Daybook journals when Master Journal Register is present
-                db_vchs = [v for v in db_vchs if v.get("voucherType", "").lower() != "journal"]
-            db_res = db.save_vouchers_batch(db_vchs, file_sha=f_sha)
-            results["daybook"] = {
-                "filename": db_file["filename"],
-                "vouchersParsed": parsed_db.get("voucherCount", 0),
-                "insertedCount": db_res.get("insertedCount", 0),
-                "skippedCount": db_res.get("skippedCount", 0),
-                "newPartiesCount": db_res.get("newPartiesCount", 0)
-            }
-        except Exception as e:
-            results["daybook"] = {"error": str(e)}
+    # 2. Bank Books first (HDFC & Yes Bank) for Smart Liquid Deduplication pool
+    from collections import Counter
+    from .voucher_parser import parse_bank_workbook, clean_party_name
+    bank_lookup = Counter()
 
-    # 2.5 HDFC Bank Book
+    # 2.1 HDFC Bank Book
     if "hdfc" in by_type:
         h_file = by_type["hdfc"]
         try:
             f_sha = hashlib.sha256(h_file["content"]).hexdigest()
-            from .voucher_parser import parse_bank_workbook
             parsed_h = parse_bank_workbook(h_file["path"], file_sha256=f_sha)
-            h_res = db.save_vouchers_batch(parsed_h["vouchers"], file_sha=f_sha)
+            h_vchs = parsed_h.get("vouchers", [])
+            h_res = db.save_vouchers_batch(h_vchs, file_sha=f_sha)
             results["hdfc"] = {
                 "filename": h_file["filename"],
                 "vouchersParsed": parsed_h.get("voucherCount", 0),
@@ -2929,17 +2910,25 @@ async def apply_multi_excel_bundle(
                 "totalDebitFormatted": parsed_h.get("totalDebitFormatted", "0.00"),
                 "totalCreditFormatted": parsed_h.get("totalCreditFormatted", "0.00")
             }
+            for b_vch in h_vchs:
+                key = (
+                    b_vch.get("voucherDate"),
+                    clean_party_name(b_vch.get("partyName", "")).lower().strip(),
+                    b_vch.get("debitPaise", 0),
+                    b_vch.get("creditPaise", 0)
+                )
+                bank_lookup[key] += 1
         except Exception as e:
             results["hdfc"] = {"error": str(e)}
 
-    # 2.6 Yes Bank Book
+    # 2.2 Yes Bank Book
     if "yesbank" in by_type:
         y_file = by_type["yesbank"]
         try:
             f_sha = hashlib.sha256(y_file["content"]).hexdigest()
-            from .voucher_parser import parse_bank_workbook
             parsed_y = parse_bank_workbook(y_file["path"], file_sha256=f_sha)
-            y_res = db.save_vouchers_batch(parsed_y["vouchers"], file_sha=f_sha)
+            y_vchs = parsed_y.get("vouchers", [])
+            y_res = db.save_vouchers_batch(y_vchs, file_sha=f_sha)
             results["yesbank"] = {
                 "filename": y_file["filename"],
                 "vouchersParsed": parsed_y.get("voucherCount", 0),
@@ -2949,10 +2938,70 @@ async def apply_multi_excel_bundle(
                 "totalDebitFormatted": parsed_y.get("totalDebitFormatted", "0.00"),
                 "totalCreditFormatted": parsed_y.get("totalCreditFormatted", "0.00")
             }
+            for b_vch in y_vchs:
+                key = (
+                    b_vch.get("voucherDate"),
+                    clean_party_name(b_vch.get("partyName", "")).lower().strip(),
+                    b_vch.get("debitPaise", 0),
+                    b_vch.get("creditPaise", 0)
+                )
+                bank_lookup[key] += 1
         except Exception as e:
             results["yesbank"] = {"error": str(e)}
 
-    # 3. Master Double-Entry Journal Register
+    # 2.3 Daybook with Smart Liquid Deduplication
+    if "daybook" in by_type:
+        db_file = by_type["daybook"]
+        try:
+            f_sha = hashlib.sha256(db_file["content"]).hexdigest()
+            parsed_db = parse_accounting_workbook(db_file["path"], file_sha256=f_sha, disable_payment_receipt=False)
+            all_db_vchs = parsed_db.get("vouchers", [])
+            
+            clean_vouchers = []
+            skipped_bank_duplicates = 0
+            skipped_stock = 0
+            skipped_journals = 0
+            retained_cash_pmt_rcpt = 0
+
+            for v in all_db_vchs:
+                vt = (v.get("voucherType") or "").lower()
+                if vt in ("stock journal", "physical stock", "material in", "material out") or "stock" in vt:
+                    skipped_stock += 1
+                    continue
+                if "journal" in by_type and vt == "journal":
+                    skipped_journals += 1
+                    continue
+                if vt in ("payment", "receipt"):
+                    key = (
+                        v.get("voucherDate"),
+                        clean_party_name(v.get("partyName", "")).lower().strip(),
+                        v.get("debitPaise", 0),
+                        v.get("creditPaise", 0)
+                    )
+                    if bank_lookup[key] > 0:
+                        bank_lookup[key] -= 1
+                        skipped_bank_duplicates += 1
+                        continue
+                    else:
+                        retained_cash_pmt_rcpt += 1
+                clean_vouchers.append(v)
+
+            db_res = db.save_vouchers_batch(clean_vouchers, file_sha=f_sha)
+            results["daybook"] = {
+                "filename": db_file["filename"],
+                "vouchersParsed": len(all_db_vchs),
+                "skippedStock": skipped_stock,
+                "skippedJournals": skipped_journals,
+                "skippedBankDuplicates": skipped_bank_duplicates,
+                "retainedCashVouchers": retained_cash_pmt_rcpt,
+                "insertedCount": db_res.get("insertedCount", 0),
+                "skippedCount": db_res.get("skippedCount", 0),
+                "newPartiesCount": db_res.get("newPartiesCount", 0)
+            }
+        except Exception as e:
+            results["daybook"] = {"error": str(e)}
+
+    # 2.4 Master Double-Entry Journal Register
     if "journal" in by_type:
         j_file = by_type["journal"]
         try:
@@ -3013,6 +3062,36 @@ async def apply_multi_excel_bundle(
             }
         except Exception as e:
             results["discount"] = {"error": str(e)}
+
+    # 4.5 Dynamic Authoritative Customer Ledgers
+    cust_ledgers = [sf for sf in saved_files if sf["type"] == "customer_ledger"]
+    if cust_ledgers:
+        results["customerLedgers"] = []
+        for c_file in cust_ledgers:
+            try:
+                f_sha = hashlib.sha256(c_file["content"]).hexdigest()
+                parsed_c = parse_accounting_workbook(c_file["path"], file_sha256=f_sha, filename=c_file["filename"])
+                vchs = parsed_c.get("vouchers", [])
+                if vchs:
+                    c_name = parsed_c.get("customerName") or vchs[0]["partyName"]
+                    with db.get_connection() as conn:
+                        pid, _ = db.find_or_create_party_by_name(conn, c_name)
+                        ob_paise = parsed_c.get("openingBalancePaise", 0)
+                        if ob_paise != 0:
+                            conn.execute("""
+                                INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)
+                                VALUES (?, '2026-04-01', ?, ?, 'Authoritative Ledger', datetime('now'))
+                            """, (pid, abs(ob_paise), "debit" if ob_paise >= 0 else "credit"))
+                        conn.execute("DELETE FROM vouchers WHERE party_id = ?", (pid,))
+                        conn.commit()
+                    res = db.save_vouchers_batch(vchs, file_sha=f_sha)
+                    results["customerLedgers"].append({
+                        "filename": c_file["filename"],
+                        "customerName": c_name,
+                        "vouchersCount": res.get("insertedCount", 0)
+                    })
+            except Exception as e:
+                results["customerLedgers"].append({"filename": c_file["filename"], "error": str(e)})
             
     # 5. Run classification & cleanup
     try:

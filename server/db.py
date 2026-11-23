@@ -1369,13 +1369,29 @@ def reconcile_adjustment_vouchers(
             short_label = book_source.replace(" Ledger", "")
             narration = v.get("narration") or (f"{short_label} ({vno})" if vno else short_label)
 
-            # Match generic voucher from Day Book on same date and amount (1-to-1 pairing, never delete)
+            # 1. If this party already has this adjustment entry from the Master Journal Register, skip to prevent double counting
+            cur.execute(
+                """
+                SELECT id FROM vouchers
+                WHERE party_id = ? AND voucher_date = ? AND (credit_paise = ? OR debit_paise = ?)
+                  AND book_source = 'Journal Register'
+                """,
+                (party_id, vdate, amt_paise, amt_paise)
+            )
+            jr_match = next((row[0] for row in cur.fetchall() if row[0] not in claimed_party_vids), None)
+            if jr_match:
+                claimed_party_vids.add(jr_match)
+                skipped += 1
+                continue
+
+            # 2. Match generic voucher from Day Book on same date and amount (1-to-1 pairing, never delete, never steal from Journal/Bank)
             cur.execute(
                 """
                 SELECT id, voucher_no FROM vouchers
                 WHERE (LOWER(party_name) IN (?, ? || ' ledger') OR party_id IN ('LEDGER-DISCOUNT', 'LEDGER-ROUNDOFF'))
                   AND voucher_date = ?
                   AND (debit_paise = ? OR credit_paise = ?)
+                  AND book_source NOT IN ('Journal Register', 'HDFC Bank Book', 'Yes Bank Book')
                 """,
                 (target_generic_party.lower(), target_generic_party.lower(), vdate, amt_paise, amt_paise)
             )
@@ -1406,7 +1422,7 @@ def reconcile_adjustment_vouchers(
                         SELECT id FROM vouchers
                         WHERE party_id = ? AND voucher_date = ? AND (credit_paise = ? OR debit_paise = ?)
                           AND LOWER(voucher_type) = 'journal'
-                          AND (book_source = ? OR book_source LIKE 'Day Book (%)')
+                          AND (book_source = ? OR book_source LIKE 'Day Book (%)' OR book_source = 'Journal Register')
                         """,
                         (party_id, vdate, amt_paise, amt_paise, book_source)
                     )
