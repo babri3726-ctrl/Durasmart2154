@@ -4,7 +4,7 @@ import {
   BookOpen,
   LayoutDashboard, TrendingUp, Wallet, Truck, Boxes,
   Map, Route, AlarmClock, Users, ShoppingCart, FilePlus2, IdCard, BarChart3, Settings, ReceiptIndianRupee,
-  Megaphone, KeyRound,
+  Megaphone, KeyRound, Building2,
   ChevronLeft, ChevronRight, LogOut, Menu, User,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -30,6 +30,7 @@ const NAV: { label: string; to: string; icon: LucideIcon; end?: boolean; hidden?
   { label: 'Task Alarm', to: '/task-alarm', icon: AlarmClock },
   { label: 'Customers', to: '/debtors', icon: Users, hidden: true },
   { label: 'Debtor List', to: '/debtors', icon: ReceiptIndianRupee, end: true },
+  { label: 'Creditor List', to: '/creditors', icon: Building2, end: true },
   { label: 'Provisional Debtors', to: '/debtors', icon: ReceiptIndianRupee, hidden: true },
   { label: 'Orders', to: '/orders', icon: ShoppingCart, end: true },
   { label: 'New Order', to: '/orders/new', icon: FilePlus2, end: true },

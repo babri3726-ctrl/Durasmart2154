@@ -2516,6 +2516,84 @@ def get_creditors(
         x_employee_id=x_employee_id,
     )
 
+@app.post("/api/v1/creditors/upload")
+async def upload_creditors_workbook(file: UploadFile = File(...)):
+    """Uploads sundry creditor.xlsx, extracts Tally closing balances, and marks parties as supplier creditors."""
+    import openpyxl, io, hashlib
+    content = await file.read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(content))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to open Excel workbook: {e}")
+
+    sheet = wb.active
+    updated_count = 0
+    total_debit = 0.0
+    total_credit = 0.0
+    now_iso = datetime.now().isoformat()
+    
+    with db.get_connection() as conn:
+        for i in range(1, sheet.max_row + 1):
+            val = sheet.cell(i, 1).value
+            dr = sheet.cell(i, 2).value or 0
+            cr = sheet.cell(i, 3).value or 0
+            if not val or str(val).strip().lower().startswith(('grand total', 'total', 'particulars', 'dura ldh', 'sundry creditor', 'group summary', '1-apr')):
+                continue
+            name_clean = str(val).strip()
+            try:
+                dr_val = float(dr)
+            except Exception:
+                dr_val = 0.0
+            try:
+                cr_val = float(cr)
+            except Exception:
+                cr_val = 0.0
+
+            total_debit += dr_val
+            total_credit += cr_val
+            net_paise = round((dr_val - cr_val) * 100)
+
+            cur = conn.cursor()
+            cur.execute("SELECT id, name FROM parties WHERE UPPER(TRIM(name)) = ?", (name_clean.upper(),))
+            row = cur.fetchone()
+            if not row:
+                cur.execute("SELECT id, name FROM parties WHERE UPPER(name) LIKE ?", (f"%{name_clean.upper()}%",))
+                row = cur.fetchone()
+            
+            if row:
+                cur.execute("""
+                    UPDATE parties 
+                    SET party_type = 'supplier', 
+                        tally_closing_paise = ?,
+                        tally_status = 'verified',
+                        updated_at = ?
+                    WHERE id = ?
+                """, (net_paise, now_iso, row["id"]))
+            else:
+                pid = f"CREDITOR-TALLY-{hashlib.md5(name_clean.encode()).hexdigest()[:4].upper()}"
+                cur.execute("""
+                    INSERT INTO parties (id, name, state, city, district, salesperson, balance_paise, credit_days, status, party_type, tally_closing_paise, tally_status, created_at, updated_at)
+                    VALUES (?, ?, 'Punjab', '', '', 'Unassigned', ?, 30, 'active', 'supplier', ?, 'verified', ?, ?)
+                """, (pid, name_clean, net_paise, net_paise, now_iso, now_iso))
+            updated_count += 1
+        conn.commit()
+
+    # Reload memory state
+    persisted = db.load_all_persisted_state()
+    if persisted.get("creditors"):
+        STATE["creditors"] = persisted["creditors"]
+    if persisted.get("debtors"):
+        STATE["debtors"] = persisted["debtors"]
+
+    return {
+        "success": True,
+        "message": f"Successfully processed {updated_count} Sundry Creditors from {file.filename}.",
+        "updatedCount": updated_count,
+        "totalDebit": total_debit,
+        "totalCredit": total_credit,
+        "netBalance": total_debit - total_credit
+    }
+
 @app.post("/api/v1/debtors")
 def create_debtor(body: DebtorCreate):
     new_id = f"DEBTOR-MAN-{len(STATE['debtors']) + 1:04d}"

@@ -25,6 +25,7 @@ import TaskAlarm from './pages/TaskAlarm';
 
 
 import Debtors from './pages/Debtors';
+import Creditors from './pages/Creditors';
 import Orders from './pages/Orders';
 import OrderNew from './pages/OrderNew';
 import OrderDetail from './pages/OrderDetail';
@@ -134,6 +135,7 @@ export default function App() {
           {/* Employees read this too, scoped by the server to their own parties; the owner-only
               workbook preview inside the page is hidden for them and refused by the backend. */}
           <Route path="/debtors" element={<Debtors />} />
+          <Route path="/creditors" element={<Creditors />} />
           <Route path="/orders" element={<Orders />} />
           <Route path="/orders/new" element={<OrderNew />} />
           {/* A saved draft is opened at its own address rather than edited in place: the screen has to

@@ -2081,6 +2081,22 @@ export function listCreditors(params: ListDebtorsParams = {}): Promise<ServerPag
   return listDebtors({ ...params, ledgerType: 'creditors', partyType: 'supplier' });
 }
 
+export function uploadCreditorsWorkbook(file: File): Promise<{
+  success: boolean;
+  message: string;
+  updatedCount: number;
+  totalDebit: number;
+  totalCredit: number;
+  netBalance: number;
+}> {
+  const formData = new FormData();
+  formData.append('file', file);
+  return send('/creditors/upload', {
+    method: 'POST',
+    body: formData,
+  });
+}
+
 export function syncDebtorBenchmarks(): Promise<{ status: string; message: string; details: any }> {
   return send('/debtors/sync-benchmarks', { method: 'POST' });
 }
