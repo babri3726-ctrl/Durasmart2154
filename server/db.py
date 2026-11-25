@@ -1577,9 +1577,19 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
             cur_book = v.get("bookSource", "")
 
             # Universal deduplication (across same book re-uploads, revised files, and cross-book statements)
-            clean_incoming_vno = re.sub(r'\(optional\)', '', str(vch_no or ''), flags=re.IGNORECASE).strip().lower()
-            if clean_incoming_vno.startswith(('db-', 'hdfc-', 'yes-', 'cash-')):
-                clean_incoming_vno = ""
+            def clean_vno_value(vno_raw):
+                if not vno_raw:
+                    return "", True
+                s = re.sub(r'\(optional\)', '', str(vno_raw), flags=re.IGNORECASE).strip()
+                is_synthetic = bool(
+                    re.match(r'^(db|hdfc|yes|cash|khan|jv)\s*[-_:]\s*', s, flags=re.IGNORECASE)
+                    or any(s.lower().startswith(p) for p in ('aug ', 'spt ', 'oct ', 'nov ', 'dec ', 'jan ', 'feb ', 'mar ', 'apr ', 'may ', 'jun ', 'jul '))
+                    or '@' in s
+                )
+                clean = re.sub(r'^(db|hdfc|yes|cash|khan|jv)\s*[-_:]\s*', '', s, flags=re.IGNORECASE).strip().lower()
+                return clean, is_synthetic
+
+            clean_incoming_vno, incoming_is_synthetic = clean_vno_value(vch_no)
             incoming_narr = re.sub(r'\s+', ' ', (v.get("narration") or "").strip().lower())
 
             cur.execute(
@@ -1599,28 +1609,16 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
             for cand_id, cand_vno, cand_narr, cand_bs in candidates:
                 if cand_id in claimed_cross_ids:
                     continue
-                cand_clean_vno = re.sub(r'\(optional\)', '', str(cand_vno or ''), flags=re.IGNORECASE).strip().lower()
-                if cand_clean_vno.startswith(('db-', 'hdfc-', 'yes-', 'cash-')):
-                    cand_clean_vno = ""
+                cand_clean_vno, cand_is_synthetic = clean_vno_value(cand_vno)
                 cand_clean_narr = re.sub(r'\s+', ' ', (cand_narr or "").strip().lower())
 
-                # If incoming voucher has a valid specific voucher_no (e.g. 2305)
-                if clean_incoming_vno:
-                    # Matches if candidate has matching voucher_no, or candidate had generic/empty voucher_no
-                    if cand_clean_vno == clean_incoming_vno or not cand_clean_vno:
-                        cross_match_id = cand_id
-                        break
-                else:
-                    # Incoming has no specific voucher_no
-                    if not cand_clean_vno:
-                        if incoming_narr and cand_clean_narr:
-                            if incoming_narr == cand_clean_narr or incoming_narr in cand_clean_narr or cand_clean_narr in incoming_narr:
-                                cross_match_id = cand_id
-                                break
-                        else:
-                            # 1-to-1 match for identical date, type, amount, party
-                            cross_match_id = cand_id
-                            break
+                # If either side is synthetic/auto-generated, or clean invoice numbers match, it is a duplicate!
+                if incoming_is_synthetic or cand_is_synthetic or clean_incoming_vno == cand_clean_vno:
+                    cross_match_id = cand_id
+                    break
+                elif not clean_incoming_vno or not cand_clean_vno:
+                    cross_match_id = cand_id
+                    break
 
             if cross_match_id:
                 claimed_cross_ids.add(cross_match_id)
@@ -1689,10 +1687,12 @@ def deduplicate_all_vouchers(conn=None) -> dict[str, Any]:
     def clean_vno_str(s):
         if not s:
             return ""
-        c = re.sub(r'\(optional\)', '', str(s), flags=re.IGNORECASE).strip().lower()
-        if c.startswith(('db-', 'hdfc-', 'yes-', 'cash-')):
+        c = re.sub(r'\(optional\)', '', str(s), flags=re.IGNORECASE).strip()
+        if re.match(r'^(db|hdfc|yes|cash|khan|jv)\s*[-_:]\s*', c, flags=re.IGNORECASE):
             return ""
-        return c
+        if any(c.lower().startswith(p) for p in ('aug ', 'spt ', 'oct ', 'nov ', 'dec ', 'jan ', 'feb ', 'mar ', 'apr ', 'may ', 'jun ', 'jul ')):
+            return ""
+        return c.lower()
 
     def is_invoice_no(s):
         c = clean_vno_str(s)
@@ -1764,7 +1764,7 @@ def deduplicate_all_vouchers(conn=None) -> dict[str, Any]:
                 generic_db = []
                 for v in group:
                     vid, pid, dt, vt, vno, dr, cr, narr, bs, fsha, cat = v
-                    is_generic = (bs == 'Day Book') and (not vno or str(vno).lower().startswith('db-') or any(str(vno).lower().startswith(p) for p in ('aug ', 'spt ', 'oct ', 'nov ', 'dec ', 'jan ', 'feb ', 'mar ', 'apr ', 'may ', 'jun ', 'jul ')))
+                    is_generic = (bs == 'Day Book') or not vno or bool(re.match(r'^(db|hdfc|yes|cash|khan|jv)\s*[-_:]\s*', str(vno), flags=re.IGNORECASE)) or any(str(vno).lower().startswith(p) for p in ('aug ', 'spt ', 'oct ', 'nov ', 'dec ', 'jan ', 'feb ', 'mar ', 'apr ', 'may ', 'jun ', 'jul '))
                     if is_generic:
                         generic_db.append(v)
                     else:

@@ -70,7 +70,7 @@ def parse_cell_amount(val: Any) -> tuple[float, str]:
     s = str(val).strip()
     if not s:
         return 0.0, ""
-    cleaned = s.replace(",", "").strip()
+    cleaned = s.replace(",", "").replace("Dr", "").replace("Cr", "").strip()
     try:
         return float(cleaned), ""
     except ValueError:
@@ -169,6 +169,330 @@ def parse_accounting_workbook(
     period_text = str(ws.cell(header_row_idx - 1, 1).value or "").strip()
     if not period_text or len(period_text) > 40:
         period_text = datetime.now().strftime("%B %Y")
+
+    def classify_party_account(name: str) -> tuple[str, str, str]:
+        p_lower = (name or "").strip().lower()
+        if p_lower in ("round off", "roundoff", "rounoff"):
+            return "Round Off Ledger", "LEDGER-ROUNDOFF", "roundoff"
+        elif p_lower in ("discount", "cd discount"):
+            return "Discount Ledger", "LEDGER-DISCOUNT", "discount"
+        elif p_lower in ("khan cash", "khancash"):
+            return "KHAN CASH", "LEDGER-KHANCASH", "cash"
+        elif p_lower in ("cash gbd", "cashgbd"):
+            return "Cash Gbd", "LEDGER-CASHGBD", "cash"
+        elif p_lower in ("cash", "cash book"):
+            return "Cash", "LEDGER-CASH", "cash"
+        elif p_lower in ("yes bank", "yes bank deemand loan", "yes"):
+            return "Yes Bank", "LEDGER-YESBANK", "bank"
+        elif any(k == p_lower or p_lower.startswith(k) for k in ("hdfc p.o.finance", "hdfc dura", "hdfc bank", "hdfc loan account")):
+            return "HDFC Bank", "LEDGER-HDFC", "bank"
+        return name, "", "customer"
+
+    if book_source == "Day Book":
+        rows = list(ws.iter_rows(values_only=True))
+        c_date = col_map["date"] - 1
+        c_part = col_map["particulars"] - 1
+        c_type = col_map.get("vch_type", 3) - 1
+        c_no = col_map.get("vch_no", 4) - 1 if "vch_no" in col_map else None
+        c_dr = col_map.get("debit", 5) - 1 if "debit" in col_map else None
+        c_cr = col_map.get("credit", 6) - 1 if "credit" in col_map else None
+
+        tx_blocks = []
+        current_tx = []
+        for r_idx in range(header_row_idx, len(rows)):
+            row = rows[r_idx]
+            r = r_idx + 1
+            d_val = row[c_date] if c_date < len(row) else None
+            if d_val is not None:
+                d_str = str(d_val).strip().lower()
+                if d_str.startswith(("total", "amount", "date", "grand total", "inwards", "outwards")):
+                    continue
+                if "1-apr-26 to 30-nov-27" in d_str or (r > 100 and d_str.startswith("dura ldh")):
+                    break
+                if current_tx:
+                    tx_blocks.append(current_tx)
+                current_tx = [(r, row)]
+            else:
+                p_val = row[c_part] if c_part < len(row) else None
+                dr_val = row[c_dr] if c_dr is not None and c_dr < len(row) else None
+                cr_val = row[c_cr] if c_cr is not None and c_cr < len(row) else None
+                if p_val is not None or dr_val is not None or cr_val is not None:
+                    if current_tx:
+                        current_tx.append((r, row))
+        if current_tx:
+            tx_blocks.append(current_tx)
+
+        vouchers = []
+        for tx in tx_blocks:
+            r0, row0 = tx[0]
+            vch_date = normalize_date_str(row0[c_date])
+            vch_type_val = row0[c_type] if c_type < len(row0) else ""
+            vch_type = str(vch_type_val or "").strip()
+            
+            if vch_type.lower() in ("stock journal", "physical stock", "material in", "material out") or "stock" in vch_type.lower():
+                continue
+            if vch_type.lower() == "contra":
+                continue
+            if disable_payment_receipt and vch_type.lower() in ("payment", "receipt"):
+                continue
+
+            vch_no_val = row0[c_no] if c_no is not None and c_no < len(row0) else None
+            if isinstance(vch_no_val, datetime):
+                vch_no = vch_no_val.strftime("%d-%b-%y")
+            else:
+                vch_no = str(vch_no_val or "").strip()
+
+            lines = []
+            for r, row in tx:
+                p = clean_party_name(row[c_part] if c_part < len(row) else None)
+                dr, d_qty = parse_cell_amount(row[c_dr] if c_dr is not None and c_dr < len(row) else None)
+                cr, c_qty = parse_cell_amount(row[c_cr] if c_cr is not None and c_cr < len(row) else None)
+                if p and p.lower() not in ("(cancelled)", "total", "grand total", "opening balance"):
+                    lines.append((r, p, dr, cr, d_qty, c_qty))
+                    
+            if not lines:
+                continue
+
+            vt_lower = vch_type.lower()
+            
+            def make_vch_id(r, vdate, vtype, vno, pname, dr_p, cr_p, extra=""):
+                clean_vno = re.sub(r'\(optional\)', '', str(vno or ''), flags=re.IGNORECASE).strip().lower()
+                is_real = clean_vno and not clean_vno.startswith("db-") and '@' not in clean_vno and not any(clean_vno.startswith(m) for m in ('aug ', 'spt ', 'oct ', 'nov ', 'dec ', 'jan ', 'feb ', 'mar ', 'apr ', 'may ', 'jun ', 'jul '))
+                if is_real:
+                    h_src = f"{vdate}:{vtype}:{clean_vno}:{pname.strip().lower()}:{dr_p}:{cr_p}"
+                else:
+                    h_src = f"Day Book:{r}:{vdate}:{vtype}:{vno}:{pname}:{dr_p}:{cr_p}:{extra}"
+                return f"VCH-{hashlib.md5(h_src.encode('utf-8')).hexdigest()[:16]}"
+
+            if len(lines) == 1:
+                r, p, dr, cr, d_qty, c_qty = lines[0]
+                if dr > 0 or cr > 0:
+                    pname, pid, ptype = classify_party_account(p)
+                    vtype = vch_type or ("Sales" if dr > 0 else "Receipt")
+                    dr_p = round(dr * 100)
+                    cr_p = round(cr * 100)
+                    v_id = make_vch_id(r, vch_date, vtype, vch_no or f"DB-{r}", pname, dr_p, cr_p, d_qty or c_qty)
+                    vouchers.append({
+                        "id": v_id,
+                        "voucherNo": vch_no or f"DB-{r}",
+                        "voucherType": vtype,
+                        "voucherDate": vch_date,
+                        "partyName": pname,
+                        "partyId": pid,
+                        "partyType": ptype,
+                        "debitPaise": dr_p,
+                        "creditPaise": cr_p,
+                        "debitAmount": dr,
+                        "creditAmount": cr,
+                        "narration": "",
+                        "prefix": "",
+                        "bookSource": "Day Book"
+                    })
+            elif vt_lower == "sales":
+                r, p, dr, cr, d_qty, c_qty = lines[0]
+                pname, pid, ptype = classify_party_account(p)
+                dr_p = round(dr * 100)
+                opposing = [l[1] for l in lines[1:] if clean_party_name(l[1]).lower() not in ("sales dura", "sales", "bill gst", "gst", "round off")]
+                narr = opposing[0] if opposing else "Sales Dura"
+                v_id = make_vch_id(r, vch_date, "Sales", vch_no or f"DB-{r}", pname, dr_p, 0, d_qty or c_qty)
+                vouchers.append({
+                    "id": v_id,
+                    "voucherNo": vch_no or f"DB-{r}",
+                    "voucherType": "Sales",
+                    "voucherDate": vch_date,
+                    "partyName": pname,
+                    "partyId": pid,
+                    "partyType": ptype,
+                    "debitPaise": dr_p,
+                    "creditPaise": 0,
+                    "debitAmount": dr,
+                    "creditAmount": 0.0,
+                    "narration": narr,
+                    "prefix": "",
+                    "bookSource": "Day Book"
+                })
+            elif vt_lower == "purchase":
+                r, p, dr, cr, d_qty, c_qty = lines[0]
+                pname, pid, ptype = classify_party_account(p)
+                cr_p = round(cr * 100)
+                v_id = make_vch_id(r, vch_date, "Purchase", vch_no or f"DB-{r}", pname, 0, cr_p, d_qty or c_qty)
+                vouchers.append({
+                    "id": v_id,
+                    "voucherNo": vch_no or f"DB-{r}",
+                    "voucherType": "Purchase",
+                    "voucherDate": vch_date,
+                    "partyName": pname,
+                    "partyId": pid,
+                    "partyType": ptype,
+                    "debitPaise": 0,
+                    "creditPaise": cr_p,
+                    "debitAmount": 0.0,
+                    "creditAmount": cr,
+                    "narration": "Purchage",
+                    "prefix": "",
+                    "bookSource": "Day Book"
+                })
+            elif vt_lower == "credit note":
+                r, p, dr, cr, d_qty, c_qty = lines[0]
+                pname, pid, ptype = classify_party_account(p)
+                cr_p = round(cr * 100)
+                v_id = make_vch_id(r, vch_date, "Credit Note", vch_no or f"DB-{r}", pname, 0, cr_p, d_qty or c_qty)
+                vouchers.append({
+                    "id": v_id,
+                    "voucherNo": vch_no or f"DB-{r}",
+                    "voucherType": "Credit Note",
+                    "voucherDate": vch_date,
+                    "partyName": pname,
+                    "partyId": pid,
+                    "partyType": ptype,
+                    "debitPaise": 0,
+                    "creditPaise": cr_p,
+                    "debitAmount": 0.0,
+                    "creditAmount": cr,
+                    "narration": "Sales Dura",
+                    "prefix": "",
+                    "bookSource": "Day Book"
+                })
+            elif vt_lower == "debit note":
+                r, p, dr, cr, d_qty, c_qty = lines[0]
+                pname, pid, ptype = classify_party_account(p)
+                dr_p = round(dr * 100)
+                v_id = make_vch_id(r, vch_date, "Debit Note", vch_no or f"DB-{r}", pname, dr_p, 0, d_qty or c_qty)
+                vouchers.append({
+                    "id": v_id,
+                    "voucherNo": vch_no or f"DB-{r}",
+                    "voucherType": "Debit Note",
+                    "voucherDate": vch_date,
+                    "partyName": pname,
+                    "partyId": pid,
+                    "partyType": ptype,
+                    "debitPaise": dr_p,
+                    "creditPaise": 0,
+                    "debitAmount": dr,
+                    "creditAmount": 0.0,
+                    "narration": "Purchage",
+                    "prefix": "",
+                    "bookSource": "Day Book"
+                })
+            elif vt_lower == "receipt":
+                d_names = [l[1] for l in lines if l[2] > 0]
+                bank_label = ", ".join(d_names) if d_names else "Bank"
+                for r, p, dr, cr, d_qty, c_qty in lines:
+                    if cr > 0:
+                        pname, pid, ptype = classify_party_account(p)
+                        cr_p = round(cr * 100)
+                        v_id = make_vch_id(r, vch_date, "Receipt", vch_no or f"DB-{r}", pname, 0, cr_p, d_qty or c_qty)
+                        vouchers.append({
+                            "id": v_id,
+                            "voucherNo": vch_no or f"DB-{r}",
+                            "voucherType": "Receipt",
+                            "voucherDate": vch_date,
+                            "partyName": pname,
+                            "partyId": pid,
+                            "partyType": ptype,
+                            "debitPaise": 0,
+                            "creditPaise": cr_p,
+                            "debitAmount": 0.0,
+                            "creditAmount": cr,
+                            "narration": f"To {bank_label}",
+                            "prefix": "",
+                            "bookSource": "Day Book"
+                        })
+            elif vt_lower == "payment":
+                c_names = [l[1] for l in lines if l[3] > 0]
+                bank_label = ", ".join(c_names) if c_names else "Bank"
+                for r, p, dr, cr, d_qty, c_qty in lines:
+                    if dr > 0:
+                        pname, pid, ptype = classify_party_account(p)
+                        dr_p = round(dr * 100)
+                        v_id = make_vch_id(r, vch_date, "Payment", vch_no or f"DB-{r}", pname, dr_p, 0, d_qty or c_qty)
+                        vouchers.append({
+                            "id": v_id,
+                            "voucherNo": vch_no or f"DB-{r}",
+                            "voucherType": "Payment",
+                            "voucherDate": vch_date,
+                            "partyName": pname,
+                            "partyId": pid,
+                            "partyType": ptype,
+                            "debitPaise": dr_p,
+                            "creditPaise": 0,
+                            "debitAmount": dr,
+                            "creditAmount": 0.0,
+                            "narration": f"By {bank_label}",
+                            "prefix": "",
+                            "bookSource": "Day Book"
+                        })
+            else:
+                debits = [(r, p, dr, dq, cq) for r, p, dr, cr, dq, cq in lines if dr > 0]
+                credits = [(r, p, cr, dq, cq) for r, p, dr, cr, dq, cq in lines if cr > 0]
+                c_names = [c[1] for c in credits]
+                d_names = [d[1] for d in debits]
+                
+                for r, p, dr, d_qty, c_qty in debits:
+                    pname, pid, ptype = classify_party_account(p)
+                    dr_p = round(dr * 100)
+                    opp = [c for c in c_names if c != p]
+                    narr = f"To {', '.join(opp)}" if opp else "Journal"
+                    v_id = make_vch_id(r, vch_date, "Journal", vch_no or f"DB-{r}", pname, dr_p, 0, d_qty or c_qty)
+                    vouchers.append({
+                        "id": v_id,
+                        "voucherNo": vch_no or f"DB-{r}",
+                        "voucherType": "Journal",
+                        "voucherDate": vch_date,
+                        "partyName": pname,
+                        "partyId": pid,
+                        "partyType": ptype,
+                        "debitPaise": dr_p,
+                        "creditPaise": 0,
+                        "debitAmount": dr,
+                        "creditAmount": 0.0,
+                        "narration": narr,
+                        "prefix": "",
+                        "bookSource": "Day Book"
+                    })
+                for r, p, cr, d_qty, c_qty in credits:
+                    pname, pid, ptype = classify_party_account(p)
+                    cr_p = round(cr * 100)
+                    opp = [d for d in d_names if d != p]
+                    narr = f"By {', '.join(opp)}" if opp else "Journal"
+                    v_id = make_vch_id(r, vch_date, "Journal", vch_no or f"DB-{r}", pname, 0, cr_p, d_qty or c_qty)
+                    vouchers.append({
+                        "id": v_id,
+                        "voucherNo": vch_no or f"DB-{r}",
+                        "voucherType": "Journal",
+                        "voucherDate": vch_date,
+                        "partyName": pname,
+                        "partyId": pid,
+                        "partyType": ptype,
+                        "debitPaise": 0,
+                        "creditPaise": cr_p,
+                        "debitAmount": 0.0,
+                        "creditAmount": cr,
+                        "narration": narr,
+                        "prefix": "",
+                        "bookSource": "Day Book"
+                    })
+
+        total_debit_paise = sum(v["debitPaise"] for v in vouchers)
+        total_credit_paise = sum(v["creditPaise"] for v in vouchers)
+
+        return {
+            "bookSource": "Day Book",
+            "isCustomerLedger": False,
+            "isDiscountLedger": False,
+            "isRoundoffLedger": False,
+            "customerName": "",
+            "openingBalancePaise": 0,
+            "periodText": period_text,
+            "headerRow": header_row_idx,
+            "voucherCount": len(vouchers),
+            "totalDebitPaise": total_debit_paise,
+            "totalCreditPaise": total_credit_paise,
+            "totalDebitFormatted": f"{total_debit_paise / 100.0:,.2f}",
+            "totalCreditFormatted": f"{total_credit_paise / 100.0:,.2f}",
+            "vouchers": vouchers,
+            "fileSha256": file_sha256 or "",
+        }
 
     vouchers = []
     skipped_count = 0
