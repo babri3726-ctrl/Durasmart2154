@@ -77,7 +77,7 @@ def parse_accounting_workbook(
     filepath: str,
     file_sha256: str | None = None,
     filename: str | None = None,
-    disable_payment_receipt: bool = True
+    disable_payment_receipt: bool = False
 ) -> dict[str, Any]:
     """
     Parses Sales Register or Bank Book spreadsheets into a standardized transaction ledger.

@@ -53,6 +53,9 @@ import {
   AlertTriangle,
   Users,
   Store,
+  Calendar,
+  ArrowUpDown,
+  ChevronRight,
 } from 'lucide-react';
 import { Card, EmptyState, KpiCard, PageHeader, Spinner } from '../components/ui/Card';
 import { LiveSyncBar } from '../components/ui/LiveSync';
@@ -216,23 +219,135 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
   };
 
   const uniqueVouchers = useMemo(() => {
-    const seen = new Set<string>();
+    // Sort so specialized vouchers come first, generic Day Book comes last
+    const sorted = [...vouchers].sort((a, b) => {
+      const aIsGeneric = (a.book_source === 'Day Book') && (!a.voucher_no || a.voucher_no.toLowerCase().startsWith('db-'));
+      const bIsGeneric = (b.book_source === 'Day Book') && (!b.voucher_no || b.voucher_no.toLowerCase().startsWith('db-'));
+      if (aIsGeneric && !bIsGeneric) return 1;
+      if (!aIsGeneric && bIsGeneric) return -1;
+      return 0;
+    });
+
+    const seenInvoices = new Set<string>();
+    const seenGenericMatch = new Set<string>();
+    const seenContent = new Set<string>();
     const result: ServerVoucher[] = [];
-    for (const v of vouchers) {
+
+    for (const v of sorted) {
       const vno = cleanVnoStr(v.voucher_no);
-      let key: string;
+      const vt = (v.voucher_type || '').toLowerCase();
+
+      // Real invoice number: deduplicate exact invoice duplicates
       if (isInvoiceVno(v.voucher_no)) {
-        key = `INV:${v.voucher_date}:${(v.voucher_type || '').toLowerCase()}:${vno}:${v.debit_paise}:${v.credit_paise}`;
-      } else {
-        key = `RAW:${v.id}`;
+        const invKey = `${v.voucher_date}:${vt}:${vno}:${v.debit_paise}:${v.credit_paise}`;
+        if (seenInvoices.has(invKey)) continue;
+        seenInvoices.add(invKey);
       }
-      if (!seen.has(key)) {
-        seen.add(key);
-        result.push(v);
+
+      // Cross-book generic match: if specialized entry exists for same date/type/amount, skip generic Day Book
+      const genericKey = `${v.voucher_date}:${vt}:${v.debit_paise}:${v.credit_paise}`;
+      const isGenericDb = (v.book_source === 'Day Book') && (!v.voucher_no || v.voucher_no.toLowerCase().startsWith('db-'));
+      if (isGenericDb && seenGenericMatch.has(genericKey)) {
+        continue;
       }
+
+      // Exact full content match
+      const contentKey = `${v.voucher_date}:${vt}:${vno}:${v.debit_paise}:${v.credit_paise}:${v.book_source || ''}:${(v.narration || '').trim().toLowerCase()}`;
+      if (seenContent.has(contentKey)) continue;
+      seenContent.add(contentKey);
+
+      seenGenericMatch.add(genericKey);
+      result.push(v);
     }
     return result;
   }, [vouchers]);
+
+  // Sort chronologically (Oldest first from 1-April-2026 as per Tally standard) and compute running balance
+  const chronologicalVouchers = useMemo(() => {
+    const list = [...uniqueVouchers].sort((a, b) => {
+      const diff = parseVoucherDate(a.voucher_date).getTime() - parseVoucherDate(b.voucher_date).getTime();
+      if (diff !== 0) return diff;
+      return (a.id || '').localeCompare(b.id || '');
+    });
+
+    let running = currentOpeningPaise;
+    return list.map((v) => {
+      running += (v.debit_paise || 0) - (v.credit_paise || 0);
+      return {
+        ...v,
+        runningBalancePaise: running,
+      };
+    });
+  }, [uniqueVouchers, currentOpeningPaise]);
+
+  const [viewMode, setViewMode] = useState<'detailed' | 'monthly'>('detailed');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc'); // Default 'asc' (Tally 1-Apr-26 chronological start)
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+
+  // Monthly breakdown for Tally-style summary
+  const monthlySummary = useMemo(() => {
+    const monthNames = [
+      'April', 'May', 'June', 'July', 'August', 'September',
+      'October', 'November', 'December', 'January', 'February', 'March'
+    ];
+    const monthBuckets: Record<string, { label: string; yearMonth: string; debits: number; credits: number; count: number }> = {};
+
+    for (const v of chronologicalVouchers) {
+      const d = parseVoucherDate(v.voucher_date);
+      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const mName = monthNames[d.getMonth()] || `Month ${d.getMonth() + 1}`;
+      if (!monthBuckets[ym]) {
+        monthBuckets[ym] = {
+          label: `${mName} ${d.getFullYear()}`,
+          yearMonth: ym,
+          debits: 0,
+          credits: 0,
+          count: 0,
+        };
+      }
+      monthBuckets[ym].debits += v.debit_paise || 0;
+      monthBuckets[ym].credits += v.credit_paise || 0;
+      monthBuckets[ym].count += 1;
+    }
+
+    const defaultMonths = [
+      { ym: '2026-04', label: 'April 2026' },
+      { ym: '2026-05', label: 'May 2026' },
+      { ym: '2026-06', label: 'June 2026' },
+      { ym: '2026-07', label: 'July 2026' },
+      { ym: '2026-08', label: 'August 2026' },
+      { ym: '2026-09', label: 'September 2026' },
+      { ym: '2026-10', label: 'October 2026' },
+      { ym: '2026-11', label: 'November 2026' },
+    ];
+
+    for (const dm of defaultMonths) {
+      if (!monthBuckets[dm.ym]) {
+        monthBuckets[dm.ym] = {
+          label: dm.label,
+          yearMonth: dm.ym,
+          debits: 0,
+          credits: 0,
+          count: 0,
+        };
+      }
+    }
+
+    const sortedYms = Object.keys(monthBuckets).sort();
+    let running = currentOpeningPaise;
+    return sortedYms.map((ym) => {
+      const b = monthBuckets[ym];
+      const opening = running;
+      running += b.debits - b.credits;
+      const closing = running;
+      return {
+        ...b,
+        openingPaise: opening,
+        closingPaise: closing,
+        netMovementPaise: b.debits - b.credits,
+      };
+    });
+  }, [chronologicalVouchers, currentOpeningPaise]);
 
   const [cleaningDupes, setCleaningDupes] = useState(false);
   const handleCleanDuplicates = async () => {
@@ -334,11 +449,25 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
     return buckets;
   }, [uniqueVouchers, debtor, currentOpeningPaise, currentOutstandingPaise]);
 
-  const filteredVouchers = uniqueVouchers.filter((v) => {
-    if (filterType === 'SALES') return (v.debit_paise || 0) > 0;
-    if (filterType === 'RECEIPT') return (v.credit_paise || 0) > 0;
-    return true;
-  });
+  const filteredVouchers = useMemo(() => {
+    let list = chronologicalVouchers;
+    if (selectedMonth) {
+      list = list.filter((v) => {
+        const d = parseVoucherDate(v.voucher_date);
+        const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        return ym === selectedMonth;
+      });
+    }
+    if (filterType === 'SALES') {
+      list = list.filter((v) => (v.debit_paise || 0) > 0);
+    } else if (filterType === 'RECEIPT') {
+      list = list.filter((v) => (v.credit_paise || 0) > 0);
+    }
+    if (sortOrder === 'desc') {
+      return [...list].reverse();
+    }
+    return list;
+  }, [chronologicalVouchers, selectedMonth, filterType, sortOrder]);
 
   const handleShareWhatsApp = () => {
     const partyName = debtor.name || debtor.customerName || 'Customer';
@@ -665,39 +794,253 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
           </div>
         </div>
 
-        {/* Filter Bar */}
-        <div className="flex items-center justify-between border-b border-slate-200 bg-slate-100/60 px-6 py-2.5 text-xs no-print">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-bold text-slate-700 mr-2">Filter:</span>
-            {(['ALL', 'SALES', 'RECEIPT'] as const).map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setFilterType(t)}
-                className={`rounded-md px-3 py-1 text-[11px] font-bold transition ${
-                  filterType === t ? 'bg-slate-900 text-white shadow-xs' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                {t === 'ALL' ? 'All Vouchers' : t === 'SALES' ? 'Debits / Bills' : 'Credits / Receipts'}
-              </button>
-            ))}
+        {/* View Mode & Filter Controls Bar */}
+        <div className="flex flex-wrap items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-2.5 gap-2 no-print">
+          <div className="flex items-center gap-1 bg-slate-200/80 p-1 rounded-xl">
+            <button
+              type="button"
+              onClick={() => { setViewMode('detailed'); setSelectedMonth(null); }}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition ${
+                viewMode === 'detailed'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <FileText size={13} />
+              Detailed Ledger
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('monthly')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition ${
+                viewMode === 'monthly'
+                  ? 'bg-white text-indigo-700 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Calendar size={13} />
+              Monthly Summary (Tally View)
+            </button>
           </div>
-          <span className="text-[11px] font-medium text-slate-500">
-            {filteredVouchers.length} {filteredVouchers.length === 1 ? 'record' : 'records'}
-          </span>
+
+          {viewMode === 'detailed' ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedMonth && (
+                <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-xs font-bold text-indigo-700">
+                  Month: {selectedMonth}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMonth(null)}
+                    className="hover:text-rose-600 ml-1 font-black"
+                    title="Clear month filter"
+                  >
+                    ×
+                  </button>
+                </span>
+              )}
+              <div className="flex items-center gap-1">
+                <span className="text-[11px] font-bold text-slate-500 mr-1">Filter:</span>
+                {(['ALL', 'SALES', 'RECEIPT'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setFilterType(t)}
+                    className={`rounded-md px-2.5 py-1 text-[11px] font-bold transition ${
+                      filterType === t
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {t === 'ALL' ? 'All' : t === 'SALES' ? 'Debits' : 'Credits'}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-50 shadow-xs transition"
+                title="Toggle Sorting Order (Default starts 1-April-2026 like Tally)"
+              >
+                <ArrowUpDown size={12} />
+                {sortOrder === 'asc' ? '1-Apr-26 First (Tally)' : 'Latest First'}
+              </button>
+              <span className="text-[11px] font-medium text-slate-500 ml-1">
+                {filteredVouchers.length} {filteredVouchers.length === 1 ? 'record' : 'records'}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+              <span className="inline-flex items-center gap-1 rounded bg-indigo-50 border border-indigo-100 px-2 py-0.5 text-[11px] font-bold text-indigo-700">
+                1-Apr-2026 to 30-Nov-2026
+              </span>
+              <span>Click any month to view vouchers</span>
+            </div>
+          )}
         </div>
 
-        {/* Voucher Table */}
+        {/* Ledger Content Area */}
         <div className="flex-1 overflow-y-auto px-6 py-4 bg-white">
           {loading ? (
             <div className="flex h-32 items-center justify-center">
               <Spinner />
+            </div>
+          ) : viewMode === 'monthly' ? (
+            /* Tally-Style Monthly Summary Table */
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs text-slate-600 font-medium">
+                <div>
+                  <span className="font-bold text-slate-900">Ledger Voucher Monthly Summary</span> · FY 2026-27
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  Opening Balance: <span className="font-mono font-bold text-slate-800">{rupeesDrCr(currentOpeningPaise)}</span>
+                </div>
+              </div>
+              <table className="w-full text-left text-xs">
+                <thead className="border-b-2 border-slate-200 bg-slate-50 text-[11px] font-black uppercase text-slate-700">
+                  <tr>
+                    <th className="py-2.5 px-3">Particulars (Month)</th>
+                    <th className="py-2.5 px-3 text-right">Debit (+)</th>
+                    <th className="py-2.5 px-3 text-right">Credit (-)</th>
+                    <th className="py-2.5 px-3 text-right">Net Movement</th>
+                    <th className="py-2.5 px-3 text-right">Closing Balance</th>
+                    <th className="py-2.5 px-3 text-center no-print w-32">Movement Visual</th>
+                    <th className="py-2.5 px-3 text-center no-print">Drilldown</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-mono">
+                  {/* Opening Balance Row */}
+                  <tr className="bg-amber-50/60 font-bold border-b border-amber-200">
+                    <td className="py-2 px-3 text-amber-950 font-sans font-bold">
+                      Opening Balance (as of 1-Apr-2026)
+                    </td>
+                    <td className="py-2 px-3 text-right text-slate-700">
+                      {currentOpeningPaise > 0 ? rupees(currentOpeningPaise) : '—'}
+                    </td>
+                    <td className="py-2 px-3 text-right text-emerald-800">
+                      {currentOpeningPaise < 0 ? rupees(Math.abs(currentOpeningPaise)) : '—'}
+                    </td>
+                    <td className="py-2 px-3 text-right text-slate-400">—</td>
+                    <td className="py-2 px-3 text-right font-black text-amber-950">
+                      {rupeesDrCr(currentOpeningPaise)}
+                    </td>
+                    <td className="py-2 px-3 text-center no-print text-[10px] text-slate-400">Baseline</td>
+                    <td className="py-2 px-3 text-center no-print">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOpeningAmount(String(currentOpeningPaise / 100));
+                          setEditingOpening(true);
+                        }}
+                        className="text-[10px] text-blue-600 hover:underline font-bold"
+                      >
+                        ✏️ Edit
+                      </button>
+                    </td>
+                  </tr>
+
+                  {/* Monthly Rows */}
+                  {monthlySummary.map((m) => {
+                    const maxVol = Math.max(
+                      ...monthlySummary.map((x) => Math.max(x.debits, x.credits)),
+                      1
+                    );
+                    const debitPct = Math.min(100, Math.round((m.debits / maxVol) * 100));
+                    const creditPct = Math.min(100, Math.round((m.credits / maxVol) * 100));
+
+                    return (
+                      <tr
+                        key={m.yearMonth}
+                        onClick={() => {
+                          setSelectedMonth(m.yearMonth);
+                          setViewMode('detailed');
+                        }}
+                        className="hover:bg-blue-50/60 cursor-pointer transition group"
+                        title={`Click to view ${m.label} transactions`}
+                      >
+                        <td className="py-2.5 px-3 font-sans font-semibold text-slate-900 group-hover:text-blue-700 flex items-center gap-1.5">
+                          <ChevronRight size={13} className="text-slate-400 group-hover:text-blue-600 group-hover:translate-x-0.5 transition-transform" />
+                          <span>{m.label}</span>
+                          {m.count > 0 && (
+                            <span className="text-[10px] text-slate-400 font-mono font-normal">
+                              ({m.count} vchs)
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-bold text-blue-700">
+                          {m.debits > 0 ? rupees(m.debits) : '—'}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-bold text-emerald-700">
+                          {m.credits > 0 ? rupees(m.credits) : '—'}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-medium text-slate-700">
+                          {m.netMovementPaise > 0
+                            ? `+${rupees(m.netMovementPaise)}`
+                            : m.netMovementPaise < 0
+                            ? `-${rupees(Math.abs(m.netMovementPaise))}`
+                            : '—'}
+                        </td>
+                        <td className={`py-2.5 px-3 text-right font-black ${m.closingPaise < 0 ? 'text-purple-700' : 'text-slate-900'}`}>
+                          {rupeesDrCr(m.closingPaise)}
+                        </td>
+                        <td className="py-2.5 px-3 no-print">
+                          <div className="flex flex-col gap-0.5 w-full">
+                            {m.debits > 0 && (
+                              <div
+                                className="h-1.5 rounded-full bg-blue-500"
+                                style={{ width: `${Math.max(6, debitPct)}%` }}
+                                title={`Debits: ${rupees(m.debits)}`}
+                              />
+                            )}
+                            {m.credits > 0 && (
+                              <div
+                                className="h-1.5 rounded-full bg-emerald-500"
+                                style={{ width: `${Math.max(6, creditPct)}%` }}
+                                title={`Credits: ${rupees(m.credits)}`}
+                              />
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3 text-center no-print">
+                          <span className="inline-flex items-center text-[10px] font-bold text-indigo-600 group-hover:underline">
+                            View →
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {/* Grand Total Row */}
+                  <tr className="bg-slate-100 font-black border-t-2 border-slate-300">
+                    <td className="py-3 px-3 font-sans uppercase tracking-wider text-slate-900">
+                      Grand Total
+                    </td>
+                    <td className="py-3 px-3 text-right text-blue-800 text-sm">
+                      {rupees(totalDebits)}
+                    </td>
+                    <td className="py-3 px-3 text-right text-emerald-800 text-sm">
+                      {rupees(totalCredits)}
+                    </td>
+                    <td className="py-3 px-3 text-right text-slate-800">
+                      {totalDebits >= totalCredits
+                        ? `+${rupees(totalDebits - totalCredits)}`
+                        : `-${rupees(totalCredits - totalDebits)}`}
+                    </td>
+                    <td className={`py-3 px-3 text-right text-sm font-black ${currentOutstandingPaise < 0 ? 'text-purple-700' : 'text-slate-900'}`}>
+                      {rupeesDrCr(currentOutstandingPaise)}
+                    </td>
+                    <td colSpan={2} className="py-3 px-3 text-center no-print text-[11px] text-slate-500 font-sans">
+                      Closing Balance
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           ) : filteredVouchers.length === 0 ? (
             <div className="py-10 text-center text-xs font-medium text-slate-500">
               No matching vouchers found for this filter.
             </div>
           ) : (
+            /* Detailed Transactions Table */
             <table className="w-full text-left text-xs">
               <thead className="border-b-2 border-slate-200 bg-slate-50 text-[11px] font-black uppercase text-slate-700">
                 <tr>
@@ -707,10 +1050,49 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
                   <th className="py-2.5 px-3">Particulars (Account)</th>
                   <th className="py-2.5 px-3 text-right">Debit (+)</th>
                   <th className="py-2.5 px-3 text-right">Credit (-)</th>
+                  <th className="py-2.5 px-3 text-right">Balance</th>
                   <th className="py-2.5 px-3 text-center no-print">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-mono">
+                {/* When sorting ascending (1-Apr-2026 first), show Opening Balance row at top */}
+                {sortOrder === 'asc' && !selectedMonth && (
+                  <tr className="bg-amber-50/70 font-bold border-b border-amber-200">
+                    <td className="py-2.5 px-3 text-amber-900">01-04-2026</td>
+                    <td className="py-2.5 px-3">
+                      <span className="inline-block rounded px-2 py-0.5 text-[10px] font-black uppercase tracking-wide bg-amber-100 border border-amber-300 text-amber-900">
+                        OPENING
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3 text-slate-400 font-mono">—</td>
+                    <td className="py-2.5 px-3 text-amber-950 font-sans font-semibold">
+                      Opening Balance (as of 1-Apr-2026)
+                    </td>
+                    <td className="py-2.5 px-3 text-right text-slate-800">
+                      {currentOpeningPaise > 0 ? rupees(currentOpeningPaise) : '—'}
+                    </td>
+                    <td className="py-2.5 px-3 text-right text-emerald-800">
+                      {currentOpeningPaise < 0 ? rupees(Math.abs(currentOpeningPaise)) : '—'}
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-black text-amber-950">
+                      {rupeesDrCr(currentOpeningPaise)}
+                    </td>
+                    <td className="py-2.5 px-3 text-center no-print">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOpeningAmount(String(currentOpeningPaise / 100));
+                          setEditingOpening(true);
+                        }}
+                        className="text-[10px] text-blue-600 hover:underline font-bold"
+                        title="Edit Opening Balance"
+                      >
+                        ✏️ Edit
+                      </button>
+                    </td>
+                  </tr>
+                )}
+
                 {filteredVouchers.map((v) => {
                   const isSales = v.voucher_type.toLowerCase() === 'sales';
                   const isReceipt = v.voucher_type.toLowerCase() === 'receipt';
@@ -740,6 +1122,9 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
                       </td>
                       <td className="py-2.5 px-3 text-right font-bold text-emerald-700">
                         {v.credit_paise > 0 ? rupees(v.credit_paise) : '—'}
+                      </td>
+                      <td className={`py-2.5 px-3 text-right font-black ${v.runningBalancePaise !== undefined && v.runningBalancePaise < 0 ? 'text-purple-700' : 'text-slate-900'}`}>
+                        {v.runningBalancePaise !== undefined ? rupeesDrCr(v.runningBalancePaise) : '—'}
                       </td>
                       <td className="py-2.5 px-3 text-center no-print whitespace-nowrap">
                         <div className="inline-flex items-center gap-1">

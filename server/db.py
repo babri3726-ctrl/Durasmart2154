@@ -1700,16 +1700,49 @@ def deduplicate_all_vouchers(conn=None) -> dict[str, Any]:
                 else:
                     seen_invoices[inv_key] = v
 
-            # Rule 2: Exact full content duplicate across multiple file uploads
+            # Rule 2: Exact full content duplicate across multiple file uploads or duplicate rows
             content_key = (pid, dt, vt, dr, cr, cvno, cnarr, bs)
             if content_key in seen_exact_content:
-                prev = seen_exact_content[content_key]
-                if prev[10] != cat or prev[9] != fsha:
-                    to_delete.add(vid)
-                    affected_parties.add(pid)
-                    continue
+                to_delete.add(vid)
+                affected_parties.add(pid)
+                continue
             else:
                 seen_exact_content[content_key] = v
+
+        # Rule 3: Cross-Book generic Day Book duplicates (e.g. Kalra Steel DB-49 vs JV-1200)
+        # Group remaining vouchers by (pid, dt, vt, dr, cr)
+        remaining_vchs = [v for v in all_vchs if v[0] not in to_delete]
+        sig_groups = {}
+        for v in remaining_vchs:
+            vid, pid, dt, vt, vno, dr, cr, narr, bs, fsha, cat = v
+            sig_key = (pid, dt, vt, dr, cr)
+            if sig_key not in sig_groups:
+                sig_groups[sig_key] = []
+            sig_groups[sig_key].append(v)
+
+        for sig_key, group in sig_groups.items():
+            if len(group) > 1:
+                # Check if there is at least one specialized entry and one generic Day Book entry
+                specialized = []
+                generic_db = []
+                for v in group:
+                    vid, pid, dt, vt, vno, dr, cr, narr, bs, fsha, cat = v
+                    is_generic = (bs == 'Day Book') and (not vno or str(vno).lower().startswith('db-') or any(str(vno).lower().startswith(p) for p in ('aug ', 'spt ', 'oct ', 'nov ', 'dec ', 'jan ', 'feb ', 'mar ', 'apr ', 'may ', 'jun ', 'jul ')))
+                    if is_generic:
+                        generic_db.append(v)
+                    else:
+                        specialized.append(v)
+
+                if specialized and generic_db:
+                    # Specialized entry exists! The generic Day Book entries are redundant copies.
+                    for gv in generic_db:
+                        to_delete.add(gv[0])
+                        affected_parties.add(gv[1])
+                elif len(generic_db) > 1:
+                    # Multiple generic Day Book duplicates for the exact same transaction
+                    for gv in generic_db[1:]:
+                        to_delete.add(gv[0])
+                        affected_parties.add(gv[1])
 
         if to_delete:
             del_list = list(to_delete)

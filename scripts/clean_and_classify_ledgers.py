@@ -116,6 +116,14 @@ def run_cleanup():
 
     conn.commit()
 
+    # 4.5 Run full deduplication (eliminating multi-upload & cross-book duplicate vouchers)
+    try:
+        from server.db import deduplicate_all_vouchers
+        dedup_res = deduplicate_all_vouchers(conn)
+        print(f"Deduplication pass: deleted {dedup_res.get('deletedCount', 0)} redundant vouchers.")
+    except Exception as e:
+        print(f"Deduplication notice: {e}")
+
     # 5. Recompute customer debtor balances
     print("Recomputing debtor balances for customers...")
     cur.execute("SELECT id, name FROM parties WHERE party_type = 'customer'")
