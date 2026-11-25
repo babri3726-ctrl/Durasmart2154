@@ -611,6 +611,14 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
       debtor.hasAuthoritativeLedger = true;
       debtor.tallyDiff = 0;
       debtor.tallyDiffPaise = 0;
+      if (res.openingBalancePaise !== undefined && res.openingBalancePaise !== null) {
+        setCurrentOpeningPaise(res.openingBalancePaise);
+        debtor.openingPaise = res.openingBalancePaise;
+        debtor.openingBalance = res.openingBalancePaise / 100;
+      }
+      if (res.newBalancePaise !== undefined && res.newBalancePaise !== null) {
+        debtor.balance = res.newBalancePaise / 100.0;
+      }
       reloadVouchers();
       invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
     } catch (err: any) {

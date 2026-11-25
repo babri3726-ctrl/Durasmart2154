@@ -820,18 +820,34 @@ def apply_single_party_ledger(party_id: str, filepath_or_bytes: str | bytes, fil
     """
     from .voucher_parser import parse_accounting_workbook
     import hashlib
+    import os
 
     if isinstance(filepath_or_bytes, bytes):
-        f_sha = hashlib.sha256(filepath_or_bytes).hexdigest()
-        parsed = parse_accounting_workbook(filepath_or_bytes, file_sha256=f_sha, filename=filename)
+        content_bytes = filepath_or_bytes
     else:
         with open(filepath_or_bytes, "rb") as f:
-            content = f.read()
-        f_sha = hashlib.sha256(content).hexdigest()
-        parsed = parse_accounting_workbook(filepath_or_bytes, file_sha256=f_sha, filename=filename)
+            content_bytes = f.read()
+
+    f_sha = hashlib.sha256(content_bytes).hexdigest()
+
+    # Save a persistent copy of this authoritative ledger
+    try:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        imports_dir = os.path.join(base_dir, "data", "imports")
+        os.makedirs(imports_dir, exist_ok=True)
+        safe_name = f"authoritative_{party_id}_{os.path.basename(filename)}"
+        with open(os.path.join(imports_dir, safe_name), "wb") as out_f:
+            out_f.write(content_bytes)
+    except Exception as e:
+        logger.warning(f"Failed to persist copy of authoritative ledger: {e}")
+
+    parsed = parse_accounting_workbook(content_bytes, file_sha256=f_sha, filename=filename)
 
     vchs = parsed.get("vouchers", [])
     ob_paise = parsed.get("openingBalancePaise", 0)
+    total_dr = parsed.get("totalDebitPaise", 0)
+    total_cr = parsed.get("totalCreditPaise", 0)
+    expected_closing = ob_paise + total_dr - total_cr
 
     with get_connection() as conn:
         cur = conn.cursor()
@@ -851,22 +867,42 @@ def apply_single_party_ledger(party_id: str, filepath_or_bytes: str | bytes, fil
         # Delete previous vouchers for this party
         conn.execute("DELETE FROM vouchers WHERE party_id = ?", (party_id,))
 
-        # Force all parsed vouchers to have this party's ID and name
+        # Directly insert the authoritative vouchers from Tally
+        now_iso = datetime.now().isoformat()
         for v in vchs:
-            v["partyId"] = party_id
-            v["partyName"] = party_name
+            conn.execute(
+                """
+                INSERT INTO vouchers 
+                (id, voucher_no, voucher_type, voucher_date, party_name, party_id, debit_paise, credit_paise, narration, book_source, file_sha256, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    v["id"],
+                    v.get("voucherNo", ""),
+                    v.get("voucherType", "Sales"),
+                    v.get("voucherDate", ""),
+                    party_name,
+                    party_id,
+                    v.get("debitPaise", 0),
+                    v.get("creditPaise", 0),
+                    v.get("narration", ""),
+                    "Authoritative Tally Ledger",
+                    f_sha,
+                    now_iso,
+                )
+            )
 
         # Mark authoritative ledger = 1, tally_status = 'verified', diff = 0
         conn.execute("""
             UPDATE parties
             SET has_authoritative_ledger = 1,
                 tally_status = 'verified',
-                tally_diff_paise = 0
+                tally_diff_paise = 0,
+                tally_closing_paise = COALESCE(?, tally_closing_paise)
             WHERE id = ?
-        """, (party_id,))
+        """, (expected_closing, party_id))
         conn.commit()
 
-    res = save_vouchers_batch(vchs, file_sha=f_sha)
     recompute_party_balance(party_id)
 
     # Re-fetch new balance
@@ -879,9 +915,10 @@ def apply_single_party_ledger(party_id: str, filepath_or_bytes: str | bytes, fil
         "status": "success",
         "partyId": party_id,
         "partyName": party_name,
-        "vouchersApplied": res.get("insertedCount", len(vchs)),
+        "vouchersApplied": len(vchs),
         "newBalancePaise": new_bal,
         "newBalanceFormatted": f"{new_bal / 100.0:,.2f}",
+        "openingBalancePaise": ob_paise,
         "tallyStatus": "verified"
     }
 

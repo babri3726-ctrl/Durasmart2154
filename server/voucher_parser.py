@@ -43,10 +43,14 @@ def normalize_date_str(val: Any) -> str:
     return s[:10]
 
 
-def is_accounting_workbook(filepath: str) -> bool:
+def is_accounting_workbook(filepath: str | bytes) -> bool:
     """Quickly tests if a workbook contains accounting register headers."""
     try:
-        wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
+        import io
+        if isinstance(filepath, bytes):
+            wb = openpyxl.load_workbook(io.BytesIO(filepath), data_only=True, read_only=True)
+        else:
+            wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
         ws = wb.active
         for r_idx, row in enumerate(ws.iter_rows(max_row=12, values_only=True), start=1):
             row_vals = [str(c).strip().upper() if c is not None else "" for c in row]
@@ -83,7 +87,11 @@ def parse_accounting_workbook(
     Parses Sales Register or Bank Book spreadsheets into a standardized transaction ledger.
     Handles variable column mappings, merged cells, and 'To'/'By' prefixes dynamically.
     """
-    wb = openpyxl.load_workbook(filepath, data_only=True)
+    import io
+    if isinstance(filepath, bytes):
+        wb = openpyxl.load_workbook(io.BytesIO(filepath), data_only=True)
+    else:
+        wb = openpyxl.load_workbook(filepath, data_only=True)
     ws = wb.active
 
     # Detect header row
@@ -335,10 +343,17 @@ def parse_accounting_workbook(
         vch_date = normalize_date_str(date_cell)
 
         # Deterministic unique hash ID for idempotency:
-        # If a real voucher_no is present (not generic DB-*), do not tie it to row number 'r',
-        # so that identical vouchers in re-uploaded or modified Excel sheets produce identical IDs.
+        # If a real invoice/voucher_no is present (not generic DB-* and not a discount formula with @ or month prefixes),
+        # do not tie it to row number 'r', so that identical vouchers in re-uploaded Excel sheets produce identical IDs.
+        # Multi-row discount entries (e.g. 'SPT QD ST 91250@.75') MUST include 'r' so all lines are preserved!
         clean_vno_str = re.sub(r'\(optional\)', '', str(vch_no or ''), flags=re.IGNORECASE).strip().lower()
-        if clean_vno_str and not clean_vno_str.startswith("db-"):
+        is_real_inv = (
+            clean_vno_str 
+            and not clean_vno_str.startswith("db-") 
+            and '@' not in clean_vno_str 
+            and not any(clean_vno_str.startswith(p) for p in ('aug ', 'spt ', 'oct ', 'nov ', 'dec ', 'jan ', 'feb ', 'mar ', 'apr ', 'may ', 'jun ', 'jul '))
+        )
+        if is_real_inv:
             hash_src = f"{vch_date}:{vch_type}:{clean_vno_str}:{party_name.strip().lower()}:{debit_paise}:{credit_paise}"
         else:
             hash_src = f"{book_source}:{r}:{vch_date}:{vch_type}:{vch_no}:{party_name}:{debit_paise}:{credit_paise}:{d_qty or c_qty}"
@@ -403,7 +418,11 @@ def is_opening_balance_workbook(filepath: str) -> bool:
 
 def parse_opening_balance_workbook(filepath: str) -> dict[str, Any]:
     """Parses a Trial Balance / Opening Balance workbook (e.g. opening.xlsx)."""
-    wb = openpyxl.load_workbook(filepath, data_only=True)
+    import io
+    if isinstance(filepath, bytes):
+        wb = openpyxl.load_workbook(io.BytesIO(filepath), data_only=True)
+    else:
+        wb = openpyxl.load_workbook(filepath, data_only=True)
     ws = wb.active
     part_col, debit_col, credit_col, data_start_row = None, None, None, None
     period_text = ""
@@ -467,7 +486,11 @@ def parse_journal_register_workbook(filepath: str, file_sha256: str | None = Non
     Handles multi-line compound transactions with both Debit and Credit legs,
     generating complete double-entry vouchers with counterparty narrations.
     """
-    wb = openpyxl.load_workbook(filepath, data_only=True)
+    import io
+    if isinstance(filepath, bytes):
+        wb = openpyxl.load_workbook(io.BytesIO(filepath), data_only=True)
+    else:
+        wb = openpyxl.load_workbook(filepath, data_only=True)
     ws = wb.active
 
     # Detect header row
@@ -619,7 +642,11 @@ def parse_bank_workbook(
     - Sheet Debit (Deposits / Inflow): Party account is CREDITED (Receipt from party)
     - Sheet Credit (Withdrawals / Outflow): Party account is DEBITED (Payment to party)
     """
-    wb = openpyxl.load_workbook(filepath, data_only=True)
+    import io
+    if isinstance(filepath, bytes):
+        wb = openpyxl.load_workbook(io.BytesIO(filepath), data_only=True)
+    else:
+        wb = openpyxl.load_workbook(filepath, data_only=True)
     ws = wb.active
 
     fn_lower = os.path.basename(filename or filepath).lower()
