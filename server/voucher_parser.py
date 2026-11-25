@@ -334,8 +334,14 @@ def parse_accounting_workbook(
         # Format date as YYYY-MM-DD
         vch_date = normalize_date_str(date_cell)
 
-        # Deterministic unique hash ID for idempotency (includes row number 'r' so identical legitimate transactions are preserved)
-        hash_src = f"{book_source}:{r}:{vch_date}:{vch_type}:{vch_no}:{party_name}:{debit_paise}:{credit_paise}:{d_qty or c_qty}"
+        # Deterministic unique hash ID for idempotency:
+        # If a real voucher_no is present (not generic DB-*), do not tie it to row number 'r',
+        # so that identical vouchers in re-uploaded or modified Excel sheets produce identical IDs.
+        clean_vno_str = re.sub(r'\(optional\)', '', str(vch_no or ''), flags=re.IGNORECASE).strip().lower()
+        if clean_vno_str and not clean_vno_str.startswith("db-"):
+            hash_src = f"{vch_date}:{vch_type}:{clean_vno_str}:{party_name.strip().lower()}:{debit_paise}:{credit_paise}"
+        else:
+            hash_src = f"{book_source}:{r}:{vch_date}:{vch_type}:{vch_no}:{party_name}:{debit_paise}:{credit_paise}:{d_qty or c_qty}"
         vch_id = f"VCH-{hashlib.md5(hash_src.encode('utf-8')).hexdigest()[:16]}"
 
         vouchers.append({
@@ -527,8 +533,13 @@ def parse_journal_register_workbook(filepath: str, file_sha256: str | None = Non
         for r, deb_party, dr in debits:
             c_names = [c[1] for c in credits]
             narration = f"To {', '.join(c_names)} {vch_no}".strip() if c_names else vch_no
-            hash_src = f"JV-DR:{r}:{vch_date}:{deb_party}:{dr}:{vch_no}"
-            vch_id = f"JV-{r}-{hashlib.md5(hash_src.encode('utf-8')).hexdigest()[:10]}"
+            clean_jv_no = re.sub(r'\(optional\)', '', str(vch_no or ''), flags=re.IGNORECASE).strip().lower()
+            if clean_jv_no and not clean_jv_no.startswith("jv-"):
+                hash_src = f"JV-DR:{vch_date}:{deb_party.strip().lower()}:{round(dr*100)}:{clean_jv_no}"
+                vch_id = f"JV-{hashlib.md5(hash_src.encode('utf-8')).hexdigest()[:16]}"
+            else:
+                hash_src = f"JV-DR:{r}:{vch_date}:{deb_party}:{round(dr*100)}:{vch_no}"
+                vch_id = f"JV-{r}-{hashlib.md5(hash_src.encode('utf-8')).hexdigest()[:10]}"
             vouchers.append({
                 "id": vch_id,
                 "voucherNo": vch_no or f"JV-{r}",
@@ -549,8 +560,13 @@ def parse_journal_register_workbook(filepath: str, file_sha256: str | None = Non
         for r, cred_party, cr in credits:
             d_names = [d[1] for d in debits]
             narration = f"By {', '.join(d_names)} {vch_no}".strip() if d_names else vch_no
-            hash_src = f"JV-CR:{r}:{vch_date}:{cred_party}:{cr}:{vch_no}"
-            vch_id = f"JV-{r}-{hashlib.md5(hash_src.encode('utf-8')).hexdigest()[:10]}"
+            clean_jv_no = re.sub(r'\(optional\)', '', str(vch_no or ''), flags=re.IGNORECASE).strip().lower()
+            if clean_jv_no and not clean_jv_no.startswith("jv-"):
+                hash_src = f"JV-CR:{vch_date}:{cred_party.strip().lower()}:{round(cr*100)}:{clean_jv_no}"
+                vch_id = f"JV-{hashlib.md5(hash_src.encode('utf-8')).hexdigest()[:16]}"
+            else:
+                hash_src = f"JV-CR:{r}:{vch_date}:{cred_party}:{round(cr*100)}:{vch_no}"
+                vch_id = f"JV-{r}-{hashlib.md5(hash_src.encode('utf-8')).hexdigest()[:10]}"
             vouchers.append({
                 "id": vch_id,
                 "voucherNo": vch_no or f"JV-{r}",
@@ -768,7 +784,11 @@ def parse_bank_workbook(
             debit_paise = round(p_dr * 100)
             credit_paise = round(p_cr * 100)
 
-            hash_src = f"{bank_source}:{r}:{vch_date}:{v_type_assigned}:{vno}:{part}:{debit_paise}:{credit_paise}"
+            clean_bnk_vno = re.sub(r'\(optional\)', '', str(vno or ''), flags=re.IGNORECASE).strip().lower()
+            if clean_bnk_vno and not clean_bnk_vno.startswith(('hdfc-', 'yes-', 'cash-')):
+                hash_src = f"{bank_source}:{vch_date}:{v_type_assigned}:{clean_bnk_vno}:{part.strip().lower()}:{debit_paise}:{credit_paise}"
+            else:
+                hash_src = f"{bank_source}:{r}:{vch_date}:{v_type_assigned}:{vno}:{part}:{debit_paise}:{credit_paise}"
             vch_id = f"BNK-{hashlib.md5(hash_src.encode('utf-8')).hexdigest()[:16]}"
 
             vouchers.append({
@@ -850,7 +870,11 @@ def parse_bank_workbook(
             debit_paise = round(p_dr * 100)
             credit_paise = round(p_cr * 100)
 
-            hash_src = f"{bank_source}:{cur_parent['row']}:{r}:{cur_parent['date']}:{v_type_assigned}:{cur_parent['vno']}:{part}:{debit_paise}:{credit_paise}"
+            clean_child_vno = re.sub(r'\(optional\)', '', str(cur_parent.get('vno') or ''), flags=re.IGNORECASE).strip().lower()
+            if clean_child_vno and not clean_child_vno.startswith(('hdfc-', 'yes-', 'cash-')):
+                hash_src = f"{bank_source}:{cur_parent['date']}:{v_type_assigned}:{clean_child_vno}:{part.strip().lower()}:{debit_paise}:{credit_paise}"
+            else:
+                hash_src = f"{bank_source}:{cur_parent['row']}:{r}:{cur_parent['date']}:{v_type_assigned}:{cur_parent['vno']}:{part}:{debit_paise}:{credit_paise}"
             vch_id = f"BNK-{hashlib.md5(hash_src.encode('utf-8')).hexdigest()[:16]}"
 
             vouchers.append({

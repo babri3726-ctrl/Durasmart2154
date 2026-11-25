@@ -3045,6 +3045,9 @@ def sync_debtor_benchmarks():
     if not debtor_bal_path:
         raise HTTPException(status_code=404, detail="debtor balance.xlsx benchmark file not found")
 
+    # Run full deduplication first to ensure no double-counted vouchers pollute ground truth
+    db.deduplicate_all_vouchers()
+
     from .voucher_parser import parse_debtor_balance_workbook
     parsed = parse_debtor_balance_workbook(debtor_bal_path)
     res = db.apply_debtor_balance_benchmarks(parsed)
@@ -3059,6 +3062,24 @@ def sync_debtor_benchmarks():
         "status": "success",
         "message": f"Successfully synced {res['totalBenchmarks']} Tally debtor benchmarks! {res['totalVerified']} verified, {res['mismatchCount']} mismatches.",
         "details": res
+    }
+
+@app.post("/api/v1/debtors/cleanup-duplicates")
+def cleanup_duplicate_vouchers():
+    """
+    Cleans up any duplicate voucher entries in the database caused by re-uploaded files.
+    Recalculates ledger balances for all affected parties and syncs ground truth.
+    """
+    res = db.deduplicate_all_vouchers()
+    persisted = db.load_all_persisted_state()
+    for k in ["debtors", "customers"]:
+        if k in persisted:
+            STATE[k] = persisted[k]
+    return {
+        "status": "success",
+        "deletedCount": res["deletedCount"],
+        "affectedPartiesCount": res["affectedPartiesCount"],
+        "message": f"Successfully removed {res['deletedCount']} duplicate voucher(s) across {res['affectedPartiesCount']} party ledger(s)."
     }
 
 @app.post("/api/v1/debtors/benchmarks/upload")

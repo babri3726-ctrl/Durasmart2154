@@ -81,6 +81,7 @@ import {
   resetAccountingBalances,
   syncDebtorBenchmarks,
   uploadDebtorBenchmarks,
+  cleanupDuplicateVouchers,
   uploadPartyLedger,
   listEmployees,
   serverHost,
@@ -205,11 +206,54 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
     reloadVouchers();
   }, [reloadVouchers]);
 
-  const totalDebits = vouchers.reduce((sum, v) => sum + (v.debit_paise || 0), 0);
-  const totalCredits = vouchers.reduce((sum, v) => sum + (v.credit_paise || 0), 0);
+  // Client-side deduplication filter: prevents identical or duplicate voucher imports from inflating ledger
+  const cleanVnoStr = (vno?: string) => (vno || '').replace(/\(optional\)/gi, '').trim().toLowerCase();
+  const isInvoiceVno = (vno?: string) => {
+    const c = cleanVnoStr(vno);
+    if (!c || c.startsWith('db-') || c.startsWith('hdfc-') || c.startsWith('yes-') || c.startsWith('cash-')) return false;
+    if (c.includes('@') || /^(aug|spt|oct|nov|dec|jan|feb|mar|apr|may|jun|jul)\s/i.test(c)) return false;
+    return true;
+  };
+
+  const uniqueVouchers = useMemo(() => {
+    const seen = new Set<string>();
+    const result: ServerVoucher[] = [];
+    for (const v of vouchers) {
+      const vno = cleanVnoStr(v.voucher_no);
+      let key: string;
+      if (isInvoiceVno(v.voucher_no)) {
+        key = `INV:${v.voucher_date}:${(v.voucher_type || '').toLowerCase()}:${vno}:${v.debit_paise}:${v.credit_paise}`;
+      } else {
+        key = `RAW:${v.id}`;
+      }
+      if (!seen.has(key)) {
+        seen.add(key);
+        result.push(v);
+      }
+    }
+    return result;
+  }, [vouchers]);
+
+  const [cleaningDupes, setCleaningDupes] = useState(false);
+  const handleCleanDuplicates = async () => {
+    setCleaningDupes(true);
+    try {
+      const res = await cleanupDuplicateVouchers();
+      alert(res.message || `Cleaned up ${res.deletedCount} duplicate vouchers`);
+      reloadVouchers();
+      invalidate(syncKeys.debtors, syncKeys.customers);
+    } catch (e: any) {
+      alert(e.message || 'Failed to cleanup duplicates');
+    } finally {
+      setCleaningDupes(false);
+    }
+  };
+
+  const totalDebits = uniqueVouchers.reduce((sum, v) => sum + (v.debit_paise || 0), 0);
+  const totalCredits = uniqueVouchers.reduce((sum, v) => sum + (v.credit_paise || 0), 0);
 
   const calculatedOutstandingPaise = currentOpeningPaise + totalDebits - totalCredits;
-  const currentOutstandingPaise = vouchers.length > 0 || currentOpeningPaise !== 0
+  const currentOutstandingPaise = uniqueVouchers.length > 0 || currentOpeningPaise !== 0
     ? calculatedOutstandingPaise
     : (debtor.balance !== undefined ? Math.round(Number(debtor.balance) * 100) : 0);
 
@@ -227,7 +271,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
     }
 
     // Credits pool: all credit vouchers
-    let remainingCredits = vouchers.reduce((sum, v) => sum + (v.credit_paise || 0), 0);
+    let remainingCredits = uniqueVouchers.reduce((sum, v) => sum + (v.credit_paise || 0), 0);
 
     // 1. Opening balance: debit increases oldest obligation, credit increases remaining credits buffer
     if (currentOpeningPaise > 0) {
@@ -242,7 +286,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
     }
 
     // 2. Debit vouchers sorted chronologically oldest first
-    const debitVouchers = vouchers
+    const debitVouchers = uniqueVouchers
       .filter((v) => (v.debit_paise || 0) > 0)
       .slice()
       .sort((a, b) => parseVoucherDate(a.voucher_date).getTime() - parseVoucherDate(b.voucher_date).getTime());
@@ -288,9 +332,9 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
     }
 
     return buckets;
-  }, [vouchers, debtor, currentOpeningPaise, currentOutstandingPaise]);
+  }, [uniqueVouchers, debtor, currentOpeningPaise, currentOutstandingPaise]);
 
-  const filteredVouchers = vouchers.filter((v) => {
+  const filteredVouchers = uniqueVouchers.filter((v) => {
     if (filterType === 'SALES') return (v.debit_paise || 0) > 0;
     if (filterType === 'RECEIPT') return (v.credit_paise || 0) > 0;
     return true;
@@ -480,6 +524,16 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
             </p>
           </div>
           <div className="flex items-center gap-2 no-print">
+            <button
+              type="button"
+              onClick={handleCleanDuplicates}
+              disabled={cleaningDupes}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition disabled:opacity-50"
+              title="Deduplicate all identical and double-uploaded vouchers"
+            >
+              <RefreshCw size={13} className={cleaningDupes ? 'animate-spin' : ''} />
+              {cleaningDupes ? 'Cleaning...' : 'Clean Duplicates'}
+            </button>
             <button
               type="button"
               onClick={() => setShowJvModal(true)}
@@ -1004,6 +1058,21 @@ function DebtorListCard() {
   const [booksMessage, setBooksMessage] = useState<string | null>(null);
   const [uploadingOpening, setUploadingOpening] = useState(false);
   const [openingMessage, setOpeningMessage] = useState<string | null>(null);
+  const [cleaningAllDupes, setCleaningAllDupes] = useState(false);
+
+  const handleCleanAllDuplicates = async () => {
+    setCleaningAllDupes(true);
+    try {
+      const res = await cleanupDuplicateVouchers();
+      alert(res.message || `Cleaned up ${res.deletedCount} duplicate vouchers`);
+      invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
+      retry();
+    } catch (e: any) {
+      alert(e.message || 'Failed to cleanup duplicate vouchers');
+    } finally {
+      setCleaningAllDupes(false);
+    }
+  };
 
   // Salespeople for dropdown selection
   const [salespeople, setSalespeople] = useState<string[]>([]);
@@ -1371,6 +1440,16 @@ function DebtorListCard() {
           >
             <RefreshCw size={13} className={syncingHrPb ? 'animate-spin' : ''} />
             {syncingHrPb ? 'Syncing...' : '1-Click Sync HR-PB'}
+          </button>
+          <button
+            type="button"
+            onClick={handleCleanAllDuplicates}
+            disabled={cleaningAllDupes}
+            className="btn-secondary !py-1.5 text-xs font-bold inline-flex items-center gap-1.5 text-amber-700 border-amber-300 hover:bg-amber-50"
+            title="Scan database and remove any duplicate vouchers imported from repeated Excel uploads"
+          >
+            <RefreshCw size={13} className={cleaningAllDupes ? 'animate-spin' : ''} />
+            {cleaningAllDupes ? 'Cleaning...' : '🧹 Clean Duplicates'}
           </button>
           <button
             type="button"

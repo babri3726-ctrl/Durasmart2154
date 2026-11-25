@@ -2227,6 +2227,17 @@ export function listVouchers(
   return send<ServerVoucher[]>(`/vouchers${query}`);
 }
 
+export function cleanupDuplicateVouchers(): Promise<{
+  status: string;
+  deletedCount: number;
+  affectedPartiesCount: number;
+  message: string;
+}> {
+  return send('/debtors/cleanup-duplicates', {
+    method: 'POST',
+  });
+}
+
 export function syncAccountingBooks(): Promise<{
   status: string;
   message: string;

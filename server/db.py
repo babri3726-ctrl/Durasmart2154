@@ -388,6 +388,12 @@ def init_db(seed_state: dict[str, Any] | None = None):
                 )
             conn.commit()
 
+        # Run auto-cleanup for any duplicate vouchers on startup
+        try:
+            deduplicate_all_vouchers(conn)
+        except Exception as e:
+            pass
+
 def save_slip_image(order_id: str, image_data: str | None) -> str | None:
     """Saves raw base64 image data to disk file and returns relative API URL."""
     if not image_data or not isinstance(image_data, str):
@@ -1533,23 +1539,51 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
             cr_paise = v.get("creditPaise", 0)
             cur_book = v.get("bookSource", "")
 
-            # Cross-book 1-to-1 deduplication (e.g. Day Book vs Sales/Bank Book / Ledger statements)
+            # Universal deduplication (across same book re-uploads, revised files, and cross-book statements)
+            clean_incoming_vno = re.sub(r'\(optional\)', '', str(vch_no or ''), flags=re.IGNORECASE).strip().lower()
+            if clean_incoming_vno.startswith(('db-', 'hdfc-', 'yes-', 'cash-')):
+                clean_incoming_vno = ""
+            incoming_narr = re.sub(r'\s+', ' ', (v.get("narration") or "").strip().lower())
+
+            cur.execute(
+                """
+                SELECT id, voucher_no, narration, book_source FROM vouchers
+                WHERE voucher_date = ?
+                  AND LOWER(voucher_type) = LOWER(?)
+                  AND (party_id = ? OR LOWER(TRIM(party_name)) = LOWER(TRIM(?)))
+                  AND debit_paise = ?
+                  AND credit_paise = ?
+                """,
+                (vch_date, vch_type, party_id, party_name, dr_paise, cr_paise)
+            )
+            candidates = cur.fetchall()
+
             cross_match_id = None
-            if cur_book:
-                cur.execute(
-                    """
-                    SELECT id FROM vouchers
-                    WHERE voucher_date = ?
-                      AND LOWER(voucher_type) = LOWER(?)
-                      AND (LOWER(TRIM(party_name)) = LOWER(TRIM(?)) OR party_id = ?)
-                      AND debit_paise = ?
-                      AND credit_paise = ?
-                      AND book_source != ?
-                    """,
-                    (vch_date, vch_type, party_name, party_id, dr_paise, cr_paise, cur_book)
-                )
-                candidates = cur.fetchall()
-                cross_match_id = next((row[0] for row in candidates if row[0] not in claimed_cross_ids), None)
+            for cand_id, cand_vno, cand_narr, cand_bs in candidates:
+                if cand_id in claimed_cross_ids:
+                    continue
+                cand_clean_vno = re.sub(r'\(optional\)', '', str(cand_vno or ''), flags=re.IGNORECASE).strip().lower()
+                if cand_clean_vno.startswith(('db-', 'hdfc-', 'yes-', 'cash-')):
+                    cand_clean_vno = ""
+                cand_clean_narr = re.sub(r'\s+', ' ', (cand_narr or "").strip().lower())
+
+                # If incoming voucher has a valid specific voucher_no (e.g. 2305)
+                if clean_incoming_vno:
+                    # Matches if candidate has matching voucher_no, or candidate had generic/empty voucher_no
+                    if cand_clean_vno == clean_incoming_vno or not cand_clean_vno:
+                        cross_match_id = cand_id
+                        break
+                else:
+                    # Incoming has no specific voucher_no
+                    if not cand_clean_vno:
+                        if incoming_narr and cand_clean_narr:
+                            if incoming_narr == cand_clean_narr or incoming_narr in cand_clean_narr or cand_clean_narr in incoming_narr:
+                                cross_match_id = cand_id
+                                break
+                        else:
+                            # 1-to-1 match for identical date, type, amount, party
+                            cross_match_id = cand_id
+                            break
 
             if cross_match_id:
                 claimed_cross_ids.add(cross_match_id)
@@ -1560,9 +1594,9 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
                         "UPDATE vouchers SET narration = ? WHERE id = ? AND (narration IS NULL OR narration = '')",
                         (incoming_narration, cross_match_id)
                     )
-                if vch_no and not vch_no.startswith("DB-") and not "-" in vch_no:
+                if clean_incoming_vno:
                     cur.execute(
-                        "UPDATE vouchers SET voucher_no = ? WHERE id = ? AND (voucher_no LIKE 'DB-%' OR voucher_no LIKE '%-%')",
+                        "UPDATE vouchers SET voucher_no = ? WHERE id = ? AND (voucher_no LIKE 'DB-%' OR voucher_no LIKE '%-%' OR voucher_no = '')",
                         (vch_no, cross_match_id)
                     )
                 continue
@@ -1605,6 +1639,97 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
         "newPartiesCount": new_parties_count,
         "affectedPartiesCount": len(affected_party_ids),
     }
+
+def deduplicate_all_vouchers(conn=None) -> dict[str, Any]:
+    """
+    Scans the vouchers table and deletes redundant duplicate entries
+    (e.g. from repeated file uploads or multi-book overlaps).
+    Preserves legitimate multi-row entries while eliminating double-counted transactions.
+    Recomputes balances for all affected parties.
+    """
+    import re
+
+    def clean_vno_str(s):
+        if not s:
+            return ""
+        c = re.sub(r'\(optional\)', '', str(s), flags=re.IGNORECASE).strip().lower()
+        if c.startswith(('db-', 'hdfc-', 'yes-', 'cash-')):
+            return ""
+        return c
+
+    def is_invoice_no(s):
+        c = clean_vno_str(s)
+        if not c:
+            return False
+        if '@' in c or any(c.startswith(p) for p in ('aug ', 'spt ', 'oct ', 'nov ', 'dec ', 'jan ', 'feb ', 'mar ', 'apr ', 'may ', 'jun ', 'jul ')):
+            return False
+        return True
+
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, party_id, voucher_date, LOWER(voucher_type), voucher_no, debit_paise, credit_paise, narration, book_source, file_sha256, created_at
+            FROM vouchers
+            ORDER BY voucher_date, id
+        """)
+        all_vchs = cur.fetchall()
+
+        seen_invoices = {}
+        seen_exact_content = {}
+        to_delete = set()
+        affected_parties = set()
+
+        for v in all_vchs:
+            vid, pid, dt, vt, vno, dr, cr, narr, bs, fsha, cat = v
+            cvno = clean_vno_str(vno)
+            cnarr = re.sub(r'\s+', ' ', (narr or '').strip().lower())
+
+            # Rule 1: Real invoice numbers (e.g. Sales voucher 2305, 1323)
+            # A party cannot legitimately have two invoices with identical invoice number, date, and amount.
+            if is_invoice_no(vno):
+                inv_key = (pid, dt, vt, dr, cr, cvno)
+                if inv_key in seen_invoices:
+                    to_delete.add(vid)
+                    affected_parties.add(pid)
+                    continue
+                else:
+                    seen_invoices[inv_key] = v
+
+            # Rule 2: Exact full content duplicate across multiple file uploads
+            content_key = (pid, dt, vt, dr, cr, cvno, cnarr, bs)
+            if content_key in seen_exact_content:
+                prev = seen_exact_content[content_key]
+                if prev[10] != cat or prev[9] != fsha:
+                    to_delete.add(vid)
+                    affected_parties.add(pid)
+                    continue
+            else:
+                seen_exact_content[content_key] = v
+
+        if to_delete:
+            del_list = list(to_delete)
+            for i in range(0, len(del_list), 500):
+                chunk = del_list[i:i+500]
+                placeholders = ','.join('?' for _ in chunk)
+                cur.execute(f"DELETE FROM vouchers WHERE id IN ({placeholders})", chunk)
+
+            for pid in affected_parties:
+                recompute_party_balance(pid, conn)
+
+            conn.commit()
+
+        return {
+            "deletedCount": len(to_delete),
+            "affectedPartiesCount": len(affected_parties),
+        }
+    finally:
+        if should_close:
+            conn.close()
 
 def reconcile_adjustment_vouchers(
     vouchers: list[dict[str, Any]],
