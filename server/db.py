@@ -688,13 +688,34 @@ def apply_debtor_balance_benchmarks(benchmarks_data: list[dict] | dict) -> dict[
     else:
         benchmarks = benchmarks_data
 
-    from .voucher_parser import clean_party_name
+    import re, hashlib
+    from datetime import datetime
+    from .voucher_parser import clean_party_name, detect_state_and_city
+
+    def _norm(s: str) -> str:
+        return re.sub(r"[^a-zA-Z0-9]", "", str(s or "")).lower()
 
     bm_lookup = {}
+    bm_norm_lookup = {}
     for bm in benchmarks:
-        k = clean_party_name(bm.get("partyName") or bm.get("rawName") or "").lower().strip()
-        if k:
-            bm_lookup[k] = bm
+        raw = bm.get("rawName") or ""
+        pname = bm.get("partyName") or raw
+        k_clean = clean_party_name(pname).lower().strip()
+        k_raw = clean_party_name(raw).lower().strip()
+        k_norm = _norm(pname)
+        k_norm_raw = _norm(raw)
+
+        if k_clean:
+            bm_lookup[k_clean] = bm
+        if k_raw:
+            bm_lookup[k_raw] = bm
+        if k_norm:
+            bm_norm_lookup[k_norm] = bm
+        if k_norm_raw:
+            bm_norm_lookup[k_norm_raw] = bm
+
+    now_iso = datetime.now().isoformat()
+    matched_bm_ids = set()
 
     with get_connection() as conn:
         cur = conn.cursor()
@@ -709,10 +730,13 @@ def apply_debtor_balance_benchmarks(benchmarks_data: list[dict] | dict) -> dict[
         for cid, cname, bal_paise, has_auth in customers:
             bal_paise = bal_paise or 0
             k = clean_party_name(cname or "").lower().strip()
+            kn = _norm(cname or "")
 
-            if k in bm_lookup:
+            bm = bm_lookup.get(k) or bm_norm_lookup.get(kn)
+
+            if bm:
                 matched_count += 1
-                bm = bm_lookup[k]
+                matched_bm_ids.add(id(bm))
                 t_cl = bm["closingPaise"]
                 t_op = bm["openingPaise"]
                 diff = bal_paise - t_cl
@@ -747,16 +771,38 @@ def apply_debtor_balance_benchmarks(benchmarks_data: list[dict] | dict) -> dict[
                     WHERE id = ?
                 """, (status, cid))
 
+        inserted_count = 0
+        for bm in benchmarks:
+            if id(bm) not in matched_bm_ids:
+                raw_n = bm.get("rawName") or bm.get("partyName") or ""
+                pname = clean_party_name(raw_n)
+                if not pname:
+                    continue
+                t_cl = bm.get("closingPaise", 0)
+                t_op = bm.get("openingPaise", 0)
+                state, city = detect_state_and_city(pname)
+                pid = f"DEBTOR-TALLY-{hashlib.md5(pname.encode()).hexdigest()[:4].upper()}"
+
+                cur.execute("SELECT id FROM parties WHERE id = ? OR UPPER(TRIM(name)) = ?", (pid, pname.upper().strip()))
+                if not cur.fetchone():
+                    cur.execute("""
+                        INSERT INTO parties (id, name, state, city, district, salesperson, balance_paise, credit_days, status, party_type, tally_closing_paise, tally_opening_paise, tally_status, tally_diff_paise, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, 'Unassigned', ?, 30, 'active', 'customer', ?, ?, 'verified', 0, ?, ?)
+                    """, (pid, pname, state, city, city, t_cl, t_cl, t_op, now_iso, now_iso))
+                    inserted_count += 1
+                    exact_count += 1
+
         conn.commit()
 
     return {
         "totalBenchmarks": len(benchmarks),
-        "totalCustomers": len(customers),
+        "totalCustomers": len(customers) + inserted_count,
         "matchedCount": matched_count,
         "exactCount": exact_count,
         "mismatchCount": mismatch_count,
         "verifiedByLedgerCount": verified_by_ledger_count,
         "totalVerified": exact_count + verified_by_ledger_count,
+        "newPartiesInserted": inserted_count,
     }
 
 

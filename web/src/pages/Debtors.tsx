@@ -80,6 +80,7 @@ import {
   uploadOpeningBalances,
   resetAccountingBalances,
   syncDebtorBenchmarks,
+  uploadDebtorBenchmarks,
   uploadPartyLedger,
   listEmployees,
   serverHost,
@@ -1109,6 +1110,25 @@ function DebtorListCard() {
     }
   };
 
+  const [uploadingDebtorBalance, setUploadingDebtorBalance] = useState(false);
+  const handleUploadDebtorBalance = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingDebtorBalance(true);
+    setBenchmarksMessage(null);
+    try {
+      const res = await uploadDebtorBenchmarks(file);
+      setBenchmarksMessage(res.message);
+      invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
+      retry();
+    } catch (err: any) {
+      setBenchmarksMessage(err?.message || 'Failed to upload debtor balance.xlsx');
+    } finally {
+      setUploadingDebtorBalance(false);
+      e.target.value = '';
+    }
+  };
+
   const refreshToken = useSyncToken(syncKeys.debtors);
   const { state, rows, total, error, retry, sync } = useLiveList(load, term, page, refreshToken);
 
@@ -1319,6 +1339,22 @@ function DebtorListCard() {
             className="hidden"
             disabled={uploadingOpening}
             onChange={handleOpeningFileUpload}
+          />
+          <label
+            htmlFor="debtor-balance-benchmark-input"
+            className="btn-primary !py-1.5 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-sm bg-amber-600 hover:bg-amber-700 text-white"
+            title="Upload fresh debtor balance.xlsx exported from Tally to reconcile all customer debtor accounts"
+          >
+            <Upload size={13} className={uploadingDebtorBalance ? 'animate-spin' : ''} />
+            {uploadingDebtorBalance ? 'Reconciling...' : '📊 Upload debtor balance (.xlsx)'}
+          </label>
+          <input
+            id="debtor-balance-benchmark-input"
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            disabled={uploadingDebtorBalance}
+            onChange={handleUploadDebtorBalance}
           />
           <label
             htmlFor="debtor-workbook-file-input"

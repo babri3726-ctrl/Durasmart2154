@@ -899,6 +899,12 @@ def parse_debtor_balance_workbook(
     """
     Parses Tally Prime 'Sundry Debtors Group Summary' export (e.g. debtor balance.xlsx).
     Extracts Opening Balance, Debit, Credit, and Closing Balance ground truth benchmarks.
+    Auto-detects:
+    1. New Format (split_dr_cr):
+       - Header rows with 'Opening Balance' and 'Closing Balance'
+       - Sub-headers with 'Debit', 'Credit', 'Debit', 'Credit' across columns B, C, D, E
+    2. Legacy Format:
+       - Columns: Particulars, Opening, Debit, Credit, Closing (with Dr/Cr strings)
     """
     import io
     if isinstance(filepath_or_bytes, bytes):
@@ -907,7 +913,39 @@ def parse_debtor_balance_workbook(
         wb = openpyxl.load_workbook(filepath_or_bytes, data_only=True)
     
     ws = wb.active
-    
+
+    # Auto-detect header row and layout
+    header_row = 1
+    layout = "legacy"
+    start_row = 2
+
+    for r in range(1, min(15, ws.max_row + 1)):
+        c1 = ws.cell(r, 1).value
+        if c1 and "particular" in str(c1).lower():
+            header_row = r
+            break
+
+    for r in range(header_row, min(header_row + 4, ws.max_row + 1)):
+        vals = [str(ws.cell(r, c).value or "").lower().strip() for c in range(1, 7)]
+        if "closing balance" in vals[3:5] or ("debit" in vals[3:5] and "credit" in vals[4:6]):
+            layout = "split_dr_cr"
+            start_row = r + 1
+        elif len(vals) >= 5 and vals[1] == "debit" and vals[2] == "credit" and vals[3] == "debit" and vals[4] == "credit":
+            layout = "split_dr_cr"
+            start_row = r + 1
+
+    def to_float(val):
+        if val is None:
+            return 0.0
+        try:
+            s = str(val).strip()
+            num = float(re.sub(r"[^\d.]", "", s) or 0)
+            if "cr" in s.lower() and not s.startswith("-"):
+                return -num
+            return num
+        except Exception:
+            return 0.0
+
     def _parse_amt(val):
         if not val:
             return 0, 'debit'
@@ -919,13 +957,13 @@ def parse_debtor_balance_workbook(
         return paise, 'debit'
 
     benchmarks = []
-    for r in range(1, ws.max_row + 1):
+    for r in range(start_row, ws.max_row + 1):
         c1 = ws.cell(r, 1).value
         if not c1:
             continue
         s = str(c1).strip()
         s_low = s.lower()
-        if s_low.startswith(('total', 'grand total', 'closing balance', 'particulars', 'dura ldh', 'sundry debtors', 'group summary')) or '1-apr' in s_low:
+        if s_low.startswith(('total', 'grand total', 'closing balance', 'particulars', 'dura ldh', 'sundry debtors', 'group summary')) or '1-apr' in s_low or 'opening balance' in s_low:
             continue
         if not any(c.isalpha() for c in s):
             continue
@@ -935,10 +973,25 @@ def parse_debtor_balance_workbook(
             continue
         
         pname = clean_party_name(s)
-        op_paise, op_dir = _parse_amt(ws.cell(r, 2).value)
-        dr_paise, _ = _parse_amt(ws.cell(r, 3).value)
-        cr_paise, _ = _parse_amt(ws.cell(r, 4).value)
-        cl_paise, cl_dir = _parse_amt(ws.cell(r, 5).value)
+
+        if layout == "split_dr_cr":
+            op_dr = to_float(ws.cell(r, 2).value)
+            op_cr = to_float(ws.cell(r, 3).value)
+            cl_dr = to_float(ws.cell(r, 4).value)
+            cl_cr = to_float(ws.cell(r, 5).value)
+
+            net_op = op_dr - op_cr
+            net_cl = cl_dr - cl_cr
+            op_paise = int(round(net_op * 100))
+            cl_paise = int(round(net_cl * 100))
+            cl_dir = 'credit' if net_cl < 0 else 'debit'
+            dr_paise = int(round(cl_dr * 100)) if cl_dr > 0 else 0
+            cr_paise = int(round(cl_cr * 100)) if cl_cr > 0 else 0
+        else:
+            op_paise, op_dir = _parse_amt(ws.cell(r, 2).value)
+            dr_paise, _ = _parse_amt(ws.cell(r, 3).value)
+            cr_paise, _ = _parse_amt(ws.cell(r, 4).value)
+            cl_paise, cl_dir = _parse_amt(ws.cell(r, 5).value)
 
         benchmarks.append({
             "partyName": pname,
@@ -947,7 +1000,7 @@ def parse_debtor_balance_workbook(
             "debitPaise": dr_paise,
             "creditPaise": cr_paise,
             "closingPaise": cl_paise,
-            "closingFormatted": f"{cl_paise / 100.0:,.2f}",
+            "closingFormatted": f"₹{abs(cl_paise) / 100.0:,.2f} {'Cr.' if cl_paise < 0 else 'Dr.' if cl_paise > 0 else ''}".strip(),
             "direction": cl_dir
         })
 

@@ -2101,6 +2101,22 @@ export function syncDebtorBenchmarks(): Promise<{ status: string; message: strin
   return send('/debtors/sync-benchmarks', { method: 'POST' });
 }
 
+export async function uploadDebtorBenchmarks(file: File): Promise<{ status: string; message: string; details: any }> {
+  const form = new FormData();
+  form.append('file', file);
+  const token = localStorage.getItem('durasmart_access_token');
+  const res = await fetch(`${serverHost()}/api/v1/debtors/benchmarks/upload`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(txt || 'Failed to upload debtor balance workbook');
+  }
+  return res.json();
+}
+
 export async function uploadPartyLedger(debtorId: string, file: File): Promise<any> {
   const form = new FormData();
   form.append('file', file);

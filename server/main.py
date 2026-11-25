@@ -3061,6 +3061,41 @@ def sync_debtor_benchmarks():
         "details": res
     }
 
+@app.post("/api/v1/debtors/benchmarks/upload")
+async def upload_debtor_benchmarks(file: UploadFile = File(...)):
+    """
+    Uploads debtor balance.xlsx, extracts Tally closing & opening balances,
+    reconciles against customer debtors, and saves file to data/debtor balance.xlsx.
+    """
+    if not file.filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Only Excel .xlsx/.xls files are supported")
+    content = await file.read()
+    
+    # Save a copy to data/debtor balance.xlsx and root
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(base_dir, "data")
+    os.makedirs(data_dir, exist_ok=True)
+    with open(os.path.join(base_dir, "debtor balance.xlsx"), "wb") as f:
+        f.write(content)
+    with open(os.path.join(data_dir, "debtor balance.xlsx"), "wb") as f:
+        f.write(content)
+
+    from .voucher_parser import parse_debtor_balance_workbook
+    parsed = parse_debtor_balance_workbook(content)
+    res = db.apply_debtor_balance_benchmarks(parsed)
+
+    # Refresh in-memory state
+    persisted = db.load_all_persisted_state()
+    for k in ["debtors", "customers"]:
+        if k in persisted:
+            STATE[k] = persisted[k]
+
+    return {
+        "status": "success",
+        "message": f"Successfully synced {res['totalBenchmarks']} Tally debtor benchmarks from {file.filename}! {res['totalVerified']} verified, {res['mismatchCount']} mismatches.",
+        "details": res
+    }
+
 @app.post("/api/v1/debtors/{debtor_id}/upload-ledger")
 async def upload_single_party_ledger(debtor_id: str, file: UploadFile = File(...)):
     """
