@@ -78,8 +78,45 @@ export default function LeafletVacantAreaMap({
         fillOpacity: isSelected ? 0.85 : 0.65,
       });
 
+      const parties = dist.parties || [];
+      const topParties = parties.slice(0, 4);
+
+      const partiesListHtml =
+        parties.length > 0
+          ? `
+          <div style="margin-top: 8px; border-top: 1px solid #e5e7eb; padding-top: 6px;">
+            <div style="font-weight: 700; font-size: 11px; color: #374151; margin-bottom: 4px; display: flex; justify-content: space-between;">
+              <span>Registered Shops (${parties.length}):</span>
+            </div>
+            <ul style="margin: 0; padding-left: 14px; list-style-type: disc; max-height: 120px; overflow-y: auto; font-size: 11px; color: #1f2937;">
+              ${topParties
+                .map(
+                  (p) => `
+                <li style="margin-bottom: 3px;">
+                  <strong>${p.name}</strong>
+                  ${p.city ? `<span style="color: #6b7280;"> (${p.city})</span>` : ''}
+                  <span style="color: #059669; font-weight: 600;"> • ₹${p.balance.toLocaleString('en-IN')}</span>
+                  <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                    p.name + ' ' + (p.city || '') + ' ' + dist.district
+                  )}" target="_blank" rel="noreferrer" style="color: #2563eb; text-decoration: none; margin-left: 4px; font-size: 10px; font-weight: bold;">[Google Maps ↗]</a>
+                </li>
+              `
+                )
+                .join('')}
+              ${
+                parties.length > 4
+                  ? `<li style="list-style-type: none; margin-left: -14px; font-size: 10px; color: #4b5563; font-style: italic; margin-top: 2px;">+ ${
+                      parties.length - 4
+                    } more shops in panel below</li>`
+                  : ''
+              }
+            </ul>
+          </div>
+        `
+          : '<p style="margin: 4px 0 0 0; font-size: 11px; color: #9ca3af; font-style: italic;">No shops currently registered in this territory.</p>';
+
       const popupContent = `
-        <div style="font-family: inherit; font-size: 12px; min-width: 180px; padding: 2px;">
+        <div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; min-width: 240px; max-width: 300px; padding: 2px;">
           <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; margin-bottom: 6px;">
             <strong style="font-size: 13px; color: #111827;">${dist.district}</strong>
             <span style="font-size: 10px; font-weight: bold; text-transform: uppercase; color: ${color};">
@@ -94,6 +131,7 @@ export default function LeafletVacantAreaMap({
               ? `<p style="margin: 3px 0 0 0; font-size: 10px; color: #6b7280;">Cities: ${dist.cities.slice(0, 3).join(', ')}${dist.cities.length > 3 ? '…' : ''}</p>`
               : ''
           }
+          ${partiesListHtml}
         </div>
       `;
 

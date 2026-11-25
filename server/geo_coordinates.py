@@ -251,6 +251,7 @@ def get_district_coverage_info(db_path: str = "data/operations.db") -> list[dict
             "salespersons": set(),
             "status": "vacant",  # 'assigned', 'partial', 'vacant'
             "cities": set(),
+            "parties": [],
         }
 
     # Query parties database if available
@@ -258,9 +259,9 @@ def get_district_coverage_info(db_path: str = "data/operations.db") -> list[dict
         try:
             conn = sqlite3.connect(db_path)
             c = conn.cursor()
-            c.execute("SELECT name, city, district, state, salesperson, salesperson_id FROM parties")
+            c.execute("SELECT id, name, city, district, state, salesperson, salesperson_id, balance_paise, mobile FROM parties")
             for row in c.fetchall():
-                name, city, dist, st, sp, sp_id = row
+                pid, name, city, dist, st, sp, sp_id, bal_paise, mob = row
                 d_key = (dist or "").strip().upper()
                 if not d_key and city:
                     c_clean = city.strip().upper()
@@ -294,6 +295,7 @@ def get_district_coverage_info(db_path: str = "data/operations.db") -> list[dict
                         "salespersons": set(),
                         "status": "vacant",
                         "cities": set(),
+                        "parties": [],
                     }
 
                 entry = coverage_map[d_key]
@@ -305,6 +307,18 @@ def get_district_coverage_info(db_path: str = "data/operations.db") -> list[dict
                     if not entry["assignedSalesperson"]:
                         entry["assignedSalesperson"] = sp.strip()
                         entry["salespersonId"] = sp_id
+
+                entry["parties"].append({
+                    "id": pid,
+                    "name": (name or "").strip(),
+                    "city": (city or "").strip(),
+                    "district": (dist or d_key).strip(),
+                    "state": (st or entry["state"]).strip(),
+                    "salesperson": (sp or "Unassigned").strip(),
+                    "salespersonId": sp_id or "",
+                    "balance": round((bal_paise or 0) / 100, 2),
+                    "mobile": (mob or "").strip(),
+                })
 
             conn.close()
         except Exception as e:
@@ -323,6 +337,8 @@ def get_district_coverage_info(db_path: str = "data/operations.db") -> list[dict
 
         item["salespersons"] = list(item["salespersons"])
         item["cities"] = list(item["cities"])
+        # Sort parties by balance descending
+        item["parties"] = sorted(item["parties"], key=lambda p: abs(p.get("balance", 0)), reverse=True)
         result.append(item)
 
     return sorted(result, key=lambda x: (x["state"], x["district"]))

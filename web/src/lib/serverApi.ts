@@ -3453,6 +3453,18 @@ export function updateTourVisitStatus(
 
 // ── Vacant Areas & Territory Coverage ──────────────────────────────────────
 
+export interface ServerVacantParty {
+  id: string;
+  name: string;
+  city: string;
+  district: string;
+  state: string;
+  salesperson: string;
+  salespersonId?: string;
+  balance: number;
+  mobile?: string;
+}
+
 export interface ServerVacantDistrict {
   district: string;
   state: string;
@@ -3464,6 +3476,7 @@ export interface ServerVacantDistrict {
   salespersons: string[];
   status: 'assigned' | 'partial' | 'vacant';
   cities: string[];
+  parties?: ServerVacantParty[];
 }
 
 export interface ServerVacantAreasResponse {

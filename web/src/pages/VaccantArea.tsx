@@ -3,6 +3,13 @@ import {
   Search,
   UserPlus,
   X,
+  Store,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  MapPin,
+  Phone,
+  Building2,
 } from 'lucide-react';
 import { Card, PageHeader } from '../components/ui/Card';
 import LeafletVacantAreaMap from '../components/map/LeafletVacantAreaMap';
@@ -46,6 +53,16 @@ export default function VaccantArea() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [stateFilter, setStateFilter] = useState('all');
   const [selectedDistrict, setSelectedDistrict] = useState<ServerVacantDistrict | null>(null);
+  const [partySearch, setPartySearch] = useState('');
+  const [expandedDistrictMap, setExpandedDistrictMap] = useState<Record<string, boolean>>({});
+
+  const toggleDistrictExpand = (districtName: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpandedDistrictMap((prev) => ({
+      ...prev,
+      [districtName]: !prev[districtName],
+    }));
+  };
 
   // Assign Territory Modal
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
@@ -308,28 +325,100 @@ export default function VaccantArea() {
                           </p>
                         </div>
 
-                        {isVacant ? (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openAssignModal(d);
-                            }}
-                            className="shrink-0 rounded border border-red-300 px-2 py-0.5 text-[10px] font-bold text-brand-red hover:bg-brand-red hover:text-white"
-                          >
-                            Assign Beat
-                          </button>
-                        ) : (
-                          <span className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
-                            Covered
-                          </span>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {d.parties && d.parties.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={(e) => toggleDistrictExpand(d.district, e)}
+                              className="shrink-0 inline-flex items-center gap-0.5 rounded border border-line bg-canvas px-1.5 py-0.5 text-[10px] font-semibold text-ink hover:bg-line/40"
+                              title="Show party names in this district"
+                            >
+                              <Store size={10} className="text-muted" />
+                              <span>{d.parties.length}</span>
+                              {expandedDistrictMap[d.district] ? (
+                                <ChevronUp size={11} />
+                              ) : (
+                                <ChevronDown size={11} />
+                              )}
+                            </button>
+                          )}
+
+                          {isVacant ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openAssignModal(d);
+                              }}
+                              className="shrink-0 rounded border border-red-300 px-2 py-0.5 text-[10px] font-bold text-brand-red hover:bg-brand-red hover:text-white"
+                            >
+                              Assign Beat
+                            </button>
+                          ) : (
+                            <span className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold uppercase text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+                              Covered
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       {d.cities && d.cities.length > 0 && (
                         <p className="text-[10px] text-faint mt-1 pl-4 truncate">
                           Cities: {d.cities.join(', ')}
                         </p>
+                      )}
+
+                      {/* Inline Expanded Parties List */}
+                      {expandedDistrictMap[d.district] && d.parties && d.parties.length > 0 && (
+                        <div
+                          className="mt-2.5 rounded-md border border-line/80 bg-panel/90 p-2 space-y-1.5 text-xs"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex items-center justify-between pb-1 border-b border-line text-[11px] font-bold text-muted">
+                            <span>Parties in {d.district} ({d.parties.length}):</span>
+                            <span className="text-[10px] font-normal text-faint">Click to search on Google</span>
+                          </div>
+                          <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                            {d.parties.map((p) => (
+                              <div
+                                key={p.id || p.name}
+                                className="flex items-center justify-between gap-2 p-1.5 rounded hover:bg-canvas text-[11px]"
+                              >
+                                <div className="min-w-0">
+                                  <div className="font-semibold text-ink truncate">{p.name}</div>
+                                  <div className="text-[10px] text-muted flex items-center gap-1.5">
+                                    <span>{p.city || d.district}</span>
+                                    <span>•</span>
+                                    <span className="text-emerald-600 font-semibold">
+                                      ₹{p.balance.toLocaleString('en-IN')}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <a
+                                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                                      `${p.name} ${p.city || ''} ${d.district}`
+                                    )}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center gap-1 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-700 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300"
+                                    title="Search exact shop on Google Maps"
+                                  >
+                                    <span>Google Maps</span>
+                                    <ExternalLink size={10} />
+                                  </a>
+                                  <a
+                                    href={`/debtors?q=${encodeURIComponent(p.name)}`}
+                                    className="inline-flex items-center rounded border border-line px-1.5 py-0.5 text-[10px] font-semibold text-muted hover:text-ink"
+                                    title="View Debtor Ledger"
+                                  >
+                                    Ledger
+                                  </a>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       )}
                     </div>
                   );
@@ -339,6 +428,130 @@ export default function VaccantArea() {
           </Card>
         </div>
       </div>
+
+      {/* Dealer Shops & Parties in Selected District Directory */}
+      {selectedDistrict && (
+        <Card className="mt-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line pb-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <Store className="text-brand-red" size={18} />
+                <h3 className="text-sm font-bold text-ink">
+                  {selectedDistrict.district} Territory — Registered Dealer Parties & Shops
+                </h3>
+                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-bold text-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
+                  {selectedDistrict.parties?.length || selectedDistrict.totalShops} Shops
+                </span>
+              </div>
+              <p className="mt-0.5 text-xs text-muted">
+                State: <strong>{selectedDistrict.state}</strong> • Assigned Officer:{' '}
+                <strong>{selectedDistrict.assignedSalesperson || 'None (Vacant)'}</strong> • Search any party on Google Maps for live directions, reviews, and phone numbers.
+              </p>
+            </div>
+
+            <div className="relative w-full sm:w-72">
+              <input
+                type="text"
+                placeholder="Search party name or city in this district…"
+                value={partySearch}
+                onChange={(e) => setPartySearch(e.target.value)}
+                className="input !py-1 text-xs !pl-7 w-full"
+              />
+              <Search size={13} className="absolute left-2 top-2 text-muted" />
+            </div>
+          </div>
+
+          {/* Party Directory Grid */}
+          <div className="mt-3">
+            {(() => {
+              const parties = (selectedDistrict.parties || []).filter((p) => {
+                if (!partySearch.trim()) return true;
+                const q = partySearch.toLowerCase();
+                return (
+                  p.name.toLowerCase().includes(q) ||
+                  p.city.toLowerCase().includes(q) ||
+                  p.salesperson.toLowerCase().includes(q)
+                );
+              });
+
+              if (parties.length === 0) {
+                return (
+                  <div className="py-8 text-center text-xs text-muted">
+                    No shops found matching &ldquo;{partySearch}&rdquo; in {selectedDistrict.district}.
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                  {parties.map((p) => {
+                    const gmapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                      `${p.name} ${p.city || ''} ${selectedDistrict.district}`
+                    )}`;
+
+                    return (
+                      <div
+                        key={p.id || p.name}
+                        className="flex flex-col justify-between rounded-lg border border-line bg-canvas/40 p-3 hover:border-line hover:bg-canvas transition"
+                      >
+                        <div>
+                          <div className="flex items-start justify-between gap-1.5">
+                            <h4 className="text-xs font-bold text-ink leading-tight">{p.name}</h4>
+                            <span className="shrink-0 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
+                              ₹{p.balance.toLocaleString('en-IN')}
+                            </span>
+                          </div>
+
+                          <div className="mt-1.5 space-y-1 text-[11px] text-muted">
+                            <div className="flex items-center gap-1.5">
+                              <MapPin size={12} className="text-faint shrink-0" />
+                              <span className="truncate">
+                                {p.city || selectedDistrict.district}, {selectedDistrict.state}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <Building2 size={12} className="text-faint shrink-0" />
+                              <span>Officer: {p.salesperson || 'Unassigned'}</span>
+                            </div>
+                            {p.mobile && (
+                              <div className="flex items-center gap-1.5">
+                                <Phone size={12} className="text-faint shrink-0" />
+                                <a href={`tel:${p.mobile}`} className="hover:underline text-ink">
+                                  {p.mobile}
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="mt-3 flex items-center justify-between gap-2 border-t border-line/60 pt-2 text-[11px]">
+                          <a
+                            href={gmapsUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-blue-600 font-bold hover:underline"
+                            title="Open Google Maps search for this shop (ratings, phone, directions)"
+                          >
+                            <span>🗺️ Google Maps</span>
+                            <ExternalLink size={11} />
+                          </a>
+
+                          <a
+                            href={`/debtors?q=${encodeURIComponent(p.name)}`}
+                            className="inline-flex items-center gap-1 font-semibold text-muted hover:text-ink hover:underline"
+                          >
+                            <span>Debtor Ledger →</span>
+                          </a>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        </Card>
+      )}
 
       {/* Assign Sales Officer Modal */}
       {isAssignModalOpen && targetDistrict && (
