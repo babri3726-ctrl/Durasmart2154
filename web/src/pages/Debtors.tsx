@@ -52,6 +52,7 @@ import {
   Upload,
   AlertTriangle,
   Users,
+  Store,
 } from 'lucide-react';
 import { Card, EmptyState, KpiCard, PageHeader, Spinner } from '../components/ui/Card';
 import { LiveSyncBar } from '../components/ui/LiveSync';
@@ -988,6 +989,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
 }
 
 function DebtorListCard() {
+  const [ledgerType, setLedgerType] = useState<'debtors' | 'creditors'>('debtors');
   const [term, setTerm] = useState('');
   const [page, setPage] = useState(1);
   const [activeOnly, setActiveOnly] = useState(false);
@@ -1084,10 +1086,12 @@ function DebtorListCard() {
         q: folded || undefined,
         activeOnly: activeOnly ? true : undefined,
         statusFilter: statusFilter !== 'all' ? statusFilter : undefined,
+        ledgerType: ledgerType,
+        partyType: ledgerType === 'creditors' ? 'supplier' : 'customer',
         page: p,
         pageSize: PAGE_SIZE,
       }),
-    [activeOnly, statusFilter],
+    [activeOnly, statusFilter, ledgerType],
   );
 
   const handleSyncBenchmarks = async () => {
@@ -1360,36 +1364,78 @@ function DebtorListCard() {
         </div>
       </div>
 
-      {/* Debtor Master Hybrid KPI Summary Grid */}
+      {/* Ledger Book Category Switcher: Sundry Debtors vs Sundry Creditors */}
+      <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-line pb-3">
+        <button
+          type="button"
+          onClick={() => {
+            setLedgerType('debtors');
+            setPage(1);
+          }}
+          className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shadow-sm ${
+            ledgerType === 'debtors'
+              ? 'bg-blue-600 text-white shadow-blue-500/20'
+              : 'bg-canvas border border-line text-muted hover:text-ink hover:bg-line/30'
+          }`}
+        >
+          <Users size={15} />
+          <span>👥 Sundry Debtors (Customers)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setLedgerType('creditors');
+            setPage(1);
+          }}
+          className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition shadow-sm ${
+            ledgerType === 'creditors'
+              ? 'bg-purple-600 text-white shadow-purple-500/20'
+              : 'bg-canvas border border-line text-muted hover:text-ink hover:bg-line/30'
+          }`}
+        >
+          <Store size={15} />
+          <span>🏭 Sundry Creditors (Suppliers / Vendors)</span>
+          <span className="rounded-full bg-purple-200/40 px-1.5 py-0.5 text-[10px] text-purple-900 dark:text-purple-200 font-semibold">
+            32 Ledgers
+          </span>
+        </button>
+      </div>
+
+      {/* Debtor / Creditor Master Hybrid KPI Summary Grid */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 mb-5">
         <KpiCard
-          label="Total Receivables"
+          label={ledgerType === 'creditors' ? "Total Creditors Balance (Payables)" : "Total Receivables"}
           value={rupees(rows.reduce((acc, r) => acc + Math.round((parseFloat(String(r.balance || 0)) || 0) * 100), 0))}
-          hint="Across verified dealers"
-          gradient="from-amber-600 to-orange-600"
+          hint={ledgerType === 'creditors' ? "Suppliers, mills & vendors (Tally)" : "Across verified dealers"}
+          gradient={ledgerType === 'creditors' ? "from-purple-600 to-indigo-600" : "from-amber-600 to-orange-600"}
           icon={<AlertTriangle size={20} />}
         />
         <KpiCard
-          label="Active Debtors"
+          label={ledgerType === 'creditors' ? "Active Creditors" : "Active Debtors"}
           value={`${total} Accounts`}
-          hint="Master directory size"
+          hint={ledgerType === 'creditors' ? "Sundry Creditors master directory" : "Master directory size"}
           gradient="from-emerald-600 to-teal-600"
           icon={<Users size={20} />}
         />
         <KpiCard
-          label="With Outstanding"
-          value={`${rows.filter((r) => (parseFloat(String(r.balance || 0)) || 0) > 0).length} Parties`}
-          hint="Dues pending recovery"
-          gradient="from-red-600 to-rose-600"
+          label={ledgerType === 'creditors' ? "Parties with Balance" : "With Outstanding"}
+          value={`${rows.filter((r) => Math.abs(parseFloat(String(r.balance || 0)) || 0) > 0).length} Parties`}
+          hint={ledgerType === 'creditors' ? "Suppliers with closing dues" : "Dues pending recovery"}
+          gradient={ledgerType === 'creditors' ? "from-indigo-600 to-blue-600" : "from-red-600 to-rose-600"}
           icon={<ShieldAlert size={20} />}
         />
       </div>
 
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-[15px] font-black text-ink">Debtor Master</h2>
+          <h2 className="text-[15px] font-black text-ink">
+            {ledgerType === 'creditors' ? 'Sundry Creditors Master (Suppliers / Vendors)' : 'Sundry Debtors Master (Customers)'}
+          </h2>
           <p className="text-[11px] text-muted">
-            Dealers and parties with balance, station, salesperson, and live Edit / Delete controls.
+            {ledgerType === 'creditors'
+              ? 'Suppliers, mills, transports & vendors separated from customer debtor ledgers per Tally.'
+              : 'Dealers and customers with balance, station, salesperson, and live Edit / Delete controls.'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -1521,10 +1567,16 @@ function DebtorListCard() {
             <table className="w-full min-w-[700px] text-left text-[12px]">
               <thead>
                 <tr className="border-b border-line bg-canvas/40">
-                  <th className="px-3 py-2 text-[10px] font-extrabold uppercase tracking-wide text-muted">Party Name</th>
+                  <th className="px-3 py-2 text-[10px] font-extrabold uppercase tracking-wide text-muted">
+                    {ledgerType === 'creditors' ? 'Creditor / Supplier Name' : 'Party Name'}
+                  </th>
                   <th className="px-3 py-2 text-[10px] font-extrabold uppercase tracking-wide text-muted">Station / City</th>
-                  <th className="px-3 py-2 text-[10px] font-extrabold uppercase tracking-wide text-muted">Salesperson</th>
-                  <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wide text-muted">Balance</th>
+                  <th className="px-3 py-2 text-[10px] font-extrabold uppercase tracking-wide text-muted">
+                    {ledgerType === 'creditors' ? 'Account Type' : 'Salesperson'}
+                  </th>
+                  <th className="px-3 py-2 text-right text-[10px] font-extrabold uppercase tracking-wide text-muted">
+                    {ledgerType === 'creditors' ? 'Tally Closing Balance' : 'Balance'}
+                  </th>
                   <th className="px-3 py-2 text-center text-[10px] font-extrabold uppercase tracking-wide text-muted">Actions</th>
                 </tr>
               </thead>
@@ -1549,7 +1601,13 @@ function DebtorListCard() {
                             <span className="font-bold text-ink">{partyTitle}</span>
                             <span className="text-[10px] text-faint">{row.id || row.customerId}</span>
                           </div>
-                          {isMismatch ? (
+                          {ledgerType === 'creditors' ? (
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <span className="inline-flex items-center gap-1 rounded bg-purple-50 border border-purple-200 px-1.5 py-0.5 text-[10px] font-bold text-purple-700 dark:bg-purple-950/30 dark:text-purple-300">
+                                🏭 Sundry Creditor · Tally Verified
+                              </span>
+                            </div>
+                          ) : isMismatch ? (
                             <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                               <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-300">
                                 <AlertTriangle size={10} className="text-amber-600 shrink-0" />
@@ -1570,7 +1628,15 @@ function DebtorListCard() {
                         </div>
                       </td>
                       <td className="px-3 py-2 align-middle text-muted">{cityStation}</td>
-                      <td className="px-3 py-2 align-middle font-medium text-ink">{sp}</td>
+                      <td className="px-3 py-2 align-middle font-medium text-ink">
+                        {ledgerType === 'creditors' ? (
+                          <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                            Supplier / Creditor
+                          </span>
+                        ) : (
+                          sp
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-right align-middle font-semibold tabular-nums text-ink">
                         <div className="flex flex-col items-end">
                           <span className={`rounded px-2 py-0.5 border font-mono text-[11px] font-bold ${

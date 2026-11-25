@@ -2349,6 +2349,8 @@ def get_debtors(
     state: str | None = None,
     salesperson: str | None = None,
     statusFilter: str | None = None,
+    partyType: str | None = None,
+    ledgerType: str | None = None,
     activeOnly: bool = False,
     page: int = 1,
     pageSize: int = 50,
@@ -2363,14 +2365,28 @@ def get_debtors(
         if persisted.get("debtors"):
             STATE["debtors"] = persisted["debtors"]
             STATE["customers"] = persisted["debtors"]
+        if persisted.get("creditors"):
+            STATE["creditors"] = persisted["creditors"]
     except Exception:
         pass
 
-    from .ledger_classifier import is_sundry_debtor
-    items = [
-        d for d in STATE.get("debtors", [])
-        if is_sundry_debtor(d.get("name", ""), d.get("party_type"))
-    ]
+    from .ledger_classifier import is_sundry_debtor, is_sundry_creditor
+
+    is_creditor_mode = (
+        (ledgerType and ledgerType.lower() in ("creditor", "creditors", "supplier", "suppliers")) or
+        (partyType and partyType.lower() in ("creditor", "supplier"))
+    )
+
+    if is_creditor_mode:
+        items = [
+            c for c in STATE.get("creditors", [])
+            if is_sundry_creditor(c.get("name", ""), c.get("party_type"))
+        ]
+    else:
+        items = [
+            d for d in STATE.get("debtors", [])
+            if is_sundry_debtor(d.get("name", ""), d.get("party_type"))
+        ]
 
     # Search filter by party name, city, station, or id
     if q and q.strip():
@@ -2469,6 +2485,36 @@ def get_debtors(
             "totalCount": total
         }
     }
+
+@app.get("/api/v1/creditors")
+def get_creditors(
+    q: str | None = None,
+    state: str | None = None,
+    salesperson: str | None = None,
+    statusFilter: str | None = None,
+    activeOnly: bool = False,
+    page: int = 1,
+    pageSize: int = 50,
+    authorization: str | None = Header(None),
+    x_user_role: str | None = Header(None, alias="X-User-Role"),
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_employee_id: str | None = Header(None, alias="X-Employee-Id"),
+):
+    return get_debtors(
+        q=q,
+        state=state,
+        salesperson=salesperson,
+        statusFilter=statusFilter,
+        partyType="supplier",
+        ledgerType="creditors",
+        activeOnly=activeOnly,
+        page=page,
+        pageSize=pageSize,
+        authorization=authorization,
+        x_user_role=x_user_role,
+        x_user_id=x_user_id,
+        x_employee_id=x_employee_id,
+    )
 
 @app.post("/api/v1/debtors")
 def create_debtor(body: DebtorCreate):

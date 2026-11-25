@@ -916,16 +916,48 @@ def load_all_persisted_state() -> dict[str, Any]:
             signed_paise = amt if (ob["direction"] or "debit").lower() in ("debit", "owes") else -amt
             ob_by_customer[ob["customer_id"]] = (signed_paise, ob["direction"] or "debit")
 
-        from .ledger_classifier import is_sundry_debtor
+        from .ledger_classifier import is_sundry_debtor, is_sundry_creditor
 
         cur.execute("SELECT * FROM parties ORDER BY name ASC")
         parties = cur.fetchall()
 
         debtors = []
+        creditors = []
         seen_debtor_names = set()
+        seen_creditor_names = set()
+
         for p in parties:
             p_name = p["name"] or ""
             p_type = p["party_type"] if "party_type" in p.keys() else "customer"
+
+            # Check if this party is a Sundry Creditor
+            if is_sundry_creditor(p_name, p_type):
+                bal_paise = p["balance_paise"] or 0
+                bal_rupees = round(bal_paise / 100.0, 2)
+                norm_c = (p["name"] or "").strip().lower()
+                if norm_c not in seen_creditor_names:
+                    seen_creditor_names.add(norm_c)
+                    creditors.append({
+                        "id": p["id"],
+                        "name": p["name"],
+                        "state": p["state"],
+                        "city": p["city"],
+                        "district": p["district"],
+                        "salesperson": p["salesperson"] or "Unassigned",
+                        "salespersonId": p["salesperson_id"] or "",
+                        "mobile": p["mobile"] or "",
+                        "balance": bal_rupees,
+                        "balance_formatted": f"{bal_rupees:.2f}",
+                        "creditDays": p["credit_days"] or 30,
+                        "status": p["status"] or "active",
+                        "partyType": "supplier",
+                        "party_type": "supplier",
+                        "tallyClosingPaise": p["tally_closing_paise"] if "tally_closing_paise" in p.keys() else None,
+                        "tallyClosing": round(p["tally_closing_paise"] / 100.0, 2) if ("tally_closing_paise" in p.keys() and p["tally_closing_paise"] is not None) else None,
+                        "tallyStatus": p["tally_status"] if ("tally_status" in p.keys() and p["tally_status"]) else "verified",
+                    })
+                continue
+
             if not is_sundry_debtor(p_name, p_type):
                 continue
             bal_paise = p["balance_paise"] or 0
@@ -1153,6 +1185,7 @@ def load_all_persisted_state() -> dict[str, Any]:
         return {
             "debtors": debtors,
             "customers": customers,
+            "creditors": creditors,
             "orders": orders,
             "payments": payments,
             "dispatches": dispatches,

@@ -2055,6 +2055,8 @@ export interface ListDebtorsParams {
   state?: string;
   salesperson?: string;
   statusFilter?: 'all' | 'mismatch' | 'verified' | 'unbenchmarked' | string;
+  partyType?: 'customer' | 'supplier' | string;
+  ledgerType?: 'debtors' | 'creditors' | string;
   activeOnly?: boolean;
   page?: number;
   pageSize?: number;
@@ -2067,10 +2069,16 @@ export function listDebtors(params: ListDebtorsParams = {}): Promise<ServerPage<
   if (params.state) query.set('state', params.state);
   if (params.salesperson) query.set('salesperson', params.salesperson);
   if (params.statusFilter) query.set('statusFilter', params.statusFilter);
+  if (params.partyType) query.set('partyType', params.partyType);
+  if (params.ledgerType) query.set('ledgerType', params.ledgerType);
   if (params.activeOnly) query.set('activeOnly', 'true');
   if (params.page) query.set('page', String(params.page));
   query.set('pageSize', String(params.pageSize ?? 50));
   return send<ServerPage<ServerDebtor>>(`/debtors?${query.toString()}`);
+}
+
+export function listCreditors(params: ListDebtorsParams = {}): Promise<ServerPage<ServerDebtor>> {
+  return listDebtors({ ...params, ledgerType: 'creditors', partyType: 'supplier' });
 }
 
 export function syncDebtorBenchmarks(): Promise<{ status: string; message: string; details: any }> {

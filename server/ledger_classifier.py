@@ -76,6 +76,42 @@ PURCHASE_SUPPLIER_PATTERNS = [
     r"^import\s+bill\b",
 ]
 
+# Known Sundry Creditors (Suppliers, Mills, Vendors, Transporters) from Tally Sundry Creditor Ledger
+KNOWN_SUNDRY_CREDITORS = {
+    "APRAMAPAR JULL",
+    "AYS SHIPPING",
+    "BALA JI TRADING CO. ( DAGSHAI CUPBOARD)",
+    "HUMBLE STEEL PRIVATE LIMITED , PADDI LUDHIANA",
+    "JATINDER KUMAR & CO.",
+    "JHS ISPAT",
+    "JINDAL EXPORT",
+    "JSW STEEL COATED PRODUCT (40049316)",
+    "KAHNA STAINLESS STEEL",
+    "KAMDHENU LTD",
+    "K.L.STEEL",
+    "KRISHNA SHEET PROCESSER (LUDHIANA)",
+    "MANAKSIYA COATED METALS & INDUSTRIES LTD",
+    "MOHIT STEEL IND. GBD",
+    "NAMAN GOYAL",
+    "N H STEEL",
+    "PROMPT ENTERPRISES PRIVATE LIMITED BALLABGARH",
+    "PUNJAB FORGEING",
+    "RADIANT FLAT PRODUCTS PRIVATE LIMITED(MANDI RADINET",
+    "RK GOYAL & COMPANY",
+    "SACHIN KABJA KHANNA",
+    "SANJU KUMAR LOCKTIE MANDI GOBINDGARH",
+    "SAT PAL METEL PVT",
+    "SHIVA TRADERS LALIT JI BUCHO",
+    "SHREE BHAGWATI TRADERS",
+    "SHREE KRISHNA STEEL ROLLING MILL",
+    "SHREE SAI STEEL FARIDABAD",
+    "SONY FEBRICATER GBD",
+    "TRAI SERVICES",
+    "UNIVERSAL ADVOTISING",
+    "UNIVERSAL PROPACK",
+    "VIJAY KUMAR CHARAN DASS GBD",
+}
+
 RE_PNL = re.compile("|".join(PNL_PATTERNS), re.IGNORECASE)
 RE_EXPENSE = re.compile("|".join(EXPENSE_PATTERNS), re.IGNORECASE)
 RE_CASH = re.compile("|".join(CASH_PATTERNS), re.IGNORECASE)
@@ -108,9 +144,17 @@ def classify_party_name(name: str) -> str:
     raw = (name or "").strip()
     norm = " ".join(raw.split())
     norm_lower = norm.lower()
+    norm_upper = norm.upper()
 
     if not norm or norm_lower in ("total", "grand total", "(as per details)"):
         return "expense"
+
+    # Known Sundry Creditors (Suppliers, Mills, Vendors, Transporters) check
+    if norm_upper in KNOWN_SUNDRY_CREDITORS:
+        return "supplier"
+    for cred_kw in ("JHS ISPAT", "PROMPT ENTERPRISES", "SHREE SAI STEEL", "MANAKSIYA COATED", "AYS SHIPPING", "KAMDHENU LTD"):
+        if cred_kw in norm_upper:
+            return "supplier"
 
     if RE_PNL.search(norm_lower):
         return "pnl"
@@ -157,6 +201,12 @@ def is_sundry_debtor(name: str, party_type: Optional[str] = None) -> bool:
     if party_type and party_type != "customer":
         return False
     return classify_party_name(name) == "customer"
+
+def is_sundry_creditor(name: str, party_type: Optional[str] = None) -> bool:
+    """Returns True if the party is a sundry creditor supplier/vendor."""
+    if party_type and party_type in ("supplier", "creditor"):
+        return True
+    return classify_party_name(name) == "supplier"
 
 
 # Comprehensive Gazette for Punjab, Haryana, UP, HP, Rajasthan, Delhi-NCR
