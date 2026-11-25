@@ -2105,7 +2105,7 @@ export async function uploadDebtorBenchmarks(file: File): Promise<{ status: stri
   const form = new FormData();
   form.append('file', file);
   const token = localStorage.getItem('durasmart_access_token');
-  const res = await fetch(`${serverHost()}/api/v1/debtors/benchmarks/upload`, {
+  const res = await transportFetch('/debtors/benchmarks/upload', {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: form,
@@ -2121,7 +2121,7 @@ export async function uploadPartyLedger(debtorId: string, file: File): Promise<a
   const form = new FormData();
   form.append('file', file);
   const token = localStorage.getItem('durasmart_access_token');
-  const res = await fetch(`${serverHost()}/api/v1/debtors/${encodeURIComponent(debtorId)}/upload-ledger`, {
+  const res = await transportFetch(`/debtors/${encodeURIComponent(debtorId)}/upload-ledger`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: form,
