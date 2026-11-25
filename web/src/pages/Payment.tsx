@@ -18,7 +18,7 @@ import { Card, PageHeader, StatusBadge } from '../components/ui/Card';
 import { LiveSyncBar } from '../components/ui/LiveSync';
 import { Pager } from '../components/ui/Pager';
 import { exactRupees, paiseFromRupees } from '../lib/entryRules';
-import { fmtDateTime, rupees } from '../lib/format';
+import { fmtDateTime, rupees, rupeesDrCr } from '../lib/format';
 import { invalidate, syncKeys } from '../lib/syncStore';
 import { toast } from '../lib/toast';
 import { useLiveList } from '../lib/useLiveList';
@@ -544,7 +544,7 @@ export default function Payment() {
             <div className="rounded-xl border border-line bg-surface p-3.5 shadow-sm">
               <span className="text-[11px] font-extrabold uppercase tracking-wide text-muted">Opening Balance</span>
               <p className="mt-1 font-mono text-base font-black text-ink">
-                {bankSummary.openingBalancePaise !== undefined ? rupees(bankSummary.openingBalancePaise) : '—'}
+                {bankSummary.openingBalancePaise !== undefined ? rupeesDrCr(bankSummary.openingBalancePaise) : '—'}
               </p>
               <span className="text-[10px] text-faint">Baseline start of period</span>
             </div>
@@ -587,7 +587,7 @@ export default function Payment() {
                 Closing Balance
               </span>
               <p className="mt-1 font-mono text-lg font-black text-emerald-800 dark:text-emerald-300">
-                {bankSummary.closingBalancePaise !== undefined ? rupees(bankSummary.closingBalancePaise) : '—'}
+                {bankSummary.closingBalancePaise !== undefined ? rupeesDrCr(bankSummary.closingBalancePaise) : '—'}
               </p>
               <span className="text-[10px] font-medium text-emerald-700/80">Live calculated position</span>
             </div>

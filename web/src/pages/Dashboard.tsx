@@ -22,7 +22,7 @@ import {
 import { Card, CardHeader, KpiCard, PageHeader } from '../components/ui/Card';
 import { LiveSyncBar } from '../components/ui/LiveSync';
 import { RangePicker } from '../components/Reporting';
-import { qtyLabel, rupees } from '../lib/format';
+import { qtyLabel, rupees, rupeesDrCr } from '../lib/format';
 import { monthWindow, windowProblem } from '../lib/reportingWindow';
 import { dashboardCockpit, serverHost } from '../lib/serverApi';
 import { useResource } from '../lib/useResource';
@@ -129,7 +129,7 @@ function CockpitSummary({ from, to }: { from: string; to: string }) {
             />
             <KpiCard
               label="Receivables (Market Debt)"
-              value={rupees(data.summary.outstandingPaise)}
+              value={rupeesDrCr(data.summary.outstandingPaise)}
               hint={`Owed by ${data.summary.activeDealers || data.summary.dealersCount || 588} active trade dealers`}
               gradient="from-amber-600 to-orange-600"
               icon={<AlertTriangle size={20} />}
@@ -322,8 +322,8 @@ function CockpitSummary({ from, to }: { from: string; to: string }) {
                         </p>
                       </div>
                       <div className="shrink-0 text-right">
-                        <p className="text-xs font-black text-brand-red">
-                          {rupees(Math.round(d.balance * 100))}
+                        <p className="text-xs font-black text-brand-red font-mono">
+                          {rupeesDrCr(Math.round(d.balance * 100))}
                         </p>
                         <Link
                           to="/debtors"

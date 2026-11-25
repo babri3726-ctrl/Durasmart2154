@@ -57,7 +57,7 @@ import {
 import { Card, EmptyState, KpiCard, PageHeader, Spinner } from '../components/ui/Card';
 import { LiveSyncBar } from '../components/ui/LiveSync';
 import { Pager } from '../components/ui/Pager';
-import { rupees } from '../lib/format';
+import { rupees, rupeesDrCr, formatRupeesDrCr } from '../lib/format';
 import { useLiveList } from '../lib/useLiveList';
 import { useLiveSession } from '../lib/liveSession';
 import { invalidate, syncKeys, useSyncToken } from '../lib/syncStore';
@@ -501,11 +501,11 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="text-amber-600 shrink-0" size={16} />
                   <span className="text-xs font-bold text-amber-900">
-                    Tally Ground Truth Mismatch: Current {rupees(currentOutstandingPaise)} vs Tally {debtor.tallyClosing !== null && debtor.tallyClosing !== undefined ? rupees(Math.round(debtor.tallyClosing * 100)) : '—'}
+                    Tally Ground Truth Mismatch: Current {rupeesDrCr(currentOutstandingPaise)} vs Tally {debtor.tallyClosing !== null && debtor.tallyClosing !== undefined ? formatRupeesDrCr(debtor.tallyClosing) : '—'}
                   </span>
                   {debtor.tallyDiff !== undefined && (
                     <span className="font-mono text-xs font-bold text-amber-800">
-                      (Diff: {debtor.tallyDiff > 0 ? '+' : ''}₹{debtor.tallyDiff.toLocaleString('en-IN', { minimumFractionDigits: 2 })})
+                      (Diff: {debtor.tallyDiff > 0 ? '+' : ''}{formatRupeesDrCr(debtor.tallyDiff)})
                     </span>
                   )}
                 </div>
@@ -530,7 +530,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
               <span>
                 {debtor.hasAuthoritativeLedger
                   ? '✅ Verified with Authoritative Individual Party Ledger'
-                  : `✅ 100% Matches Tally Prime Sundry Debtors Benchmark (Closing: ₹${debtor.tallyClosing?.toLocaleString('en-IN', { minimumFractionDigits: 2 })})`}
+                  : `✅ 100% Matches Tally Prime Sundry Debtors Benchmark (Closing: ${formatRupeesDrCr(debtor.tallyClosing)})`}
               </span>
             </div>
             <label className="cursor-pointer text-[11px] font-bold text-emerald-700 hover:underline inline-flex items-center gap-1">
@@ -559,7 +559,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
               </button>
             </div>
             <p className="font-mono text-base font-extrabold text-slate-800">
-              {currentOpeningPaise < 0 ? `${rupees(Math.abs(currentOpeningPaise))} Cr` : rupees(currentOpeningPaise)}
+              {rupeesDrCr(currentOpeningPaise)}
             </p>
           </div>
           <div>
@@ -572,8 +572,8 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
           </div>
           <div>
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Current Outstanding</span>
-            <p className={`font-mono text-base font-extrabold ${currentOutstandingPaise < 0 ? 'text-emerald-700' : 'text-slate-900'}`}>
-              {currentOutstandingPaise < 0 ? `${rupees(Math.abs(currentOutstandingPaise))} Cr` : rupees(currentOutstandingPaise)}
+            <p className={`font-mono text-base font-extrabold ${currentOutstandingPaise < 0 ? 'text-purple-700' : 'text-slate-900'}`}>
+              {rupeesDrCr(currentOutstandingPaise)}
             </p>
           </div>
         </div>
@@ -1611,9 +1611,9 @@ function DebtorListCard() {
                             <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                               <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-300">
                                 <AlertTriangle size={10} className="text-amber-600 shrink-0" />
-                                Tally Mismatch · Tally: ₹{row.tallyClosing?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                Tally Mismatch · Tally: {formatRupeesDrCr(row.tallyClosing)}
                                 <span className="font-mono">
-                                  ({row.tallyDiff! > 0 ? '+' : ''}₹{row.tallyDiff?.toLocaleString('en-IN', { minimumFractionDigits: 2 })})
+                                  ({row.tallyDiff! > 0 ? '+' : ''}{formatRupeesDrCr(row.tallyDiff)})
                                 </span>
                               </span>
                             </div>
@@ -1644,13 +1644,15 @@ function DebtorListCard() {
                               ? 'bg-amber-100 border-amber-300 text-amber-900 font-black'
                               : isPos
                                 ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                                : 'bg-canvas border-line text-slate-400'
+                                : balPaise < 0
+                                  ? 'bg-purple-50 border-purple-300 text-purple-800 dark:bg-purple-950/40 dark:text-purple-300'
+                                  : 'bg-canvas border-line text-slate-400'
                           }`}>
-                            {rupees(balPaise)}
+                            {rupeesDrCr(balPaise)}
                           </span>
                           {isMismatch && row.tallyClosing !== null && row.tallyClosing !== undefined && (
                             <span className="text-[10px] text-slate-500 font-mono mt-0.5">
-                              Tally: ₹{row.tallyClosing.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                              Tally: {formatRupeesDrCr(row.tallyClosing)}
                             </span>
                           )}
                         </div>

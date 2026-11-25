@@ -2460,7 +2460,10 @@ def get_debtors(
         row["openingPaise"] = int(d.get("openingPaise", 0) or 0)
         row["openingBalance"] = float(d.get("openingBalance", round(int(d.get("openingPaise", 0) or 0) / 100.0, 2)))
         row["balance"] = bal_flt
-        row["balance_formatted"] = f"{bal_flt:.2f}"
+        d_c = "Cr." if bal_flt < 0 else "Dr." if bal_flt > 0 else ""
+        row["balance_type"] = "Cr" if bal_flt < 0 else "Dr" if bal_flt > 0 else "Nil"
+        row["balance_formatted"] = f"₹{abs(bal_flt):,.2f} {d_c}".strip() if bal_flt != 0 else "₹0.00"
+        row["balance_dr_cr"] = d_c
         row["importedAt"] = STATE.get("hrpb_snapshot", {}).get("synced_at", "2026-10-23T20:00:00+05:30")
         row["tallyClosing"] = d.get("tallyClosing")
         row["tallyClosingPaise"] = d.get("tallyClosingPaise")

@@ -84,6 +84,41 @@ export function rupees(paise: number): string {
   return `${negative ? '-₹' : '₹'}${grouped}.${frac}`;
 }
 
+/** Balance in paise formatted with Indian currency grouping and Dr. / Cr. postfix.
+ *  - Positive paise (> 0) → Debit balance, e.g. "₹40,49,356.14 Dr."
+ *  - Negative paise (< 0) → Credit balance, e.g. "₹4,06,947.00 Cr."
+ *  - Zero paise (=== 0)   → "₹0.00"
+ */
+export function rupeesDrCr(paise: number): string {
+  const rounded = Math.round(paise);
+  if (rounded === 0) return '₹0.00';
+  const isCredit = rounded < 0;
+  const abs = Math.abs(rounded);
+  const whole = Math.floor(abs / 100).toString();
+  const frac = String(abs % 100).padStart(2, '0');
+  let grouped: string;
+  if (whole.length <= 3) {
+    grouped = whole;
+  } else {
+    const lastThree = whole.slice(-3);
+    let prefix = whole.slice(0, -3);
+    const chunks: string[] = [];
+    while (prefix.length > 2) {
+      chunks.unshift(prefix.slice(-2));
+      prefix = prefix.slice(0, -2);
+    }
+    if (prefix) chunks.unshift(prefix);
+    grouped = `${chunks.join(',')},${lastThree}`;
+  }
+  return `₹${grouped}.${frac} ${isCredit ? 'Cr.' : 'Dr.'}`;
+}
+
+/** Formats a decimal rupee number (e.g. 4049356.14 or -406947) into "₹40,49,356.14 Dr." / "₹4,06,947.00 Cr." */
+export function formatRupeesDrCr(rupeesVal: number | null | undefined): string {
+  if (rupeesVal === null || rupeesVal === undefined || isNaN(rupeesVal)) return '—';
+  return rupeesDrCr(Math.round(rupeesVal * 100));
+}
+
 /** A quantity as the server sent it, with its unit after it. `quantity` is a decimal **string**
  *  (`"5.000"`), so the trailing digits a NUMERIC column kept survive instead of becoming `5`.
  *  Nothing here parses, pads or re-rounds it. */

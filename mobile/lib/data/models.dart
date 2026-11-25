@@ -722,13 +722,23 @@ class DebtorItem {
   bool get isMismatch => tallyStatus == 'mismatch';
   bool get isUnbenchmarked => tallyStatus == 'unbenchmarked';
 
-  String get balanceFormatted => '₹${balance.toStringAsFixed(2)}';
-  String get tallyClosingFormatted =>
-      tallyClosing != null ? '₹${tallyClosing!.toStringAsFixed(2)}' : '';
+  String get balanceFormatted {
+    if (balance == 0) return '₹0.00';
+    final suffix = balance > 0 ? ' Dr.' : ' Cr.';
+    return '₹${balance.abs().toStringAsFixed(2)}$suffix';
+  }
+
+  String get tallyClosingFormatted {
+    if (tallyClosing == null) return '';
+    final suffix = tallyClosing! > 0 ? ' Dr.' : tallyClosing! < 0 ? ' Cr.' : '';
+    return '₹${tallyClosing!.abs().toStringAsFixed(2)}$suffix';
+  }
+
   String get tallyDiffFormatted {
     if (tallyDiff == null) return '';
     final sign = tallyDiff! > 0 ? '+' : '';
-    return '$sign₹${tallyDiff!.toStringAsFixed(2)}';
+    final suffix = tallyDiff! > 0 ? ' Dr.' : tallyDiff! < 0 ? ' Cr.' : '';
+    return '$sign₹${tallyDiff!.abs().toStringAsFixed(2)}$suffix';
   }
 
   factory DebtorItem.fromJson(Map<String, dynamic> json) {

@@ -13,7 +13,7 @@ import {
 import { Card, EmptyState, KpiCard, PageHeader } from '../components/ui/Card';
 import { LiveSyncBar } from '../components/ui/LiveSync';
 import { Pager } from '../components/ui/Pager';
-import { rupees } from '../lib/format';
+import { rupees, rupeesDrCr, formatRupeesDrCr } from '../lib/format';
 import { useLiveList } from '../lib/useLiveList';
 import { syncKeys, useSyncToken, invalidate } from '../lib/syncStore';
 import {
@@ -78,7 +78,7 @@ function CreditorLedgerModal({
               Station: <strong>{creditor.city || creditor.district || '—'}</strong> • Tally Status:{' '}
               <strong className="text-emerald-600">Verified</strong> • Balance:{' '}
               <strong className="font-mono text-ink">
-                ₹{((creditor.balance || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                {formatRupeesDrCr(creditor.balance)}
               </strong>
             </p>
           </div>
@@ -273,7 +273,7 @@ export default function Creditors() {
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <KpiCard
           label="Total Creditors Balance"
-          value={rupees(totalBalancePaise)}
+          value={rupeesDrCr(totalBalancePaise)}
           hint="Suppliers, mills & vendors (Tally)"
           gradient="from-purple-600 to-indigo-600"
           icon={<Building2 size={20} />}
@@ -410,13 +410,13 @@ export default function Creditors() {
                           <span
                             className={`rounded px-2 py-0.5 border ${
                               bal > 0
-                                ? 'bg-emerald-50 border-emerald-300 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300'
+                                ? 'bg-blue-50 border-blue-300 text-blue-800 dark:bg-blue-950/30 dark:text-blue-300'
                                 : bal < 0
-                                ? 'bg-amber-50 border-amber-300 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300'
+                                ? 'bg-purple-50 border-purple-300 text-purple-800 dark:bg-purple-950/30 dark:text-purple-300'
                                 : 'bg-canvas border-line text-muted'
                             }`}
                           >
-                            {rupees(balPaise)}
+                            {rupeesDrCr(balPaise)}
                           </span>
                         </td>
                         <td className="px-3 py-2.5 text-center">
