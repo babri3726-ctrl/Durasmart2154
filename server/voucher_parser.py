@@ -563,12 +563,6 @@ def parse_accounting_workbook(
             skipped_count += 1
             continue
 
-        # STRICT USER SPECIFICATION: In Day Book, disable Payment and Receipt
-        # Bank payments and receipts are authoritatively handled by dedicated bank books (HDFC & Yes Bank)
-        if book_source == "Day Book" and disable_payment_receipt and vch_type.lower() in ("payment", "receipt"):
-            skipped_count += 1
-            continue
-
         vch_no_val = ws.cell(r, col_map.get("vch_no", p_col + 2)).value if "vch_no" in col_map else ""
         if isinstance(vch_no_val, datetime):
             vch_no = vch_no_val.strftime("%d-%b-%y")
@@ -659,9 +653,6 @@ def parse_accounting_workbook(
         # Skip rows with no money and no inventory movements
         if debit_paise == 0 and credit_paise == 0 and not (d_qty or c_qty):
             continue
-
-        if not vch_no and book_source == "Day Book":
-            vch_no = f"DB-{r}"
 
         # Format date as YYYY-MM-DD
         vch_date = normalize_date_str(date_cell)
