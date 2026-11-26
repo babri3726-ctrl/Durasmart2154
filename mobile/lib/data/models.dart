@@ -698,6 +698,7 @@ class DebtorItem {
     this.balance = 0.0,
     this.openingBalance = 0.0,
     this.status = 'active',
+    this.partyType = 'customer',
     this.tallyStatus = 'unbenchmarked',
     this.tallyClosing,
     this.tallyDiff,
@@ -713,11 +714,15 @@ class DebtorItem {
   double balance;
   double openingBalance;
   String status;
+  String partyType;
   String tallyStatus;
   double? tallyClosing;
   double? tallyDiff;
   bool hasAuthoritativeLedger;
 
+  bool get isCreditor =>
+      partyType.toLowerCase() == 'supplier' ||
+      partyType.toLowerCase() == 'creditor';
   bool get isVerified => tallyStatus == 'verified';
   bool get isMismatch => tallyStatus == 'mismatch';
   bool get isUnbenchmarked => tallyStatus == 'unbenchmarked';
@@ -770,6 +775,9 @@ class DebtorItem {
             ? parseDoubleSafe(json['tallyDiffPaise']) / 100.0
             : null);
     final hasAuthLedger = json['hasAuthoritativeLedger'] == true;
+    final partyType = json['partyType']?.toString() ??
+        json['party_type']?.toString() ??
+        'customer';
 
     return DebtorItem(
       id: json['id']?.toString() ?? json['customerId']?.toString() ?? '',
@@ -781,6 +789,7 @@ class DebtorItem {
       balance: parsedBal,
       openingBalance: parsedOpenBal,
       status: json['status']?.toString() ?? 'active',
+      partyType: partyType,
       tallyStatus: tallyStatus,
       tallyClosing: tallyClosing,
       tallyDiff: tallyDiff,
@@ -798,6 +807,7 @@ class DebtorItem {
     'balance': balance,
     'openingBalance': openingBalance,
     'status': status,
+    'partyType': partyType,
     'tallyStatus': tallyStatus,
     'tallyClosing': tallyClosing,
     'tallyDiff': tallyDiff,

@@ -55,10 +55,17 @@ class MoreScreen extends StatelessWidget {
               ),
               _Item(
                 'Debtors',
-                'Accounts with balances',
+                'Sundry debtors & balances',
                 '/debtors',
                 Icons.account_balance_rounded,
                 AppGradients.danger,
+              ),
+              _Item(
+                'Creditors',
+                'Sundry creditors & payables',
+                '/creditors',
+                Icons.factory_rounded,
+                AppGradients.employee,
               ),
               _Item(
                 'Orders',

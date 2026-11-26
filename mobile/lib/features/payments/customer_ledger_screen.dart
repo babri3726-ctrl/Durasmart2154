@@ -21,7 +21,11 @@ class CustomerLedgerScreen extends StatefulWidget {
 
 class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
   String _voucherFilter = 'All'; // 'All', 'Sales', 'Receipts'
+  String _viewMode = 'detailed'; // 'detailed' | 'monthly'
+  bool _sortAscendingTally = true; // 1-Apr-26 First (Tally) by default
+  String? _selectedMonthKey; // e.g. '2026-11' when drilling down from Monthly Summary
   bool _loadingVouchers = false;
+  bool _cleaningDuplicates = false;
 
   @override
   void initState() {
@@ -82,34 +86,22 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
     final orders = repo.ordersFor(customer.id);
     final payments = repo.paymentsFor(customer.id);
 
-    // Sums
-    final voucherSalesDebit = vouchers
-        .where((v) => v.isSales)
-        .fold(0.0, (sum, v) => sum + v.debit);
-    final voucherReceiptsCredit = vouchers
-        .where((v) =>
-            v.isReceipt ||
-            v.isCreditNote ||
-            (v.isJournal && v.credit > 0))
-        .fold(0.0, (sum, v) => sum + v.credit);
-    final voucherJournalDebit = vouchers
-        .where((v) => v.isJournal && v.debit > 0)
-        .fold(0.0, (sum, v) => sum + v.debit);
+    // Sums (all debits and all credits matching backend recompute_party_balance)
+    final voucherTotalDebits =
+        vouchers.fold(0.0, (sum, v) => sum + v.debit);
+    final voucherTotalCredits =
+        vouchers.fold(0.0, (sum, v) => sum + v.credit);
 
     final billed = hasVouchers
-        ? voucherSalesDebit
+        ? voucherTotalDebits
         : orders.fold(0.0, (sum, order) => sum + order.total);
     final collected = hasVouchers
-        ? voucherReceiptsCredit
+        ? voucherTotalCredits
         : payments.fold(0.0, (sum, payment) => sum + payment.amount);
-    final outstanding = (debtor != null && debtor.balance > 0)
+    final outstanding = debtor != null
         ? debtor.balance
         : (hasVouchers
-            ? (openingBalance +
-                    voucherSalesDebit +
-                    voucherJournalDebit -
-                    voucherReceiptsCredit)
-                .clamp(0.0, double.infinity)
+            ? (openingBalance + voucherTotalDebits - voucherTotalCredits)
             : repo.customerOutstanding(customer.id));
     final overdue = repo.customerOverdue(customer.id);
 
@@ -120,7 +112,7 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
     double bucket90Plus = 0.0;
 
     if (hasVouchers) {
-      double remainingCredits = voucherReceiptsCredit;
+      double remainingCredits = voucherTotalCredits;
       if (openingBalance > 0) {
         if (remainingCredits >= openingBalance) {
           remainingCredits -= openingBalance;
@@ -163,7 +155,70 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
       }
     }
 
-    final filteredVouchers = vouchers.where((v) {
+    // Build chronological ascending list (1-Apr-2026 first) to compute Tally running balances
+    final chronoVouchers = List<VoucherItem>.from(vouchers)
+      ..sort((a, b) {
+        final cmp = a.voucherDate.compareTo(b.voucherDate);
+        if (cmp != 0) return cmp;
+        return a.id.compareTo(b.id);
+      });
+
+    final runningBalanceById = <String, double>{};
+    double runBal = openingBalance;
+    for (final v in chronoVouchers) {
+      runBal += v.debit - v.credit;
+      runningBalanceById[v.id] = runBal;
+    }
+
+    // Build Tally Monthly Summary (Apr 2026 to Nov 2026 / latest)
+    final fyMonths = <String>[
+      '2026-04', '2026-05', '2026-06', '2026-07',
+      '2026-08', '2026-09', '2026-10', '2026-11',
+    ];
+    for (final v in chronoVouchers) {
+      if (v.voucherDate.length >= 7) {
+        final mk = v.voucherDate.substring(0, 7);
+        if (mk.compareTo('2026-04') >= 0 && !fyMonths.contains(mk)) {
+          fyMonths.add(mk);
+        }
+      }
+    }
+    fyMonths.sort();
+
+    final monthlyRows = <_MonthlySummaryRow>[];
+    double mRunning = openingBalance;
+    for (final mk in fyMonths) {
+      final mOpen = mRunning;
+      double mDr = 0.0;
+      double mCr = 0.0;
+      int mCount = 0;
+      for (final v in chronoVouchers) {
+        if (v.voucherDate.startsWith(mk)) {
+          mDr += v.debit;
+          mCr += v.credit;
+          mCount++;
+        }
+      }
+      mRunning = mOpen + mDr - mCr;
+      monthlyRows.add(_MonthlySummaryRow(
+        monthKey: mk,
+        label: _formatMonthKey(mk),
+        opening: mOpen,
+        debit: mDr,
+        credit: mCr,
+        closing: mRunning,
+        count: mCount,
+      ));
+    }
+
+    final orderedVouchers = _sortAscendingTally
+        ? chronoVouchers
+        : chronoVouchers.reversed.toList();
+
+    final filteredVouchers = orderedVouchers.where((v) {
+      if (_selectedMonthKey != null && !v.voucherDate.startsWith(_selectedMonthKey!)) {
+        return false;
+      }
       if (_voucherFilter == 'Sales') return v.isSales;
       if (_voucherFilter == 'Receipts') {
         return v.isReceipt || v.isCreditNote || (v.isJournal && v.credit > 0);
@@ -254,15 +309,13 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                   Row(
                     children: [
                       Expanded(
-                        child: _HeroStat('Outstanding', rupees(outstanding)),
+                        child: _HeroStat('Outstanding', rupeesDrCr(outstanding)),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: _HeroStat(
                           'Opening Bal',
-                          openingBalance < 0
-                              ? '${rupees(openingBalance.abs())} Cr'
-                              : rupees(openingBalance),
+                          rupeesDrCr(openingBalance),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -285,6 +338,106 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                 ],
               ),
             ),
+            if (debtor != null && debtor.isMismatch) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEF3C7),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFFDE68A)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.warning_amber_rounded, color: Color(0xFFD97706), size: 18),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Tally Ground Truth Mismatch',
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFF92400E),
+                            ),
+                          ),
+                        ),
+                        TextButton.icon(
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            backgroundColor: const Color(0xFFD97706),
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: _cleaningDuplicates
+                              ? null
+                              : () async {
+                                  final sm = ScaffoldMessenger.of(context);
+                                  setState(() => _cleaningDuplicates = true);
+                                  final res = await repo.cleanupDuplicateVouchers();
+                                  await _loadVouchers();
+                                  if (!mounted) return;
+                                  setState(() => _cleaningDuplicates = false);
+                                  sm.showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        res != null
+                                            ? 'Cleaned ${res['deletedCount'] ?? 0} duplicates'
+                                            : 'Duplicate cleanup failed',
+                                      ),
+                                    ),
+                                  );
+                                },
+                          icon: const Icon(Icons.cleaning_services_rounded, size: 13),
+                          label: Text(
+                            _cleaningDuplicates ? 'Cleaning...' : 'Clean Dupes',
+                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Current: ${debtor.balanceFormatted} vs Tally: ${debtor.tallyClosingFormatted} (Diff: ${debtor.tallyDiffFormatted})',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFFB45309),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else if (debtor != null && debtor.isVerified) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF0FDF4),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFBBF7D0)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle_rounded, color: Color(0xFF16A34A), size: 16),
+                    const SizedBox(width: 6),
+                    Text(
+                      debtor.hasAuthoritativeLedger
+                          ? 'Verified with Authoritative Tally Party Ledger'
+                          : 'Verified with Tally Closing Balance',
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF15803D),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 14),
 
             // ── 4 Balance Metric Tiles ────────────────────────────────────
@@ -293,12 +446,10 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                 Expanded(
                   child: MetricCard(
                     title: 'Opening balance',
-                    value: openingBalance < 0
-                        ? '${rupees(openingBalance.abs())} Cr'
-                        : rupees(openingBalance),
+                    value: rupeesDrCr(openingBalance),
                     caption: openingBalance < 0
                         ? 'Advance credit brought forward'
-                        : 'Starting balance',
+                        : 'As of 01-04-2026',
                     icon: Icons.account_balance_rounded,
                     gradient: openingBalance < 0
                         ? AppGradients.customer
@@ -308,10 +459,10 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: MetricCard(
-                    title: 'Total billed sales',
+                    title: 'Total debits / billed',
                     value: rupees(billed),
                     caption: hasVouchers
-                        ? '${vouchers.where((v) => v.isSales).length} sales invoice(s)'
+                        ? '${vouchers.where((v) => v.debit > 0).length} debit voucher(s)'
                         : '${orders.length} order(s)',
                     icon: Icons.receipt_rounded,
                     gradient: AppGradients.order,
@@ -327,7 +478,7 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                     title: 'Total credits / receipts',
                     value: rupees(collected),
                     caption: hasVouchers
-                        ? '${vouchers.where((v) => !v.isSales).length} payment(s) & note(s)'
+                        ? '${vouchers.where((v) => v.credit > 0).length} credit voucher(s)'
                         : '${payments.length} receipt(s)',
                     icon: Icons.payments_rounded,
                     gradient: AppGradients.success,
@@ -337,8 +488,10 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                 Expanded(
                   child: MetricCard(
                     title: 'Current outstanding',
-                    value: rupees(outstanding),
-                    caption: outstanding <= 0 ? 'Account settled' : 'Net balance payable',
+                    value: rupeesDrCr(outstanding),
+                    caption: outstanding.abs() < 0.01
+                        ? 'Account settled'
+                        : (outstanding > 0 ? 'Receivable (Dr.)' : 'Advance / Payable (Cr.)'),
                     icon: Icons.account_balance_wallet_rounded,
                     gradient: AppGradients.payment,
                   ),
@@ -397,17 +550,19 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
             ),
             const SizedBox(height: 14),
 
-            // ── Live Vouchers / Ledger Table ──────────────────────────────
+            // ── Live Vouchers / Ledger Table & Tally Monthly Summary ──────
             WhitePanel(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   SectionHeading(
-                    title: hasVouchers ? 'Day Book Vouchers' : 'Invoice Ledger',
+                    title: hasVouchers ? 'Party Ledger Statement' : 'Invoice Ledger',
                     subtitle: hasVouchers
-                        ? '${filteredVouchers.length} vouchers recorded'
+                        ? (_viewMode == 'monthly'
+                            ? 'Tally-style monthly summary (Apr–Nov 2026)'
+                            : '${filteredVouchers.length} vouchers recorded')
                         : '${orders.length} order invoice(s)',
-                    trailing: hasVouchers
+                    trailing: hasVouchers && _viewMode == 'detailed'
                         ? Container(
                             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                             decoration: BoxDecoration(
@@ -422,7 +577,7 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                                 style: AppText.caption.copyWith(fontWeight: FontWeight.bold),
                                 items: const [
                                   DropdownMenuItem(value: 'All', child: Text('All')),
-                                  DropdownMenuItem(value: 'Sales', child: Text('Sales')),
+                                  DropdownMenuItem(value: 'Sales', child: Text('Debits')),
                                   DropdownMenuItem(value: 'Receipts', child: Text('Credits')),
                                 ],
                                 onChanged: (v) {
@@ -433,11 +588,225 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                           )
                         : null,
                   ),
+                  if (hasVouchers) ...[
+                    const SizedBox(height: 10),
+                    // View Mode Switcher: Detailed Ledger vs Monthly Summary (Tally View)
+                    Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () => setState(() => _viewMode = 'detailed'),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 7),
+                                decoration: BoxDecoration(
+                                  color: _viewMode == 'detailed' ? Colors.white : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(8),
+                                  boxShadow: _viewMode == 'detailed'
+                                      ? const [BoxShadow(color: Color(0x12000000), blurRadius: 4, offset: Offset(0, 1))]
+                                      : null,
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    'Detailed Ledger',
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: _viewMode == 'detailed' ? FontWeight.w800 : FontWeight.w600,
+                                      color: _viewMode == 'detailed' ? const Color(0xFF0F172A) : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () => setState(() => _viewMode = 'monthly'),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 7),
+                                decoration: BoxDecoration(
+                                  color: _viewMode == 'monthly' ? Colors.white : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(8),
+                                  boxShadow: _viewMode == 'monthly'
+                                      ? const [BoxShadow(color: Color(0x12000000), blurRadius: 4, offset: Offset(0, 1))]
+                                      : null,
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    'Monthly Summary (Tally)',
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: _viewMode == 'monthly' ? FontWeight.w800 : FontWeight.w600,
+                                      color: _viewMode == 'monthly' ? const Color(0xFF2563EB) : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_viewMode == 'detailed') ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          InkWell(
+                            borderRadius: BorderRadius.circular(8),
+                            onTap: () => setState(() => _sortAscendingTally = !_sortAscendingTally),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF8FAFC),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.swap_vert_rounded, size: 14, color: Color(0xFF2563EB)),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    _sortAscendingTally ? '1-Apr-26 First (Tally)' : 'Latest First',
+                                    style: const TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF334155),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          if (_selectedMonthKey != null) ...[
+                            const SizedBox(width: 8),
+                            InkWell(
+                              borderRadius: BorderRadius.circular(8),
+                              onTap: () => setState(() => _selectedMonthKey = null),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFEFF6FF),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      'Month: ${_formatMonthKey(_selectedMonthKey!)}',
+                                      style: const TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w800,
+                                        color: Color(0xFF1D4ED8),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Icon(Icons.close_rounded, size: 13, color: Color(0xFF1D4ED8)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ],
                   const SizedBox(height: 10),
                   if (_loadingVouchers)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 24),
                       child: Center(child: CircularProgressIndicator()),
+                    )
+                  else if (hasVouchers && _viewMode == 'monthly')
+                    Column(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Row(
+                            children: [
+                              Expanded(flex: 3, child: Text('MONTH', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Color(0xFF475569)))),
+                              Expanded(flex: 3, child: Text('DEBIT (+)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Color(0xFF475569)))),
+                              Expanded(flex: 3, child: Text('CREDIT (-)', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Color(0xFF475569)))),
+                              Expanded(flex: 4, child: Text('CLOSING', textAlign: TextAlign.right, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Color(0xFF475569)))),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        for (final m in monthlyRows)
+                          InkWell(
+                            onTap: () {
+                              setState(() {
+                                _selectedMonthKey = m.monthKey;
+                                _viewMode = 'detailed';
+                              });
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 6),
+                              decoration: const BoxDecoration(
+                                border: Border(bottom: BorderSide(color: Color(0xFFF1F5F9))),
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    flex: 3,
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          m.label,
+                                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
+                                        ),
+                                        Text(
+                                          '${m.count} vch',
+                                          style: const TextStyle(fontSize: 9.5, color: Color(0xFF64748B)),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Expanded(
+                                    flex: 3,
+                                    child: Text(
+                                      m.debit > 0 ? rupeesShort(m.debit) : '—',
+                                      textAlign: TextAlign.right,
+                                      style: const TextStyle(fontSize: 11, fontFamily: 'monospace', fontWeight: FontWeight.w700, color: Color(0xFF1E293B)),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    flex: 3,
+                                    child: Text(
+                                      m.credit > 0 ? rupeesShort(m.credit) : '—',
+                                      textAlign: TextAlign.right,
+                                      style: const TextStyle(fontSize: 11, fontFamily: 'monospace', fontWeight: FontWeight.w700, color: Color(0xFF15803D)),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    flex: 4,
+                                    child: Text(
+                                      rupeesDrCr(m.closing),
+                                      textAlign: TextAlign.right,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontFamily: 'monospace',
+                                        fontWeight: FontWeight.w800,
+                                        color: m.closing >= 0 ? const Color(0xFF0F172A) : const Color(0xFF0D9488),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
                     )
                   else if (hasVouchers)
                     filteredVouchers.isEmpty
@@ -446,15 +815,60 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                             title: 'No vouchers match filter',
                             subtitle: 'Try switching the filter to All.',
                           )
-                        : ListView.separated(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: filteredVouchers.length,
-                            separatorBuilder: (_, _) => const Divider(height: 1),
-                            itemBuilder: (context, i) {
-                              final v = filteredVouchers[i];
-                              return _VoucherListTile(voucher: v);
-                            },
+                        : Column(
+                            children: [
+                              if (_sortAscendingTally && _selectedMonthKey == null)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+                                  margin: const EdgeInsets.only(bottom: 4),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFFFBEB),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: const Color(0xFFFDE68A)),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'OPENING BALANCE',
+                                              style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w900, color: Color(0xFF92400E)),
+                                            ),
+                                            Text(
+                                              '01-04-2026 • Brought forward (as of 1-Apr-2026)',
+                                              style: TextStyle(fontSize: 10.5, color: Color(0xFFB45309)),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      Text(
+                                        rupeesDrCr(openingBalance),
+                                        style: const TextStyle(
+                                          fontFamily: 'monospace',
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w900,
+                                          color: Color(0xFF92400E),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ListView.separated(
+                                shrinkWrap: true,
+                                physics: const NeverScrollableScrollPhysics(),
+                                itemCount: filteredVouchers.length,
+                                separatorBuilder: (_, _) => const Divider(height: 1),
+                                itemBuilder: (context, i) {
+                                  final v = filteredVouchers[i];
+                                  return _VoucherListTile(
+                                    voucher: v,
+                                    runningBalance: runningBalanceById[v.id],
+                                  );
+                                },
+                              ),
+                            ],
                           )
                   else
                     // Fallback to order rows when vouchers are not yet imported
@@ -508,13 +922,11 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                   const SizedBox(height: 6),
                   InfoRow(
                     label: 'Opening balance',
-                    value: openingBalance < 0
-                        ? '${rupees(openingBalance.abs())} Cr'
-                        : rupees(openingBalance),
+                    value: rupeesDrCr(openingBalance),
                     valueColor: openingBalance < 0 ? AppColors.teal : AppColors.ink,
                   ),
                   InfoRow(
-                    label: 'Total billed sales',
+                    label: 'Total debits / billed',
                     value: rupees(billed),
                   ),
                   InfoRow(
@@ -524,7 +936,7 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                   ),
                   InfoRow(
                     label: 'Current outstanding',
-                    value: rupees(outstanding),
+                    value: rupeesDrCr(outstanding),
                     valueColor: outstanding > 0 ? AppColors.red : AppColors.green,
                   ),
                   if (overdue > 0)
@@ -582,11 +994,11 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
     buffer.writeln('*Party:* ${customer.name}');
     buffer.writeln('*City:* ${customer.city}');
     buffer.writeln(
-      '*Opening Balance:* ${openingBalance < 0 ? '${rupees(openingBalance.abs())} Cr' : rupees(openingBalance)}',
+      '*Opening Balance:* ${rupeesDrCr(openingBalance)}',
     );
-    buffer.writeln('*Total Billed Sales:* ${rupees(totalSales)}');
+    buffer.writeln('*Total Debits / Billed:* ${rupees(totalSales)}');
     buffer.writeln('*Total Credits / Receipts:* ${rupees(totalCredits)}');
-    buffer.writeln('*Current Outstanding:* ${rupees(outstanding)}');
+    buffer.writeln('*Current Outstanding:* ${rupeesDrCr(outstanding)}');
     buffer.writeln();
     buffer.writeln('*Aging Breakdown:*');
     buffer.writeln('• 0-30 Days: ${rupees(bucket0_30)}');
@@ -686,8 +1098,9 @@ class _AgingBucketTile extends StatelessWidget {
 }
 
 class _VoucherListTile extends StatelessWidget {
-  const _VoucherListTile({required this.voucher});
+  const _VoucherListTile({required this.voucher, this.runningBalance});
   final VoucherItem voucher;
+  final double? runningBalance;
 
   @override
   Widget build(BuildContext context) {
@@ -779,12 +1192,56 @@ class _VoucherListTile extends StatelessWidget {
                     color: AppColors.green,
                   ),
                 ),
+              if (runningBalance != null) ...[
+                const SizedBox(height: 2),
+                Text(
+                  'Bal: ${rupeesDrCr(runningBalance!)}',
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: runningBalance! >= 0 ? AppColors.muted : AppColors.teal,
+                  ),
+                ),
+              ],
             ],
           ),
         ],
       ),
     );
   }
+}
+
+class _MonthlySummaryRow {
+  const _MonthlySummaryRow({
+    required this.monthKey,
+    required this.label,
+    required this.opening,
+    required this.debit,
+    required this.credit,
+    required this.closing,
+    required this.count,
+  });
+
+  final String monthKey;
+  final String label;
+  final double opening;
+  final double debit;
+  final double credit;
+  final double closing;
+  final int count;
+}
+
+String _formatMonthKey(String mk) {
+  final parts = mk.split('-');
+  if (parts.length != 2) return mk;
+  const names = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+  final m = int.tryParse(parts[1]) ?? 1;
+  final idx = (m - 1).clamp(0, 11);
+  return '${names[idx]} ${parts[0]}';
 }
 
 class _HeroStat extends StatelessWidget {

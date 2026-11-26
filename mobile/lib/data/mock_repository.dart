@@ -86,7 +86,7 @@ class MockRepository extends ChangeNotifier {
   int? serverActiveDealers;
   int? serverSalesTeamCount;
   List<SalespersonSummary> salespersonSummaries = [];
-  static const int currentVersionCode = 13;
+  static const int currentVersionCode = 14;
   static const String currentVersionName = '1.1.4';
   AppUpdateInfo? availableUpdate;
   Timer? _syncTimer;
@@ -168,6 +168,7 @@ class MockRepository extends ChangeNotifier {
   final tasks = <WorkTask>[];
   final notifications = <AppNotification>[];
   final debtors = <DebtorItem>[];
+  final creditors = <DebtorItem>[];
   final salesTargets = <SalesTargetItem>[];
 
   static bool isNonDebtorLedger(String name) {
@@ -357,7 +358,7 @@ class MockRepository extends ChangeNotifier {
       }
 
       // 2. Customers & Debtors (Authoritative sync from backend master)
-      final remoteCusts = await ApiSyncService.fetchCustomers();
+      final remoteCusts = await ApiSyncService.fetchCustomers(partyType: 'customer');
       if (remoteCusts != null) {
         final parsed = remoteCusts
             .map(Customer.fromJson)
@@ -375,6 +376,17 @@ class MockRepository extends ChangeNotifier {
           ..addAll(parsedDebtors);
         _monthlyPaymentCache.clear();
         _saveDebtorsCache();
+      }
+
+      // 2b. Sundry Creditors (Suppliers / Vendors)
+      final remoteCreds = await ApiSyncService.fetchCustomers(partyType: 'supplier');
+      if (remoteCreds != null) {
+        final parsedCreds = remoteCreds
+            .map(DebtorItem.fromJson)
+            .toList();
+        creditors
+          ..clear()
+          ..addAll(parsedCreds);
       }
 
       // 3. Orders
@@ -644,12 +656,21 @@ class MockRepository extends ChangeNotifier {
 
   // ── lookups ──────────────────────────────────────────────────────────
   DebtorItem? debtorById(String id) =>
-      debtors.where((d) => d.id == id || d.name.toLowerCase().trim() == id.toLowerCase().trim()).firstOrNull;
+      debtors.where((d) => d.id == id || d.name.toLowerCase().trim() == id.toLowerCase().trim()).firstOrNull ??
+      creditors.where((d) => d.id == id || d.name.toLowerCase().trim() == id.toLowerCase().trim()).firstOrNull;
+
+  Future<Map<String, dynamic>?> cleanupDuplicateVouchers() async {
+    final res = await ApiSyncService.cleanupDuplicateVouchers();
+    if (res != null) {
+      await syncWithBackend();
+    }
+    return res;
+  }
 
   Customer? customerById(String id) {
     final direct = customers.where((c) => c.id == id).firstOrNull;
     if (direct != null) return direct;
-    final debtor = debtors.where((d) => d.id == id).firstOrNull;
+    final debtor = debtorById(id);
     if (debtor != null) {
       return Customer(
         id: debtor.id,

@@ -3650,8 +3650,8 @@ def get_discount_ledger():
 @app.get("/api/v1/app/version")
 def get_app_version():
     return {
-        "version_code": 13,
-        "version_name": "1.1.4",
+        "version_code": 14,
+        "version_name": "1.1.5",
         "download_url": "/api/v1/app/latest-apk",
         "release_notes": "Tally Debtor Verification Badges, Mismatch Alerts & Diff Analytics across Mobile and Web.",
         "mandatory": False,

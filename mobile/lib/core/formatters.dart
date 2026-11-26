@@ -1,5 +1,24 @@
 String rupees(num amount) => rupeesFrom(amount);
 
+/// Formats an amount with Indian accounting Dr. / Cr. notation.
+/// Positive -> "₹1,23,456 Dr.", Negative -> "₹1,23,456 Cr.", Zero -> "₹0".
+String rupeesDrCr(num amount) {
+  if (amount == 0) return '₹0';
+  final suffix = amount > 0 ? ' Dr.' : ' Cr.';
+  return '${rupeesFrom(amount.abs())}$suffix';
+}
+
+/// Formats an amount with 2 decimal places and Dr. / Cr. notation.
+String rupeesExactDrCr(num amount) {
+  if (amount.abs() < 0.005) return '₹0.00';
+  final suffix = amount > 0 ? ' Dr.' : ' Cr.';
+  final absVal = amount.abs();
+  final whole = absVal.truncate();
+  final dec = ((absVal - whole) * 100).round().toString().padLeft(2, '0');
+  final base = rupeesFrom(whole);
+  return '$base.$dec$suffix';
+}
+
 String rupeesFrom(num amount) {
   final rounded = amount.round();
   final negative = rounded < 0;

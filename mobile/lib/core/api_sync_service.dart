@@ -520,19 +520,23 @@ class ApiSyncService {
     }
   }
 
-  /// Fetches customers / dealers from backend /api/v1/customers
+  /// Fetches customers / dealers / creditors from backend /api/v1/debtors
   static Future<List<Map<String, dynamic>>?> fetchCustomers({
     String? q,
     String? salespersonId,
+    String? partyType,
   }) async {
     final host = await resolveWorkingHost();
     if (host == null) return null;
     try {
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 6);
       final params = <String>[];
       if (q != null && q.isNotEmpty) params.add('q=${Uri.encodeComponent(q)}');
       if (salespersonId != null && salespersonId.isNotEmpty) {
         params.add('salespersonId=${Uri.encodeComponent(salespersonId)}');
+      }
+      if (partyType != null && partyType.isNotEmpty) {
+        params.add('partyType=${Uri.encodeComponent(partyType)}');
       }
       params.add('pageSize=2000');
       final query = '?${params.join('&')}';
@@ -542,7 +546,7 @@ class ApiSyncService {
         req.headers.set('Authorization', 'Bearer $authToken');
       }
       var resp = await req.close();
-      if (resp.statusCode != 200) {
+      if (resp.statusCode != 200 && partyType != 'supplier') {
         req = await client.getUrl(Uri.parse('$host/api/v1/customers$query'));
         if (authToken != null) {
           req.headers.set('Authorization', 'Bearer $authToken');
@@ -555,6 +559,28 @@ class ApiSyncService {
         if (data is Map && data['items'] is List) {
           return (data['items'] as List).map((e) => e as Map<String, dynamic>).toList();
         }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Triggers backend voucher deduplication (/api/v1/debtors/cleanup-duplicates)
+  static Future<Map<String, dynamic>?> cleanupDuplicateVouchers() async {
+    final host = await resolveWorkingHost();
+    if (host == null) return null;
+    try {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
+      final req = await client.postUrl(Uri.parse('$host/api/v1/debtors/cleanup-duplicates'));
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
+      final resp = await req.close();
+      if (resp.statusCode == 200) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data is Map<String, dynamic>) return data;
       }
       return null;
     } catch (_) {

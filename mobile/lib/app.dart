@@ -49,6 +49,7 @@ class OperationsApp extends StatelessWidget {
       '/sales': (_) => const SalesDashboardScreen(),
       '/customers': (_) => const DebtorListScreen(),
       '/debtors': (_) => const DebtorListScreen(),
+      '/creditors': (_) => const DebtorListScreen(initialCreditorMode: true),
       '/new-customer': (_) => const DebtorListScreen(),
       '/performance': (_) => const PerformanceScreen(),
       '/orders': (_) => const OrderListScreen(),

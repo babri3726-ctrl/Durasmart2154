@@ -9,7 +9,9 @@ import '../../data/mock_repository.dart';
 import '../../data/models.dart';
 
 class DebtorListScreen extends StatefulWidget {
-  const DebtorListScreen({super.key});
+  const DebtorListScreen({super.key, this.initialCreditorMode = false});
+
+  final bool initialCreditorMode;
 
   @override
   State<DebtorListScreen> createState() => _DebtorListScreenState();
@@ -19,6 +21,7 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
   String _query = '';
   String _selectedTerritory = 'All';
   String _selectedStatus = 'All'; // 'All', 'Verified', 'Mismatches'
+  late bool _isCreditorMode = widget.initialCreditorMode;
 
   Widget _statusFilterChip(String key, String label, {bool isSuccess = false, bool isWarning = false}) {
     final isSelected = _selectedStatus == key;
@@ -350,12 +353,13 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
   @override
   Widget build(BuildContext context) {
     final repo = context.watch<MockRepository>();
-    final int verifiedTotal = repo.debtors.where((d) => d.isVerified).length;
-    final int mismatchTotal = repo.debtors.where((d) => d.isMismatch).length;
-    final int punjabCount = repo.debtors.where((d) => d.state.toLowerCase() == 'punjab').length;
-    final int haryanaCount = repo.debtors.where((d) => d.state.toLowerCase() == 'haryana').length;
+    final sourceList = _isCreditorMode ? repo.creditors : repo.debtors;
+    final int verifiedTotal = sourceList.where((d) => d.isVerified).length;
+    final int mismatchTotal = sourceList.where((d) => d.isMismatch).length;
+    final int punjabCount = sourceList.where((d) => d.state.toLowerCase() == 'punjab').length;
+    final int haryanaCount = sourceList.where((d) => d.state.toLowerCase() == 'haryana').length;
 
-    final items = repo.debtors.where((d) {
+    final items = sourceList.where((d) {
       if (_selectedTerritory != 'All' &&
           d.state.toLowerCase() != _selectedTerritory.toLowerCase()) {
         return false;
@@ -377,27 +381,57 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
     }).toList();
 
     items.sort((a, b) {
-      // Prioritize mismatches first if not filtered, then balances
+      // Prioritize mismatches first if not filtered, then non-zero balances
       if (_selectedStatus == 'All') {
         if (a.isMismatch && !b.isMismatch) return -1;
         if (b.isMismatch && !a.isMismatch) return 1;
       }
-      if (a.balance > 0 && b.balance <= 0) return -1;
-      if (b.balance > 0 && a.balance <= 0) return 1;
-      final cmp = b.balance.compareTo(a.balance);
+      final aHas = a.balance.abs() >= 0.01;
+      final bHas = b.balance.abs() >= 0.01;
+      if (aHas && !bHas) return -1;
+      if (bHas && !aHas) return 1;
+      final cmp = b.balance.abs().compareTo(a.balance.abs());
       if (cmp != 0) return cmp;
       return a.name.compareTo(b.name);
     });
 
-    final double totalReceivables = (_query.isEmpty && _selectedTerritory == 'All' && _selectedStatus == 'All' && repo.serverOutstanding != null)
+    final double totalBalance = (!_isCreditorMode &&
+            _query.isEmpty &&
+            _selectedTerritory == 'All' &&
+            _selectedStatus == 'All' &&
+            repo.serverOutstanding != null)
         ? repo.serverOutstanding!
         : items.fold(0.0, (sum, d) => sum + d.balance);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text('Debtor Master (HR-PB)'),
+        title: Text(_isCreditorMode ? 'Sundry Creditors' : 'Debtor Master (HR-PB)'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.cleaning_services_rounded),
+            tooltip: 'Clean Duplicate Vouchers',
+            onPressed: () async {
+              final sm = ScaffoldMessenger.of(context);
+              sm.showSnackBar(
+                const SnackBar(
+                  content: Text('Cleaning duplicate vouchers on server...'),
+                  duration: Duration(seconds: 1),
+                ),
+              );
+              final res = await repo.cleanupDuplicateVouchers();
+              if (!mounted) return;
+              sm.showSnackBar(
+                SnackBar(
+                  content: Text(
+                    res != null
+                        ? 'Cleaned ${res['deletedCount'] ?? 0} duplicates across ${res['affectedPartiesCount'] ?? 0} parties'
+                        : 'Cleanup failed or server unreachable',
+                  ),
+                ),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.sync_rounded),
             tooltip: '1-Click Sync HR-PB',
@@ -430,13 +464,15 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: const Color(0xFF059669),
-        foregroundColor: Colors.white,
-        onPressed: () => _showAddDebtorDialog(context),
-        icon: const Icon(Icons.add),
-        label: const Text('Add Debtor', style: TextStyle(fontWeight: FontWeight.w800)),
-      ),
+      floatingActionButton: _isCreditorMode
+          ? null
+          : FloatingActionButton.extended(
+              backgroundColor: const Color(0xFF059669),
+              foregroundColor: Colors.white,
+              onPressed: () => _showAddDebtorDialog(context),
+              icon: const Icon(Icons.add),
+              label: const Text('Add Debtor', style: TextStyle(fontWeight: FontWeight.w800)),
+            ),
       body: Column(
         children: [
           // KPI Summary & Filters Container
@@ -449,6 +485,69 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Sundry Debtors vs Sundry Creditors Switcher
+                Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setState(() => _isCreditorMode = false),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 7),
+                            decoration: BoxDecoration(
+                              color: !_isCreditorMode ? Colors.white : Colors.transparent,
+                              borderRadius: BorderRadius.circular(8),
+                              boxShadow: !_isCreditorMode
+                                  ? const [BoxShadow(color: Color(0x12000000), blurRadius: 4, offset: Offset(0, 1))]
+                                  : null,
+                            ),
+                            child: Center(
+                              child: Text(
+                                'Sundry Debtors (${repo.debtors.length})',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: !_isCreditorMode ? FontWeight.w800 : FontWeight.w600,
+                                  color: !_isCreditorMode ? const Color(0xFF0F172A) : const Color(0xFF64748B),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => setState(() => _isCreditorMode = true),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 7),
+                            decoration: BoxDecoration(
+                              color: _isCreditorMode ? Colors.white : Colors.transparent,
+                              borderRadius: BorderRadius.circular(8),
+                              boxShadow: _isCreditorMode
+                                  ? const [BoxShadow(color: Color(0x12000000), blurRadius: 4, offset: Offset(0, 1))]
+                                  : null,
+                            ),
+                            child: Center(
+                              child: Text(
+                                'Sundry Creditors (${repo.creditors.length})',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: _isCreditorMode ? FontWeight.w800 : FontWeight.w600,
+                                  color: _isCreditorMode ? const Color(0xFF4F46E5) : const Color(0xFF64748B),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
                 SearchField(
                   hint: 'Search by party, city or salesperson…',
                   onChanged: (v) => setState(() => _query = v),
@@ -457,12 +556,12 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                 // Territory Filters
                 HybridPillFilter(
                   options: [
-                    'All (${repo.debtors.length})',
+                    'All (${sourceList.length})',
                     'Punjab ($punjabCount)',
                     'Haryana ($haryanaCount)',
                   ],
                   selected: _selectedTerritory == 'All'
-                      ? 'All (${repo.debtors.length})'
+                      ? 'All (${sourceList.length})'
                       : _selectedTerritory == 'Punjab'
                           ? 'Punjab ($punjabCount)'
                           : 'Haryana ($haryanaCount)',
@@ -484,7 +583,7 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
-                      _statusFilterChip('All', 'All (${repo.debtors.length})'),
+                      _statusFilterChip('All', 'All (${sourceList.length})'),
                       const SizedBox(width: 6),
                       _statusFilterChip('Verified', '✓ Verified ($verifiedTotal)', isSuccess: true),
                       const SizedBox(width: 6),
@@ -501,31 +600,33 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                       child: Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFFFBEB),
+                          color: _isCreditorMode ? const Color(0xFFEEF2FF) : const Color(0xFFFFFBEB),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFFDE68A)),
+                          border: Border.all(
+                            color: _isCreditorMode ? const Color(0xFFC7D2FE) : const Color(0xFFFDE68A),
+                          ),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'TOTAL RECEIVABLES',
+                            Text(
+                              _isCreditorMode ? 'TOTAL PAYABLES' : 'TOTAL RECEIVABLES',
                               style: TextStyle(
                                 fontSize: 9.5,
                                 fontWeight: FontWeight.w800,
-                                color: Color(0xFF92400E),
+                                color: _isCreditorMode ? const Color(0xFF3730A3) : const Color(0xFF92400E),
                                 letterSpacing: 0.5,
                               ),
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              rupees(totalReceivables),
+                              rupeesDrCr(totalBalance),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 14.5,
                                 fontWeight: FontWeight.w900,
-                                color: Color(0xFFB45309),
+                                color: _isCreditorMode ? const Color(0xFF4338CA) : const Color(0xFFB45309),
                               ),
                             ),
                           ],
@@ -635,7 +736,7 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                       separatorBuilder: (_, _) => const SizedBox(height: 8),
                       itemBuilder: (context, i) {
                         final item = items[i];
-                        final hasBalance = item.balance > 0;
+                        final hasBalance = item.balance.abs() >= 0.01;
 
                         return Container(
                           decoration: BoxDecoration(
