@@ -272,7 +272,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
           ],
           const SizedBox(height: 20),
           GradientButton(
-            label: _loading ? 'Sending link…' : 'Send Password Reset Link',
+            label: _loading ? 'Sending link…' : 'Send Reset Link',
             icon: Icons.send_rounded,
             loading: _loading,
             onPressed: _loading ? null : _sendResetLink,

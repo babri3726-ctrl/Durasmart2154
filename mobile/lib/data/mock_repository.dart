@@ -807,7 +807,7 @@ class MockRepository extends ChangeNotifier {
         (customerById(customerId) != null
             ? debtorById(customerById(customerId)!.name)
             : null);
-    if (debtor != null) {
+    if (debtor != null && debtor.balance > 0) {
       return debtor.balance;
     }
     final orderSum = ordersFor(
@@ -1004,9 +1004,9 @@ class MockRepository extends ChangeNotifier {
 
     final outstanding = (serverOutstanding != null && salespersonId == null)
         ? serverOutstanding!
-        : (debtors.isNotEmpty && salespersonId == null)
+        : (debtors.isNotEmpty && debtors.any((d) => d.balance > 0) && salespersonId == null)
             ? debtors.fold(0.0, (sum, d) => sum + d.balance)
-            : (debtors.isNotEmpty && salespersonId != null)
+            : (debtors.isNotEmpty && debtors.any((d) => d.balance > 0) && salespersonId != null)
                 ? debtors
                     .where((d) =>
                         matchesSalesperson(d.salesperson, salespersonId) ||
@@ -1048,8 +1048,8 @@ class MockRepository extends ChangeNotifier {
     final collections = cachedPay != null && cachedPay['monthCollected'] is num
         ? (cachedPay['monthCollected'] as num).toDouble()
         : (isCurrentMonth && salespersonId == null)
-            ? (serverMonthCollections ?? serverCollections ?? 0.0)
-            : monthPayments.fold(0.0, (sum, p) => sum + p.amount);
+            ? (serverMonthCollections ?? serverCollections ?? monthPayments.fold<double>(0.0, (sum, p) => sum + p.amount))
+            : monthPayments.fold<double>(0.0, (sum, p) => sum + p.amount);
 
     final ordersCount = (serverOrdersCount != null && salespersonId == null && isCurrentMonth)
         ? serverOrdersCount!

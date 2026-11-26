@@ -124,40 +124,30 @@ void main() {
       expect(find.text('New password'), findsOneWidget);
     });
 
-    testWidgets('ForgotPasswordScreen: Owner and Employee OTP recovery flow', (tester) async {
+    testWidgets('ForgotPasswordScreen: validates email and renders reset interface', (tester) async {
       _useWideScreen(tester, height: 3500);
       final repo = MockRepository();
 
       await tester.pumpWidget(_wrap(const ForgotPasswordScreen(), repo));
       await tester.pumpAndSettle();
 
-      // 1. Initial State: Account recovery prompt
-      expect(find.text('Account Recovery'), findsOneWidget);
+      // 1. Initial State: Reset with Firebase & Google Firebase Reset
+      expect(find.text('Reset with Firebase'), findsOneWidget);
+      expect(find.text('Google Firebase Reset'), findsOneWidget);
 
       // 2. Submit empty -> validation error
-      await tester.tap(find.text('Send OTP Code'));
+      await tester.tap(find.text('Send Reset Link'));
       await tester.pumpAndSettle();
-      expect(find.text('Email or employee ID is required'), findsOneWidget);
+      expect(find.text('Email address is required'), findsOneWidget);
 
-      // 3. Enter Owner identifier
-      await tester.enterText(find.byType(TextFormField).first, 'ishujindal');
-      await tester.tap(find.text('Send OTP Code'));
+      // 3. Enter invalid email -> validation error
+      await tester.enterText(find.byType(TextFormField).first, 'invalidemail');
+      await tester.tap(find.text('Send Reset Link'));
       await tester.pumpAndSettle();
+      expect(find.text('Enter a valid email address'), findsOneWidget);
 
-      // Step 2 reached
-      expect(find.text('Enter Verification Code'), findsNothing); // Title is in custom widget
-      expect(find.text('Owner'), findsOneWidget);
-      expect(find.text('New Passcode'), findsOneWidget);
-
-      // 4. Enter new passcode & confirm
-      await tester.enterText(find.byType(TextFormField).at(1), 'BrandNewPass#2026');
-      await tester.enterText(find.byType(TextFormField).at(2), 'BrandNewPass#2026');
-      await tester.tap(find.text('Update Passcode'));
-      await tester.pumpAndSettle();
-
-      // Step 3 Success reached
-      expect(find.text('Passcode Updated!'), findsOneWidget);
-      expect(find.text('Proceed to Sign in'), findsOneWidget);
+      // 4. Back button is present
+      expect(find.text('Back to sign in'), findsOneWidget);
     });
   });
 }

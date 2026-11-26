@@ -110,8 +110,8 @@ void main() {
         'Payment',
         'Vaccant Area',
         'Tour Plan',
-        'New Customer Add',
-        'New Order',
+        'Debtor Master',
+        'Orders',
         'Task Alarm',
       ]) {
         expect(

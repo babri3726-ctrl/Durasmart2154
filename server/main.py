@@ -3658,10 +3658,10 @@ def get_discount_ledger():
 @app.get("/api/v1/app/version")
 def get_app_version():
     return {
-        "version_code": 15,
-        "version_name": "1.1.6",
+        "version_code": 16,
+        "version_name": "1.1.7",
         "download_url": "/api/v1/app/latest-apk",
-        "release_notes": "Persistent login session across restarts, Tally Debtor Verification & Payment Control Tower.",
+        "release_notes": "Official PDF statement share on WhatsApp, real party mobile numbers, updated Book1 sales targets and layout overflow fixes.",
         "mandatory": False,
         "published_at": datetime.now().isoformat()
     }
