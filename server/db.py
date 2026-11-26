@@ -1761,11 +1761,19 @@ def deduplicate_all_vouchers(conn=None) -> dict[str, Any]:
             cnarr = re.sub(r'\s+', ' ', (narr or '').strip().lower())
 
             # Rule 1: Real invoice numbers (e.g. Sales voucher 2305, 1323)
-            # A party cannot legitimately have two invoices with identical invoice number, date, and amount.
+            # A party cannot legitimately have two invoices with identical invoice number on the same date for the same type.
+            # If two entries exist (e.g. taxable base amount vs gross invoice total with GST), preserve the gross total.
             if is_invoice_no(vno):
-                inv_key = (pid, dt, vt, dr, cr, cvno)
+                inv_key = (pid, dt, vt, cvno)
                 if inv_key in seen_invoices:
-                    to_delete.add(vid)
+                    prev_v = seen_invoices[inv_key]
+                    prev_amt = max(prev_v[5], prev_v[6])
+                    curr_amt = max(dr, cr)
+                    if curr_amt > prev_amt:
+                        to_delete.add(prev_v[0])
+                        seen_invoices[inv_key] = v
+                    else:
+                        to_delete.add(vid)
                     affected_parties.add(pid)
                     continue
                 else:
