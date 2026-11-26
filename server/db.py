@@ -894,35 +894,67 @@ def apply_single_party_ledger(party_id: str, filepath_or_bytes: str | bytes, fil
                 VALUES (?, '2026-04-01', ?, ?, 'Authoritative Party Ledger', datetime('now'))
             """, (party_id, abs(ob_paise), "debit" if ob_paise >= 0 else "credit"))
 
-        # Delete previous vouchers for this party
-        conn.execute("DELETE FROM vouchers WHERE party_id = ?", (party_id,))
-
-        # Directly insert the authoritative vouchers from Tally
+        # Smart merge authoritative vouchers: do NOT wipe existing vouchers indiscriminately.
+        # Matches existing vouchers by party, date, type, and invoice number to update amounts.
         now_iso = datetime.now().isoformat()
         for v in vchs:
-            conn.execute(
-                """
-                INSERT INTO vouchers 
-                (id, voucher_no, voucher_type, voucher_date, party_name, party_id, debit_paise, credit_paise, narration, book_source, file_sha256, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    v["id"],
-                    v.get("voucherNo", ""),
-                    v.get("voucherType", "Sales"),
-                    v.get("voucherDate", ""),
-                    party_name,
-                    party_id,
-                    v.get("debitPaise", 0),
-                    v.get("creditPaise", 0),
-                    v.get("narration", ""),
-                    "Authoritative Tally Ledger",
-                    f_sha,
-                    now_iso,
+            v_no = v.get("voucherNo", "")
+            v_date = v.get("voucherDate", "")
+            v_type = v.get("voucherType", "Sales")
+            dr_p = v.get("debitPaise", 0)
+            cr_p = v.get("creditPaise", 0)
+            narr = v.get("narration", "")
+
+            # If an existing voucher matches this invoice number on this date, update its amounts
+            matched_id = None
+            if v_no and not str(v_no).lower().startswith("db-"):
+                cur.execute(
+                    """
+                    SELECT id FROM vouchers 
+                    WHERE party_id = ? AND voucher_date = ? AND LOWER(voucher_type) = LOWER(?) AND voucher_no = ?
+                    LIMIT 1
+                    """,
+                    (party_id, v_date, v_type, v_no)
                 )
-            )
+                m_row = cur.fetchone()
+                if m_row:
+                    matched_id = m_row[0]
+
+            if matched_id:
+                cur.execute(
+                    """
+                    UPDATE vouchers 
+                    SET debit_paise = ?, credit_paise = ?, narration = COALESCE(NULLIF(?, ''), narration),
+                        book_source = 'Authoritative Tally Ledger', file_sha256 = ?
+                    WHERE id = ?
+                    """,
+                    (dr_p, cr_p, narr, f_sha, matched_id)
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT OR REPLACE INTO vouchers 
+                    (id, voucher_no, voucher_type, voucher_date, party_name, party_id, debit_paise, credit_paise, narration, book_source, file_sha256, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        v["id"],
+                        v_no,
+                        v_type,
+                        v_date,
+                        party_name,
+                        party_id,
+                        dr_p,
+                        cr_p,
+                        narr,
+                        "Authoritative Tally Ledger",
+                        f_sha,
+                        now_iso,
+                    )
+                )
 
         # Mark authoritative ledger = 1, tally_status = 'verified', diff = 0
+        final_closing = expected_closing if expected_closing != 0 else None
         conn.execute("""
             UPDATE parties
             SET has_authoritative_ledger = 1,
@@ -930,7 +962,7 @@ def apply_single_party_ledger(party_id: str, filepath_or_bytes: str | bytes, fil
                 tally_diff_paise = 0,
                 tally_closing_paise = COALESCE(?, tally_closing_paise)
             WHERE id = ?
-        """, (expected_closing, party_id))
+        """, (final_closing, party_id))
         conn.commit()
 
     recompute_party_balance(party_id)
@@ -1544,7 +1576,12 @@ def recompute_party_balance(party_id: str, conn = None):
             t_cl = t_row[0]
             has_auth = t_row[1] or 0
             diff = new_balance_paise - t_cl
-            if has_auth == 1 or abs(diff) <= 100:
+            if has_auth == 1:
+                # Authoritative individual ledger is ground truth: lock balance to Tally closing
+                new_balance_paise = t_cl
+                t_status = 'verified'
+                t_diff = 0
+            elif abs(diff) <= 100:
                 t_status = 'verified'
                 t_diff = 0
             else:
