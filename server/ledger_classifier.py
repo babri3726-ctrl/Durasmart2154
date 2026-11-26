@@ -48,7 +48,7 @@ ASSET_INVESTMENT_PATTERNS = [
     r"\bmechnery\b|\bmachinery\b(?!.*\b(?:store|trader|sales|corp|enterprises)\b)",
     r"\bplant\s*(?:&|and)\s*machinery\b",
     r"\bmutul\s*fund\b|\bmutual\s*fund\b|\bshares?\s*market\b|\binvestment\b",
-    r"\b(?:land|plot|kothi|flat|farm\s*house|complex|comlex|factory|fac|fec)\b",
+    r"\b(?:land|plot|kothi|flat|farm\s*house|complex|comlex|factory|fac|fec|show\s*room)\b",
     r"^house\s*\d+",
     r"^shop\s*(?:public|\d+)",
 ]

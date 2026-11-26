@@ -2048,7 +2048,11 @@ def get_customers(
     except Exception:
         pass
 
-    items = STATE["customers"]
+    from .ledger_classifier import is_sundry_debtor
+    items = [
+        c for c in STATE["customers"]
+        if is_sundry_debtor(c.get("name", ""), c.get("party_type", "customer"))
+    ]
     
     # Strictly scope to assigned customers if caller is a Sales Officer
     if caller["isSales"]:

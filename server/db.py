@@ -329,6 +329,23 @@ def init_db(seed_state: dict[str, Any] | None = None):
             except Exception:
                 pass
 
+        # Remove known non-debtor property/investment/expense ledgers from parties
+        non_debtor_ledgers = (
+            "comlex 17664", "fac jugiana 1747g", "fac ludhiana", "fac panipat",
+            "farm house", "fec mandi gobindgarh exp", "hdfc life investment",
+            "house 303 bti", "kothi 168", "mutul fund", "plot 1028 gaj",
+            "plot 1283 g", "plot 1400g garcha", "plot 1420 gaj", "plot 1700 gaj",
+            "plot 2488g", "plot 404g garcha", "plot gobindgarh", "plot goniana road",
+            "plot jogiana", "plot khaddar bhandar", "plot no 8 country villa 521g",
+            "plot pawa", "plot sua road", "shares market", "shop public markeet",
+            "showroom badal road", "show room barewal road", "show room bti 17667",
+        )
+        placeholders = ",".join(["?"] * len(non_debtor_ledgers))
+        conn.execute(
+            f"DELETE FROM parties WHERE LOWER(TRIM(name)) IN ({placeholders})",
+            non_debtor_ledgers,
+        )
+
         # Check if parties table is empty and seed if available
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) as count FROM parties")
