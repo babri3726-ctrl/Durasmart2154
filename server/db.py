@@ -1794,38 +1794,56 @@ def deduplicate_all_vouchers(conn=None) -> dict[str, Any]:
             sig_groups[sig_key].append(v)
 
         for sig_key, group in sig_groups.items():
-            if len(group) > 1:
-                specialized = []
-                generic_db = []
-                for v in group:
-                    vid, pid, dt, vt, vno, dr, cr, narr, bs, fsha, cat = v
-                    is_generic = (bs == 'Day Book') and (
-                        not vno
-                        or bool(re.match(r'^db\s*[-_:]\s*', str(vno), flags=re.IGNORECASE))
-                        or any(str(vno).lower().startswith(p) for p in ('aug ', 'spt ', 'oct ', 'nov ', 'dec ', 'jan ', 'feb ', 'mar ', 'apr ', 'may ', 'jun ', 'jul '))
-                    )
-                    if is_generic:
-                        generic_db.append(v)
-                    else:
-                        specialized.append(v)
+            if len(group) <= 1:
+                continue
 
-                if specialized and generic_db:
-                    # Match 1-to-1 so legitimate additional same-day Day Book rows are preserved
-                    for gv in generic_db[:len(specialized)]:
-                        to_delete.add(gv[0])
-                        affected_parties.add(gv[1])
-                elif len(generic_db) > 1:
-                    # Only deduplicate generic Day Book entries across DIFFERENT file_sha256 uploads
-                    seen_shas = set()
-                    for gv in generic_db:
-                        gv_sha = gv[9] or ""
-                        if gv_sha and gv_sha in seen_shas:
-                            continue
-                        if seen_shas and not gv_sha:
-                            to_delete.add(gv[0])
-                            affected_parties.add(gv[1])
-                        elif gv_sha:
-                            seen_shas.add(gv_sha)
+            def _is_generic_db(vno_val):
+                return (
+                    not vno_val
+                    or bool(re.match(r'^db\s*[-_:]\s*', str(vno_val), flags=re.IGNORECASE))
+                    or any(str(vno_val).lower().startswith(p) for p in ('aug ', 'spt ', 'oct ', 'nov ', 'dec ', 'jan ', 'feb ', 'mar ', 'apr ', 'may ', 'jun ', 'jul '))
+                )
+
+            # Only non-Day Book rows (Bank/Cash/Sales/Journal/Authoritative Ledger) count as cross-book specialized
+            non_daybook = [v for v in group if v[8] != 'Day Book']
+            daybook_rows = [v for v in group if v[8] == 'Day Book']
+
+            if non_daybook and daybook_rows:
+                # Prefer removing generic DB- / blank Day Book rows first, matched 1-to-1
+                db_ordered = sorted(daybook_rows, key=lambda v: (0 if _is_generic_db(v[4]) else 1, v[0]))
+                matched_count = min(len(non_daybook), len(db_ordered))
+                for gv in db_ordered[:matched_count]:
+                    to_delete.add(gv[0])
+                    affected_parties.add(gv[1])
+                daybook_rows = db_ordered[matched_count:]
+
+            # For remaining Day Book rows: NEVER delete rows from the same file_sha256;
+            # only deduplicate overlapping Day Book re-uploads across DIFFERENT file_sha256s.
+            if len(daybook_rows) > 1:
+                # Sub-group by clean voucher no when it's a real invoice no so distinct bills never collide
+                sub_groups = {}
+                for gv in daybook_rows:
+                    sub_key = clean_vno_str(gv[4]) if is_invoice_no(gv[4]) else "__generic__"
+                    sub_groups.setdefault(sub_key, []).append(gv)
+
+                for sub_rows in sub_groups.values():
+                    if len(sub_rows) <= 1:
+                        continue
+                    by_sha = {}
+                    for gv in sub_rows:
+                        sha_key = gv[9] or "__no_sha__"
+                        by_sha.setdefault(sha_key, []).append(gv)
+                    if len(by_sha) > 1:
+                        # Keep at most max_per_sha rows (preserving all rows from the primary/first upload)
+                        max_keep = max(len(r) for r in by_sha.values())
+                        kept = 0
+                        for sha_key, sha_rows in by_sha.items():
+                            for gv in sha_rows:
+                                if kept < max_keep:
+                                    kept += 1
+                                else:
+                                    to_delete.add(gv[0])
+                                    affected_parties.add(gv[1])
 
         if to_delete:
             del_list = list(to_delete)
