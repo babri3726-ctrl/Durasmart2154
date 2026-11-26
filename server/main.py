@@ -5916,7 +5916,24 @@ async def upload_excel_file(file: UploadFile = File(...)):
         wb_test.close()
 
         is_stock_file = any(s in sheet_names for s in ["TOTAL STOCK", "UPVC TOTAL STOCK", "UPVC ITEM"]) or "1-8-26" in file.filename or "stock" in file.filename.lower()
-        is_hrpb_file = any("HARYANA" in s.upper() or "PUNJAB" in s.upper() for s in sheet_names) or "hr" in file.filename.lower() or "target" in file.filename.lower()
+        is_hrpb_file = (
+            any("HARYANA" in s.upper() or "PUNJAB" in s.upper() for s in sheet_names)
+            or "hr" in file.filename.lower()
+            or "target" in file.filename.lower()
+            or "book1" in file.filename.lower()
+        )
+        if not is_hrpb_file and not is_stock_file:
+            try:
+                wb_chk = openpyxl.load_workbook(target_path, data_only=True, read_only=True)
+                ws_chk = wb_chk.active
+                for row_vals in ws_chk.iter_rows(max_row=5, values_only=True):
+                    row_u = [str(c or "").upper().strip() for c in row_vals]
+                    if any(t in row_u for t in ["TRGT", "LDH DIS", "DEALING PER", "TARGET (MT)"]):
+                        is_hrpb_file = True
+                        break
+                wb_chk.close()
+            except Exception:
+                pass
 
         if is_stock_file:
             default_stock = os.path.join(db.DATA_DIR, "1-8-26.xlsx")
@@ -5929,9 +5946,15 @@ async def upload_excel_file(file: UploadFile = File(...)):
             result["items_parsed"] = snap["summary"]["metal_items_count"] + snap["summary"]["upvc_matrix_count"]
         elif is_hrpb_file:
             default_hrpb = os.path.join(db.DATA_DIR, "HR-PB.xlsx")
-            if target_path != default_hrpb:
+            if "book1" in file.filename.lower() or (len(sheet_names) == 1 and target_path != default_hrpb):
+                try:
+                    import subprocess
+                    subprocess.run(["python", "-m", "scripts.update_hr_pb_from_book1"], capture_output=True)
+                except Exception:
+                    pass
+            elif target_path != default_hrpb:
                 shutil.copyfile(target_path, default_hrpb)
-            snap = extract_hr_pb_targets(target_path)
+            snap = extract_hr_pb_targets(default_hrpb if os.path.exists(default_hrpb) else target_path)
             STATE["hrpb_snapshot"] = snap
             STATE["targets"] = snap["all_targets"]
             

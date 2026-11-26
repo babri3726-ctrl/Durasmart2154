@@ -66,21 +66,23 @@ def parse_sheet(ws, state_label: str, prefix: str):
             continue
 
         cleaned_row = [clean_str(c).upper() for c in row]
-        if "S.NO" in cleaned_row:
+        if any(h in cleaned_row for h in ["S.NO", "S.N.", "S.NO.", "SR.NO", "SR NO"]):
             header_col_map = {name: idx for idx, name in enumerate(cleaned_row) if name}
             continue
 
         if not header_col_map:
             continue
 
-        name_idx = header_col_map.get("DEALER'S NAME")
-        if name_idx is None:
-            name_idx = header_col_map.get("PARTY NAME")
+        name_idx = (
+            header_col_map.get("DEALER'S NAME")
+            or header_col_map.get("PARTY NAME")
+            or header_col_map.get("PARTY")
+        )
         if name_idx is None or name_idx >= len(row):
             continue
 
         party_name = clean_str(row[name_idx])
-        if not party_name or party_name.upper() in ["TOTAL", "DEALER'S NAME", "PARTY NAME"]:
+        if not party_name or party_name.upper() in ["TOTAL", "GRAND TOTAL", "DEALER'S NAME", "PARTY NAME", "PARTY"]:
             continue
 
         station_idx = header_col_map.get("STATION")
@@ -89,19 +91,35 @@ def parse_sheet(ws, state_label: str, prefix: str):
         distt_idx = header_col_map.get("DISTT.") or header_col_map.get("DISTT") or header_col_map.get("DISTRICT")
         district = clean_str(row[distt_idx]) if distt_idx is not None and distt_idx < len(row) else ""
 
-        officer_idx = header_col_map.get("AREA OFFICER") or header_col_map.get("SALES PERSON")
+        officer_idx = (
+            header_col_map.get("AREA OFFICER")
+            or header_col_map.get("SALES PERSON")
+            or header_col_map.get("DEALING PER")
+            or header_col_map.get("DEALING PERSON")
+            or header_col_map.get("OFFICER")
+        )
         officer = clean_str(row[officer_idx]) if officer_idx is not None and officer_idx < len(row) else "Unassigned"
 
-        target_idx = header_col_map.get("OCT.TARGET") or header_col_map.get("TARGET")
+        target_idx = (
+            header_col_map.get("OCT.TARGET")
+            or header_col_map.get("TARGET")
+            or header_col_map.get("TRGT")
+            or header_col_map.get("TARGET (MT)")
+        )
         target_mt = clean_float(row[target_idx]) if target_idx is not None and target_idx < len(row) else 0.0
 
         order_idx = header_col_map.get("ORDER RECVED.") or header_col_map.get("ORDER RECVED")
         orders_mt = clean_float(row[order_idx]) if order_idx is not None and order_idx < len(row) else 0.0
 
-        dispatch_idx = header_col_map.get("MTRL DISPATCH") or header_col_map.get("DISPATCH")
+        dispatch_idx = (
+            header_col_map.get("MTRL DISPATCH")
+            or header_col_map.get("DISPATCH")
+            or header_col_map.get("TOTAL")
+            or header_col_map.get("LDH DIS")
+        )
         dispatch_mt = clean_float(row[dispatch_idx]) if dispatch_idx is not None and dispatch_idx < len(row) else 0.0
 
-        pending_idx = header_col_map.get("PENDING")
+        pending_idx = header_col_map.get("PENDING") or header_col_map.get("PENDING (MT)")
         pending_mt = clean_float(row[pending_idx]) if pending_idx is not None and pending_idx < len(row) else max(0.0, target_mt - dispatch_mt)
 
         record_id = f"TGT-{prefix}-{len(records) + 1:03d}"
@@ -148,11 +166,45 @@ def extract_hr_pb_targets(file_path: str = DEFAULT_HRPB_PATH) -> dict:
         haryana_records, haryana_dealers = [], []
         punjab_records, punjab_dealers = [], []
 
-        if "Sheet1" in wb.sheetnames:
-            haryana_records, haryana_dealers = parse_sheet(wb["Sheet1"], "Haryana", "HR")
+        has_hr_pb_sheets = "Sheet1" in wb.sheetnames and "Sheet2" in wb.sheetnames
 
-        if "Sheet2" in wb.sheetnames:
+        if has_hr_pb_sheets:
+            haryana_records, haryana_dealers = parse_sheet(wb["Sheet1"], "Haryana", "HR")
             punjab_records, punjab_dealers = parse_sheet(wb["Sheet2"], "Punjab", "PB")
+        else:
+            # Single-sheet unified target workbook (e.g. Book1.xlsx)
+            from .voucher_parser import clean_party_name, detect_state_and_city
+            hr_keywords = [
+                'haryana', 'karnal', 'ambala', 'panchkula', 'kurukshetra', 'yamunanagar', 'hisar', 'sirsa',
+                'rohtak', 'sonipat', 'panipat', 'jhajjar', 'gurugram', 'faridabad', 'narnaul', 'rewari',
+                'bhiwani', 'fatehabad', 'kaithal', 'palwal', 'charkhi', 'ladwa', 'taraori', 'barwala',
+                'pehowa', 'shahabad', 'sahabad', 'naraingarh', 'cheeka', 'assandh', 'gharaunda', 'samalkha',
+                'gohana', 'ganaur', 'bahadurgarh', 'hansi', 'ratia', 'tohana', 'kalanwali', 'kundli',
+                'murthal', 'bilaspur', 'radaur', 'sadhaura', 'jagadhri', 'safidon', 'narwana', 'pundri'
+            ]
+            first_sheet = wb[wb.sheetnames[0]]
+            all_parsed_records, all_parsed_dealers = parse_sheet(first_sheet, "Unified", "TGT")
+            
+            for rec, deal in zip(all_parsed_records, all_parsed_dealers):
+                p_name = rec["party_name"]
+                p_low = p_name.lower()
+                if any(kw in p_low for kw in hr_keywords):
+                    rec["state"] = "Haryana"
+                    deal["state"] = "Haryana"
+                    haryana_records.append(rec)
+                    haryana_dealers.append(deal)
+                else:
+                    st, city = detect_state_and_city(p_name)
+                    if any(kw in city.lower() for kw in hr_keywords):
+                        rec["state"] = "Haryana"
+                        deal["state"] = "Haryana"
+                        haryana_records.append(rec)
+                        haryana_dealers.append(deal)
+                    else:
+                        rec["state"] = "Punjab"
+                        deal["state"] = "Punjab"
+                        punjab_records.append(rec)
+                        punjab_dealers.append(deal)
 
         wb.close()
 
