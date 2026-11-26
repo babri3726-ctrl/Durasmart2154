@@ -1583,26 +1583,6 @@ def get_payments_monthly_summary(
             )
             all_time_col = cur.fetchone()[0] or 0
 
-            cur.execute(
-                f"""
-                SELECT COUNT(*), COALESCE(SUM(balance_paise), 0)
-                FROM parties
-                WHERE ({parties_where})
-                  AND balance_paise > 0
-                """,
-                parties_args
-            )
-            dealers_with_bal, out_paise = cur.fetchone()
-
-            cur.execute(
-                f"""
-                SELECT COUNT(*)
-                FROM parties
-                WHERE ({parties_where})
-                """,
-                parties_args
-            )
-            total_dealers = cur.fetchone()[0]
         else:
             cur.execute(
                 """
@@ -1625,11 +1605,29 @@ def get_payments_monthly_summary(
             )
             all_time_col = cur.fetchone()[0] or 0
 
-            cur.execute("SELECT COUNT(*), COALESCE(SUM(balance_paise), 0) FROM parties WHERE balance_paise > 0")
-            dealers_with_bal, out_paise = cur.fetchone()
+    # Strictly compute outstanding/overdue from canonical Trade Sundry Debtors
+    # (never mix Cash, Bank, Discount, Creditors, or Expense ledgers into Receivables)
+    from .ledger_classifier import is_sundry_debtor
+    genuine_debtors = [
+        d for d in STATE.get("debtors", [])
+        if is_sundry_debtor(d.get("name", ""), d.get("party_type", "customer"))
+    ]
+    if target_sp or target_sp_id:
+        genuine_debtors = [
+            d for d in genuine_debtors
+            if (target_sp and (d.get("salesperson") or "").strip().lower() == target_sp.lower())
+            or (target_sp_id and (d.get("salespersonId") or "").strip().lower() == target_sp_id.lower())
+        ]
 
-            cur.execute("SELECT COUNT(*) FROM parties")
-            total_dealers = cur.fetchone()[0]
+    out_paise = sum(
+        max(0, int(d.get("outstandingPaise", 0) or round(float(d.get("balance", 0.0) or 0.0) * 100)))
+        for d in genuine_debtors
+    )
+    dealers_with_bal = sum(
+        1 for d in genuine_debtors
+        if (int(d.get("outstandingPaise", 0) or round(float(d.get("balance", 0.0) or 0.0) * 100))) > 0
+    )
+    total_dealers = len(genuine_debtors)
 
     return {
         "year": year,

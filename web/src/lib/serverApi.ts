@@ -2147,6 +2147,38 @@ export function updateDebtor(id: string, body: Partial<{ name: string; state: st
   });
 }
 
+export interface ServerMonthlyPaymentSummary {
+  year: number;
+  month: number;
+  salesperson: string | null;
+  salespersonId: string | null;
+  monthCollectedPaise: number;
+  monthCollected: number;
+  allTimeCollectedPaise: number;
+  allTimeCollected: number;
+  outstandingPaise: number;
+  outstanding: number;
+  overduePaise: number;
+  overdue: number;
+  dealersWithBalance: number;
+  totalDealers: number;
+}
+
+export function getMonthlyPaymentSummary(params: {
+  year: number;
+  month: number;
+  salesperson?: string;
+  salespersonId?: string;
+}): Promise<ServerMonthlyPaymentSummary> {
+  const qs = new URLSearchParams({
+    year: String(params.year),
+    month: String(params.month),
+  });
+  if (params.salesperson) qs.set('salesperson', params.salesperson);
+  if (params.salespersonId) qs.set('salespersonId', params.salespersonId);
+  return send<ServerMonthlyPaymentSummary>(`/payments/monthly-summary?${qs.toString()}`);
+}
+
 export function deleteDebtor(id: string): Promise<{ deleted: boolean; id: string }> {
   return send<{ deleted: boolean; id: string }>(`/debtors/${encodeURIComponent(id)}`, {
     method: 'DELETE',

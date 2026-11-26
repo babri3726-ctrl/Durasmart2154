@@ -1,15 +1,23 @@
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
+  AlertTriangle,
   ArrowDownLeft,
   ArrowUpRight,
   Building2,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
   FileSearch,
+  IndianRupee,
   Plus,
   RefreshCw,
   Share2,
   ShieldAlert,
   Trash2,
+  Users,
+  Wallet,
   X,
   ReceiptText,
   ArrowRightLeft,
@@ -26,8 +34,11 @@ import {
   applyPaymentWorkbook,
   deletePayment,
   deleteVoucher,
+  getMonthlyPaymentSummary,
   listBankTransactions,
   listCustomers,
+  listDebtors,
+  listEmployees,
   listPayments,
   previewPaymentWorkbook,
   purgeTestPayments,
@@ -36,7 +47,10 @@ import {
   transferVoucher,
   BankSummary,
   ServerCustomer,
+  ServerDebtor,
   ServerDebtorPreview,
+  ServerEmployee,
+  ServerMonthlyPaymentSummary,
   ServerPayment,
   ServerVoucher,
   voidPayment,
@@ -44,8 +58,30 @@ import {
 
 const PAGE_SIZE = 20;
 
+function formatShortCr(amountRupees: number): string {
+  const n = Math.abs(amountRupees);
+  const sign = amountRupees < 0 ? '-' : '';
+  if (n >= 10000000) return `${sign}₹${(n / 10000000).toFixed(2)}Cr`;
+  if (n >= 100000) return `${sign}₹${(n / 100000).toFixed(2)}L`;
+  if (n >= 1000) return `${sign}₹${(n / 1000).toFixed(1)}k`;
+  return `${sign}₹${Math.round(n)}`;
+}
+
 export default function Payment() {
-  const [activeTab, setActiveTab] = useState<'bank' | 'manual'>('bank');
+  const [activeTab, setActiveTab] = useState<'overview' | 'bank' | 'manual'>('overview');
+
+  // ── Payment Control Tower (Mobile UI Parity) State ──────────────────────────
+  const [scopeMonth, setScopeMonth] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() + 1 };
+  });
+  const [scopeSalesperson, setScopeSalesperson] = useState<string>('');
+  const [overdueOnly, setOverdueOnly] = useState(false);
+  const [overviewSearch, setOverviewSearch] = useState('');
+  const [monthlySummary, setMonthlySummary] = useState<ServerMonthlyPaymentSummary | null>(null);
+  const [employees, setEmployees] = useState<ServerEmployee[]>([]);
+  const [debtors, setDebtors] = useState<ServerDebtor[]>([]);
+  const [loadingOverview, setLoadingOverview] = useState(false);
 
   // ── Manual Payment Collection State ─────────────────────────────────────────
   const [term, setTerm] = useState('');
@@ -142,6 +178,116 @@ export default function Payment() {
   useEffect(() => {
     loadCustomers();
   }, [loadCustomers]);
+
+  const loadOverviewData = useCallback(() => {
+    setLoadingOverview(true);
+    const spObj = employees.find((e) => e.id === scopeSalesperson);
+    Promise.all([
+      getMonthlyPaymentSummary({
+        year: scopeMonth.year,
+        month: scopeMonth.month,
+        salespersonId: scopeSalesperson || undefined,
+        salesperson: spObj?.name || undefined,
+      }),
+      listDebtors({ pageSize: 2000, partyType: 'customer' }),
+      employees.length === 0 ? listEmployees({ pageSize: 200 }) : Promise.resolve(null),
+    ])
+      .then(([summaryRes, debtorsRes, empRes]) => {
+        setMonthlySummary(summaryRes);
+        setDebtors(debtorsRes.items || []);
+        if (empRes) {
+          setEmployees((empRes.items || []).filter((e) => (e.department || '').toLowerCase() === 'sales'));
+        }
+      })
+      .catch((err) => toast.error(`Failed to load payment summary: ${err.message || 'Network error'}`))
+      .finally(() => setLoadingOverview(false));
+  }, [scopeMonth.year, scopeMonth.month, scopeSalesperson, employees]);
+
+  useEffect(() => {
+    if (activeTab === 'overview') {
+      loadOverviewData();
+    }
+  }, [activeTab, loadOverviewData]);
+
+  const shiftScopeMonth = (delta: number) => {
+    setScopeMonth((prev) => {
+      const d = new Date(prev.year, prev.month - 1 + delta, 1);
+      return { year: d.getFullYear(), month: d.getMonth() + 1 };
+    });
+  };
+
+  const scopeMonthLabel = useMemo(() => {
+    const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${names[(scopeMonth.month - 1 + 12) % 12]} ${scopeMonth.year}`;
+  }, [scopeMonth]);
+
+  const scopedDebtors = useMemo(() => {
+    const spObj = employees.find((e) => e.id === scopeSalesperson);
+    const spNameLower = (spObj?.name || '').trim().toLowerCase();
+    return debtors
+      .filter((d) => {
+        const bal = Number(d.balance || 0);
+        if (bal <= 0) return false;
+        if (scopeSalesperson) {
+          const dSp = (d.salesperson || '').trim().toLowerCase();
+          if (dSp !== spNameLower && dSp !== scopeSalesperson.toLowerCase()) return false;
+        }
+        if (overviewSearch.trim()) {
+          const q = overviewSearch.trim().toLowerCase();
+          if (
+            !(d.name || '').toLowerCase().includes(q) &&
+            !(d.city || '').toLowerCase().includes(q) &&
+            !(d.salesperson || '').toLowerCase().includes(q)
+          ) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .sort((a, b) => Number(b.balance || 0) - Number(a.balance || 0));
+  }, [debtors, employees, scopeSalesperson, overviewSearch]);
+
+  const overviewStats = useMemo(() => {
+    const totalOutstanding = monthlySummary?.outstanding ?? scopedDebtors.reduce((s, d) => s + Number(d.balance || 0), 0);
+    const totalOverdue = monthlySummary?.overdue ?? totalOutstanding;
+    const monthCollected = monthlySummary?.monthCollected ?? 0;
+    const dealersWithBalance = monthlySummary?.dealersWithBalance ?? scopedDebtors.length;
+    const totalDealers = monthlySummary?.totalDealers ?? debtors.length;
+    const spObj = employees.find((e) => e.id === scopeSalesperson);
+    const scopeName = spObj?.name || 'Full team';
+    return {
+      totalOutstanding,
+      totalOverdue,
+      monthCollected,
+      dealersWithBalance,
+      totalDealers,
+      scopeName,
+    };
+  }, [monthlySummary, scopedDebtors, debtors.length, employees, scopeSalesperson]);
+
+  const teamSummaryText = useMemo(() => {
+    const lines: string[] = [
+      'Dura Smart — payment summary',
+      `Scope: ${overviewStats.scopeName}`,
+      `Month: ${scopeMonthLabel}`,
+    ];
+    if (overdueOnly) lines.push('Filter: overdue balances only');
+    lines.push(`Customers with a balance: ${overviewStats.dealersWithBalance}`);
+    lines.push(`Total outstanding: ${rupeesDrCr(Math.round(overviewStats.totalOutstanding * 100))}`);
+    lines.push(`Of which overdue: ${rupeesDrCr(Math.round(overviewStats.totalOverdue * 100))}`);
+    lines.push(`Collected in ${scopeMonthLabel}: ${rupees(Math.round(overviewStats.monthCollected * 100))}`);
+    lines.push('');
+    lines.push('Largest balances:');
+    const top = scopedDebtors.slice(0, 6);
+    if (top.length === 0) {
+      lines.push('• No customer balance in this scope.');
+    } else {
+      for (const d of top) {
+        lines.push(`• ${d.name} (${d.city || d.state || 'Punjab'}) — ${rupeesDrCr(Math.round(Number(d.balance || 0) * 100))}`);
+      }
+    }
+    return lines.join('\n');
+  }, [overviewStats, scopeMonthLabel, overdueOnly, scopedDebtors]);
 
   // Load date-wise bank transactions
   const reloadBankTransactions = useCallback(() => {
@@ -433,7 +579,18 @@ export default function Payment() {
       />
 
       {/* Primary Tab Switcher */}
-      <div className="mb-4 flex items-center gap-2 border-b border-line">
+      <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-line">
+        <button
+          type="button"
+          onClick={() => setActiveTab('overview')}
+          className={`flex items-center gap-2 border-b-2 px-3 pb-2.5 text-xs font-bold transition ${
+            activeTab === 'overview'
+              ? 'border-brand-blue text-brand-blue'
+              : 'border-transparent text-muted hover:text-ink'
+          }`}
+        >
+          <Wallet size={16} /> Payments Overview
+        </button>
         <button
           type="button"
           onClick={() => setActiveTab('bank')}
@@ -457,6 +614,271 @@ export default function Payment() {
           <ReceiptText size={16} /> Manual Receipt Entry &amp; Counter Collection
         </button>
       </div>
+
+      {/* ── TAB 0: PAYMENTS OVERVIEW (MOBILE APK UI PARITY) ───────────────────────── */}
+      {activeTab === 'overview' && (
+        <div className="space-y-4">
+          {/* Scope Card */}
+          <Card className="p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-ink">Scope</h2>
+              <button
+                type="button"
+                onClick={loadOverviewData}
+                disabled={loadingOverview}
+                className="btn btn-secondary !py-1 !px-2.5 text-xs inline-flex items-center gap-1"
+              >
+                <RefreshCw size={13} className={loadingOverview ? 'animate-spin' : ''} /> Refresh
+              </button>
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3 md:items-center">
+              {/* Month Selector */}
+              <div className="flex items-center justify-between rounded-xl border border-line bg-canvas/50 px-3 py-2">
+                <button
+                  type="button"
+                  onClick={() => shiftScopeMonth(-1)}
+                  className="rounded-lg p-1 hover:bg-surface"
+                  title="Previous month"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <span className="text-sm font-extrabold text-ink">{scopeMonthLabel}</span>
+                <button
+                  type="button"
+                  onClick={() => shiftScopeMonth(1)}
+                  className="rounded-lg p-1 hover:bg-surface"
+                  title="Next month"
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+
+              {/* Salesperson Scope Dropdown */}
+              <div>
+                <label className="mb-1 block text-[11px] font-semibold text-muted">Salesperson Scope</label>
+                <select
+                  value={scopeSalesperson}
+                  onChange={(e) => setScopeSalesperson(e.target.value)}
+                  className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-xs font-semibold text-ink focus:border-brand-blue focus:outline-none"
+                >
+                  <option value="">All Debtors (Full team)</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Overdue Balances Only Toggle */}
+              <label className="flex cursor-pointer items-center justify-between rounded-xl border border-line bg-canvas/30 px-3 py-2">
+                <div>
+                  <p className="text-xs font-bold text-ink">Overdue balances only</p>
+                  <p className="text-[11px] text-muted">Hides customers within credit days.</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={overdueOnly}
+                  onChange={(e) => setOverdueOnly(e.target.checked)}
+                  className="h-4 w-4 accent-brand-blue"
+                />
+              </label>
+            </div>
+          </Card>
+
+          {/* 4 KPI Metric Cards */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Card className="p-4">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-muted">Total outstanding</p>
+                  <p className="mt-1 text-2xl font-black text-ink">
+                    {formatShortCr(overviewStats.totalOutstanding)}
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted">
+                    {overviewStats.scopeName} • {rupeesDrCr(Math.round(overviewStats.totalOutstanding * 100))}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-blue-600 p-2.5 text-white shadow-sm">
+                  <Wallet size={18} />
+                </div>
+              </div>
+            </Card>
+
+            <Card className="p-4">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-muted">Overdue</p>
+                  <p className="mt-1 text-2xl font-black text-ink">
+                    {formatShortCr(overviewStats.totalOverdue)}
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted">
+                    {overviewStats.dealersWithBalance} customer(s) past due date
+                  </p>
+                </div>
+                <div className="rounded-xl bg-rose-500 p-2.5 text-white shadow-sm">
+                  <AlertTriangle size={18} />
+                </div>
+              </div>
+            </Card>
+
+            <Card className="p-4">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-muted">Collected • {scopeMonthLabel}</p>
+                  <p className="mt-1 text-2xl font-black text-emerald-700">
+                    {formatShortCr(overviewStats.monthCollected)}
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted">
+                    Payments booked this month in scope
+                  </p>
+                </div>
+                <div className="rounded-xl bg-emerald-600 p-2.5 text-white shadow-sm">
+                  <IndianRupee size={18} />
+                </div>
+              </div>
+            </Card>
+
+            <Card className="p-4">
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-xs font-semibold text-muted">Customers with balance</p>
+                  <p className="mt-1 text-2xl font-black text-ink">
+                    {overviewStats.dealersWithBalance}
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted">
+                    of {overviewStats.totalDealers} customers on record
+                  </p>
+                </div>
+                <div className="rounded-xl bg-sky-600 p-2.5 text-white shadow-sm">
+                  <Users size={18} />
+                </div>
+              </div>
+            </Card>
+          </div>
+
+          {/* Quick Actions */}
+          <Card className="p-4">
+            <h2 className="mb-3 text-sm font-bold text-ink">Quick actions</h2>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('manual');
+                  setIsModalOpen(true);
+                }}
+                className="flex items-center justify-center gap-2 rounded-xl border border-line bg-canvas/50 px-4 py-2.5 text-xs font-bold text-ink hover:bg-brand-blue/10 hover:text-brand-blue transition"
+              >
+                <Plus size={15} /> Record payment
+              </button>
+              <Link
+                to="/debtors"
+                className="flex items-center justify-center gap-2 rounded-xl border border-line bg-canvas/50 px-4 py-2.5 text-xs font-bold text-ink hover:bg-brand-blue/10 hover:text-brand-blue transition"
+              >
+                <Users size={15} /> Debtor List &amp; Ledgers
+              </Link>
+              <button
+                type="button"
+                onClick={() => setActiveTab('bank')}
+                className="flex items-center justify-center gap-2 rounded-xl border border-line bg-canvas/50 px-4 py-2.5 text-xs font-bold text-ink hover:bg-brand-blue/10 hover:text-brand-blue transition"
+              >
+                <Building2 size={15} /> Bank &amp; Cash Statements
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('manual')}
+                className="flex items-center justify-center gap-2 rounded-xl border border-line bg-canvas/50 px-4 py-2.5 text-xs font-bold text-ink hover:bg-brand-blue/10 hover:text-brand-blue transition"
+              >
+                <ReceiptText size={15} /> Manual Receipt Register
+              </button>
+            </div>
+          </Card>
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            {/* Balances in Scope */}
+            <Card className="p-4 lg:col-span-2">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-bold text-ink">Balances in scope</h2>
+                  <p className="text-[11px] text-muted">
+                    {scopedDebtors.length} debtor(s) with receivable balance — sorted largest first
+                  </p>
+                </div>
+                <input
+                  type="search"
+                  value={overviewSearch}
+                  onChange={(e) => setOverviewSearch(e.target.value)}
+                  placeholder="Search dealer, city, salesperson..."
+                  className="rounded-lg border border-line bg-surface px-3 py-1.5 text-xs focus:border-brand-blue focus:outline-none"
+                />
+              </div>
+              <div className="max-h-[420px] divide-y divide-line overflow-y-auto">
+                {scopedDebtors.length === 0 ? (
+                  <p className="py-8 text-center text-xs text-muted">
+                    No customer in this scope has an open balance.
+                  </p>
+                ) : (
+                  scopedDebtors.slice(0, 60).map((d) => (
+                    <div
+                      key={d.id}
+                      className="flex items-center justify-between gap-3 py-2.5 hover:bg-canvas/40 px-2 rounded-lg"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-bold text-ink">{d.name}</p>
+                        <p className="truncate text-[11px] text-muted">
+                          {d.city || d.district || d.state || 'Punjab'} • Rep: {d.salesperson || 'Unassigned'}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="font-mono text-xs font-extrabold text-rose-700">
+                          {rupeesDrCr(Math.round(Number(d.balance || 0) * 100))}
+                        </span>
+                        <Link
+                          to={`/debtors?q=${encodeURIComponent(d.name || '')}`}
+                          className="rounded-md bg-brand-blue/10 px-2 py-1 text-[10px] font-bold text-brand-blue hover:bg-brand-blue/20"
+                        >
+                          Ledger →
+                        </Link>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </Card>
+
+            {/* Share Team Summary */}
+            <Card className="p-4">
+              <h2 className="text-sm font-bold text-ink">Share team summary</h2>
+              <p className="mb-3 text-[11px] text-muted">
+                Readable WhatsApp summary of the current scope.
+              </p>
+              <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap rounded-xl border border-line bg-canvas/50 p-3 font-sans text-[11px] leading-relaxed text-ink">
+                {teamSummaryText}
+              </pre>
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(teamSummaryText);
+                    toast.success('Team summary copied!');
+                  }}
+                  className="btn btn-secondary flex-1 inline-flex items-center justify-center gap-1.5 text-xs"
+                >
+                  <Copy size={14} /> Copy
+                </button>
+                <a
+                  href={`https://wa.me/?text=${encodeURIComponent(teamSummaryText)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-primary flex-1 inline-flex items-center justify-center gap-1.5 text-xs"
+                >
+                  <Share2 size={14} /> WhatsApp
+                </a>
+              </div>
+            </Card>
+          </div>
+        </div>
+      )}
 
       {/* ── TAB 1: BANK & CASH STATEMENT LEDGER ────────────────────────────────────── */}
       {activeTab === 'bank' && (
