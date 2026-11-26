@@ -1201,7 +1201,7 @@ def load_all_persisted_state() -> dict[str, Any]:
                     "district": p["district"],
                     "salesperson": p["salesperson"],
                     "salespersonId": (p["salesperson_id"] or "") if (p["salesperson"] and p["salesperson"].lower() != "unassigned") else "",
-                    "mobile": p["mobile"] or "9814000000",
+                    "mobile": p["mobile"] if (p["mobile"] and p["mobile"] != "9814000000" and not str(p["mobile"]).startswith("9814020")) else "",
                     "balance": bal_rupees,
                     "balance_formatted": f"{bal_rupees:.2f}",
                     "creditDays": p["credit_days"] or 30,

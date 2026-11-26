@@ -46,6 +46,8 @@ import {
   X,
   Printer,
   MessageCircle,
+  Download,
+  Phone,
   GitMerge,
   ArrowRightLeft,
   Edit2,
@@ -98,6 +100,7 @@ import {
   type ServerDebtorPreviewRow,
   type ServerVoucher,
 } from '../lib/serverApi';
+import { generateStatementPdf, type StatementPdfData } from '../lib/statementPdf';
 import {
   debtorApplyFailureDetail,
   debtorApplyFailureHeadline,
@@ -519,6 +522,21 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
     setCurrentOpeningPaise(ob);
   }, [debtor]);
 
+  // Mobile / WhatsApp number state
+  const [currentMobile, setCurrentMobile] = useState<string>(debtor.mobile || '');
+  const [editingMobile, setEditingMobile] = useState(false);
+  const [mobileInput, setMobileInput] = useState(debtor.mobile || '');
+  const [mobileBusy, setMobileBusy] = useState(false);
+  const [showPhonePromptForWhatsApp, setShowPhonePromptForWhatsApp] = useState(false);
+  const [promptPhoneInput, setPromptPhoneInput] = useState('');
+  const [promptPhoneBusy, setPromptPhoneBusy] = useState(false);
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+
+  useEffect(() => {
+    setCurrentMobile(debtor.mobile || '');
+    setMobileInput(debtor.mobile || '');
+  }, [debtor.mobile]);
+
   const reloadVouchers = useCallback(() => {
     setLoading(true);
     listVouchers(debtorId)
@@ -782,42 +800,179 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
     return list;
   }, [chronologicalVouchers, selectedMonth, filterType, sortOrder]);
 
+  const handleSaveMobile = async (newPhone: string) => {
+    const cleaned = newPhone.trim();
+    setMobileBusy(true);
+    try {
+      await updateDebtor(debtorId, { mobile: cleaned });
+      setCurrentMobile(cleaned);
+      setMobileInput(cleaned);
+      setEditingMobile(false);
+      invalidate(syncKeys.debtors, syncKeys.customers);
+      return true;
+    } catch (err: unknown) {
+      const errObj = err as { message?: string };
+      alert(errObj?.message || 'Failed to update phone number');
+      return false;
+    } finally {
+      setMobileBusy(false);
+    }
+  };
+
+  const executeShare = async (targetPhone: string) => {
+    setPdfGenerating(true);
+    try {
+      const partyName = debtor.name || debtor.customerName || 'Customer';
+      const cleanPhone = targetPhone.replace(/[^0-9]/g, '');
+      const fullPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+
+      // Prepare PDF data
+      const pdfData: StatementPdfData = {
+        partyName,
+        partyId: debtorId,
+        city: debtor.city,
+        state: debtor.state,
+        mobile: targetPhone,
+        openingPaise: currentOpeningPaise,
+        totalDebitsPaise: totalDebits,
+        totalCreditsPaise: totalCredits,
+        closingPaise: currentOutstandingPaise,
+        aging: {
+          bucket0_30: aging.bucket0_30,
+          bucket31_60: aging.bucket31_60,
+          bucket61_90: aging.bucket61_90,
+          bucket90Plus: aging.bucket90Plus,
+        },
+        vouchers: filteredVouchers.map((v) => ({
+          date: v.voucher_date,
+          type: v.voucher_type,
+          vchNo: v.voucher_no || '',
+          particulars: v.narration || v.book_source || 'Tally Entry',
+          debitPaise: v.debit_paise || 0,
+          creditPaise: v.credit_paise || 0,
+          balancePaise: v.runningBalancePaise ?? 0,
+        })),
+      };
+
+      const doc = generateStatementPdf(pdfData);
+      const safeName = partyName.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const filename = `Statement_${safeName}.pdf`;
+
+      // Formatted WhatsApp message lines
+      const currentBal = currentOutstandingPaise < 0
+        ? `${rupees(Math.abs(currentOutstandingPaise))} Cr`
+        : `${rupees(currentOutstandingPaise)} Dr`;
+
+      const msgLines = [
+        `📄 *DURASMART - Statement of Account*`,
+        `--------------------------------`,
+        `*Party:* ${partyName}`,
+        `*City:* ${debtor.city || debtor.state || 'Punjab'}`,
+        `*Opening Balance:* ${currentOpeningPaise < 0 ? `${rupees(Math.abs(currentOpeningPaise))} Cr` : `${rupees(currentOpeningPaise)} Dr`}`,
+        `*Total Debits / Billed:* ${rupees(totalDebits)}`,
+        `*Total Credits / Receipts:* ${rupees(totalCredits)}`,
+        `*Current Outstanding:* ${currentBal}`,
+        ``,
+        `*Aging Breakdown:*`,
+        `• 0-30 Days: ${rupees(aging.bucket0_30)}`,
+        `• 31-60 Days: ${rupees(aging.bucket31_60)}`,
+        `• 61-90 Days: ${rupees(aging.bucket61_90)}`,
+        `• 90+ Days: ${rupees(aging.bucket90Plus)}`,
+        ``,
+        `*Statement PDF:* Attached below for your records.`,
+        `Please clear any overdue balance at your earliest convenience.`,
+        `Thank you,`,
+        `*Dura Smart Doors & Windows*`
+      ];
+      const shareText = msgLines.join('\n');
+
+      // Check if browser supports Web Share with files (Native mobile / Android / iOS / supported Web)
+      const blob = doc.output('blob');
+      const file = new File([blob], filename, { type: 'application/pdf' });
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: `Statement - ${partyName}`,
+            text: shareText,
+          });
+          return;
+        } catch (shareErr) {
+          console.warn('Native share cancelled or failed, falling back to download:', shareErr);
+        }
+      }
+
+      // Fallback for Desktop Web / browsers without file Web Share:
+      // 1. Download PDF to device
+      doc.save(filename);
+      // 2. Open WhatsApp Web / App with message
+      const textParam = encodeURIComponent(shareText);
+      const waUrl = fullPhone ? `https://wa.me/${fullPhone}?text=${textParam}` : `https://api.whatsapp.com/send?text=${textParam}`;
+      window.open(waUrl, '_blank');
+    } finally {
+      setPdfGenerating(false);
+    }
+  };
+
   const handleShareWhatsApp = () => {
+    const phone = currentMobile.trim();
+    if (!phone) {
+      // Prompt user to enter the party's number
+      setPromptPhoneInput('');
+      setShowPhonePromptForWhatsApp(true);
+      return;
+    }
+    executeShare(phone);
+  };
+
+  const handleConfirmPromptPhone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const phone = promptPhoneInput.trim();
+    if (!phone) return;
+    setPromptPhoneBusy(true);
+    try {
+      const ok = await handleSaveMobile(phone);
+      if (ok) {
+        setShowPhonePromptForWhatsApp(false);
+        executeShare(phone);
+      }
+    } finally {
+      setPromptPhoneBusy(false);
+    }
+  };
+
+  const handleDownloadPdf = () => {
     const partyName = debtor.name || debtor.customerName || 'Customer';
-    const currentBal = currentOutstandingPaise < 0
-      ? `${rupees(Math.abs(currentOutstandingPaise))} Cr`
-      : `${rupees(currentOutstandingPaise)} Dr`;
-
-    const phone = (debtor.mobile || '').replace(/[^0-9]/g, '');
-    const cleanPhone = phone.length === 10 ? `91${phone}` : phone;
-
-    const lines = [
-      `*DURASMART - Statement of Account*`,
-      `--------------------------------`,
-      `*Party:* ${partyName}`,
-      `*City:* ${debtor.city || debtor.state || 'Punjab'}`,
-      `*Opening Balance:* ${currentOpeningPaise < 0 ? `${rupees(Math.abs(currentOpeningPaise))} Cr` : `${rupees(currentOpeningPaise)} Dr`}`,
-      `*Total Debits / Billed:* ${rupees(totalDebits)}`,
-      `*Total Credits / Receipts:* ${rupees(totalCredits)}`,
-      `*Current Balance:* ${currentBal}`,
-      ``,
-      `*Aging Breakdown:*`,
-      `• 0-30 Days: ${rupees(aging.bucket0_30)}`,
-      `• 31-60 Days: ${rupees(aging.bucket31_60)}`,
-      `• 61-90 Days: ${rupees(aging.bucket61_90)}`,
-      `• 90+ Days: ${rupees(aging.bucket90Plus)}`,
-      ``,
-      `*Recent Vouchers:*`,
-      ...vouchers.slice(0, 5).map((v) => `• ${v.voucher_date} | ${v.voucher_type} (${v.voucher_no || '—'}): ${v.debit_paise > 0 ? '+' + rupees(v.debit_paise) : '-' + rupees(v.credit_paise)}`),
-      ``,
-      `Please clear any overdue balance at your earliest convenience.`,
-      `Thank you,`,
-      `*Dura Smart Doors & Windows*`
-    ];
-
-    const text = encodeURIComponent(lines.join('\n'));
-    const url = cleanPhone ? `https://wa.me/${cleanPhone}?text=${text}` : `https://api.whatsapp.com/send?text=${text}`;
-    window.open(url, '_blank');
+    const pdfData: StatementPdfData = {
+      partyName,
+      partyId: debtorId,
+      city: debtor.city,
+      state: debtor.state,
+      mobile: currentMobile,
+      openingPaise: currentOpeningPaise,
+      totalDebitsPaise: totalDebits,
+      totalCreditsPaise: totalCredits,
+      closingPaise: currentOutstandingPaise,
+      aging: {
+        bucket0_30: aging.bucket0_30,
+        bucket31_60: aging.bucket31_60,
+        bucket61_90: aging.bucket61_90,
+        bucket90Plus: aging.bucket90Plus,
+      },
+      vouchers: filteredVouchers.map((v) => ({
+        date: v.voucher_date,
+        type: v.voucher_type,
+        vchNo: v.voucher_no || '',
+        particulars: v.narration || v.book_source || 'Tally Entry',
+        debitPaise: v.debit_paise || 0,
+        creditPaise: v.credit_paise || 0,
+        balancePaise: v.runningBalancePaise ?? 0,
+      })),
+    };
+    const doc = generateStatementPdf(pdfData);
+    const safeName = partyName.replace(/[^a-zA-Z0-9_-]/g, '_');
+    doc.save(`Statement_${safeName}.pdf`);
   };
 
   const handlePrint = () => {
@@ -968,10 +1123,55 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
         <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
           <div>
             <h3 className="text-lg font-black text-slate-900">{debtor.name || debtor.customerName}</h3>
-            <p className="text-xs text-slate-500 font-medium">
-              Ledger Statement · ID: <span className="font-mono text-slate-700 font-semibold">{debtor.id || debtor.customerId}</span> · {debtor.city || debtor.state || 'Punjab'}
-              {debtor.mobile ? ` · Mobile: ${debtor.mobile}` : ''}
-            </p>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 font-medium mt-0.5">
+              <span>Ledger Statement · ID: <span className="font-mono text-slate-700 font-semibold">{debtor.id || debtor.customerId}</span> · {debtor.city || debtor.state || 'Punjab'}</span>
+              <span>·</span>
+              {editingMobile ? (
+                <div className="inline-flex items-center gap-1.5 bg-white px-2 py-0.5 rounded-lg border border-slate-300 shadow-sm">
+                  <Phone size={12} className="text-emerald-600 shrink-0" />
+                  <input
+                    type="text"
+                    value={mobileInput}
+                    onChange={(e) => setMobileInput(e.target.value)}
+                    placeholder="Enter WhatsApp / Mobile"
+                    className="w-36 rounded border border-slate-200 px-1.5 py-0.5 text-xs text-slate-900 font-semibold focus:outline-none focus:border-indigo-500"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    disabled={mobileBusy}
+                    onClick={() => handleSaveMobile(mobileInput)}
+                    className="rounded bg-emerald-600 px-2 py-0.5 text-[11px] font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    {mobileBusy ? '...' : 'Save'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setEditingMobile(false); setMobileInput(currentMobile); }}
+                    className="rounded bg-slate-200 px-1.5 py-0.5 text-[11px] font-medium text-slate-700 hover:bg-slate-300"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="inline-flex items-center gap-1.5">
+                  <Phone size={12} className={currentMobile ? "text-emerald-600" : "text-amber-500"} />
+                  {currentMobile ? (
+                    <span className="font-semibold text-slate-700">{currentMobile}</span>
+                  ) : (
+                    <span className="text-amber-600 font-semibold italic">No WhatsApp number</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { setMobileInput(currentMobile); setEditingMobile(true); }}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:underline ml-1"
+                    title="Add or update party mobile number"
+                  >
+                    <Pencil size={11} /> {currentMobile ? 'Edit' : 'Add Number'}
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2 no-print">
             <button
@@ -1497,21 +1697,31 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
           <div className="flex items-center gap-2">
             <button
               type="button"
+              disabled={pdfGenerating}
               onClick={handleShareWhatsApp}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-700 transition"
-              title="Share Statement on WhatsApp"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-700 transition disabled:opacity-50"
+              title="Share Official Statement PDF on WhatsApp"
             >
               <MessageCircle size={14} />
-              Share on WhatsApp
+              {pdfGenerating ? 'Preparing Statement PDF...' : 'Share on WhatsApp'}
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadPdf}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-800 shadow-sm hover:bg-slate-100 transition"
+              title="Download Formatted PDF Statement"
+            >
+              <Download size={14} />
+              Download PDF
             </button>
             <button
               type="button"
               onClick={handlePrint}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-800 shadow-sm hover:bg-slate-100 transition"
-              title="Print or Save PDF"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-600 shadow-sm hover:bg-slate-100 transition"
+              title="Print browser view"
             >
               <Printer size={14} />
-              Print / PDF
+              Print
             </button>
           </div>
           <button type="button" onClick={onClose} className="rounded-lg bg-slate-200 hover:bg-slate-300 px-4 py-2 text-xs font-bold text-slate-800 transition">
@@ -1745,6 +1955,67 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
         </div>
       )}
 
+      {/* WhatsApp Phone Prompt Modal */}
+      {showPhonePromptForWhatsApp && (
+        <div className="fixed inset-0 z-70 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-md">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-300 bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3 mb-4">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+                  <Phone size={16} />
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-slate-900">Add WhatsApp Number</h4>
+                  <p className="text-[11px] text-slate-500 font-semibold">{debtor.name || debtor.customerName}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPhonePromptForWhatsApp(false)}
+                className="rounded p-1 text-slate-500 hover:bg-slate-100 transition"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <form onSubmit={handleConfirmPromptPhone} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  10-Digit Mobile / WhatsApp Number *
+                </label>
+                <input
+                  type="tel"
+                  required
+                  placeholder="e.g. 9876543210"
+                  value={promptPhoneInput}
+                  onChange={(e) => setPromptPhoneInput(e.target.value)}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-900 focus:border-emerald-500 focus:outline-none"
+                  autoFocus
+                />
+                <p className="mt-1.5 text-[11px] text-slate-500">
+                  This number will be saved to the party record for future statements and invoice shares.
+                </p>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPhonePromptForWhatsApp(false)}
+                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={promptPhoneBusy || !promptPhoneInput.trim()}
+                  className="rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  {promptPhoneBusy ? 'Saving...' : 'Save & Share Statement'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Duplicate Review & Approval Modal */}
       {showDuplicateReviewModal && (
         <DuplicateReviewModal
@@ -1788,6 +2059,7 @@ function DebtorListCard() {
   const [addDistrict, setAddDistrict] = useState('');
   const [addSalesperson, setAddSalesperson] = useState('');
   const [addBalance, setAddBalance] = useState('0.00');
+  const [addMobile, setAddMobile] = useState('');
   const [addBusy, setAddBusy] = useState(false);
 
   // Edit Debtor Modal State
@@ -1797,6 +2069,7 @@ function DebtorListCard() {
   const [editDistrict, setEditDistrict] = useState('');
   const [editSalesperson, setEditSalesperson] = useState('');
   const [editBalance, setEditBalance] = useState('0.00');
+  const [editMobile, setEditMobile] = useState('');
   const [editBusy, setEditBusy] = useState(false);
 
   // Delete Debtor State
@@ -1976,6 +2249,7 @@ function DebtorListCard() {
         district: addDistrict.trim(),
         salesperson: addSalesperson.trim() || 'Unassigned',
         balance: parseFloat(addBalance) || 0.0,
+        mobile: addMobile.trim(),
       });
       setShowAddModal(false);
       setAddName('');
@@ -1983,6 +2257,7 @@ function DebtorListCard() {
       setAddDistrict('');
       setAddSalesperson('');
       setAddBalance('0.00');
+      setAddMobile('');
       invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
     } catch (err: unknown) {
       const errObj = err as { message?: string };
@@ -1999,6 +2274,7 @@ function DebtorListCard() {
     setEditDistrict(debtor.district || '');
     setEditSalesperson(debtor.salesperson || '');
     setEditBalance(debtor.balance !== undefined ? String(debtor.balance) : '0.00');
+    setEditMobile(debtor.mobile || '');
   };
 
   const handleSaveEdit = async (e: React.FormEvent) => {
@@ -2013,6 +2289,7 @@ function DebtorListCard() {
         district: editDistrict.trim(),
         salesperson: editSalesperson.trim(),
         balance: parseFloat(editBalance) || 0.0,
+        mobile: editMobile.trim(),
       });
       setEditingDebtor(null);
       invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
@@ -2576,6 +2853,16 @@ function DebtorListCard() {
                   />
                 </div>
               </div>
+              <div>
+                <label className="text-[11px] font-bold text-muted">WhatsApp / Mobile Number</label>
+                <input
+                  type="tel"
+                  className="input mt-1 w-full"
+                  value={addMobile}
+                  onChange={(e) => setAddMobile(e.target.value)}
+                  placeholder="e.g. 9876543210"
+                />
+              </div>
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   type="button"
@@ -2656,6 +2943,16 @@ function DebtorListCard() {
                     onChange={(e) => setEditBalance(e.target.value)}
                   />
                 </div>
+              </div>
+              <div>
+                <label className="text-[11px] font-bold text-muted">WhatsApp / Mobile Number</label>
+                <input
+                  type="tel"
+                  className="input mt-1 w-full"
+                  value={editMobile}
+                  onChange={(e) => setEditMobile(e.target.value)}
+                  placeholder="e.g. 9876543210"
+                />
               </div>
               <div className="mt-4 flex justify-end gap-2">
                 <button

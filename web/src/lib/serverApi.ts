@@ -2133,14 +2133,14 @@ export async function uploadPartyLedger(debtorId: string, file: File): Promise<a
   return res.json();
 }
 
-export function createDebtor(body: { name: string; state?: string; city?: string; district?: string; salesperson?: string; balance?: number }): Promise<ServerDebtor> {
+export function createDebtor(body: { name: string; state?: string; city?: string; district?: string; salesperson?: string; mobile?: string; balance?: number }): Promise<ServerDebtor> {
   return send<ServerDebtor>('/debtors', {
     method: 'POST',
     body,
   });
 }
 
-export function updateDebtor(id: string, body: Partial<{ name: string; state: string; city: string; district: string; salesperson: string; balance: number }>): Promise<ServerDebtor> {
+export function updateDebtor(id: string, body: Partial<{ name: string; state: string; city: string; district: string; salesperson: string; mobile: string; balance: number }>): Promise<ServerDebtor> {
   return send<ServerDebtor>(`/debtors/${encodeURIComponent(id)}`, {
     method: 'PUT',
     body,

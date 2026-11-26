@@ -364,7 +364,7 @@ try:
                 if d.get("state") and not curr.get("state"):
                     curr["state"] = d["state"]
             else:
-                d.setdefault("mobile", f"98140{20000 + len(STATE['debtors'])}")
+                d.setdefault("mobile", "")
                 d.setdefault("creditDays", 30)
                 d.setdefault("status", "active")
                 d.setdefault("outstandingPaise", 0)
@@ -2316,6 +2316,7 @@ class DebtorUpdate(BaseModel):
     city: str | None = None
     district: str | None = None
     salesperson: str | None = None
+    mobile: str | None = None
     balance: float | None = None
     status: str | None = None
 
@@ -2588,7 +2589,7 @@ def create_debtor(body: DebtorCreate):
         "district": body.district or "",
         "salesperson": sp_name,
         "salespersonId": sp_id,
-        "mobile": "9814000000",
+        "mobile": body.mobile or "",
         "balance": bal_val,
         "balance_formatted": f"{bal_val:.2f}",
         "creditDays": 30,
@@ -2636,6 +2637,21 @@ def update_debtor(debtor_id: str, body: DebtorUpdate):
         sp_match = next((e["id"] for e in STATE.get("employees", []) if e["name"].lower() == body.salesperson.lower()), None)
         if sp_match:
             debtor["salespersonId"] = sp_match
+    if body.mobile is not None:
+        clean_mob = re.sub(r'[^0-9+]', '', body.mobile.strip())
+        debtor["mobile"] = clean_mob
+        for c in STATE.get("customers", []):
+            if c.get("id") == debtor_id or c.get("name", "").strip().lower() == debtor["name"].strip().lower():
+                c["mobile"] = clean_mob
+        try:
+            with db.get_connection() as conn:
+                conn.execute(
+                    "UPDATE parties SET mobile = ?, updated_at = ? WHERE id = ? OR LOWER(TRIM(name)) = ?",
+                    (clean_mob, datetime.now().isoformat(), debtor_id, debtor["name"].strip().lower())
+                )
+                conn.commit()
+        except Exception as _m_err:
+            print(f"Warning updating party mobile: {_m_err}")
     if body.balance is not None:
         bal_flt = max(0.0, float(body.balance))
         debtor["balance"] = bal_flt
@@ -2857,7 +2873,7 @@ def sync_hr_pb_excel():
                     target_d["salesperson"] = dealer["salesperson"]
                 updated_count += 1
             else:
-                dealer.setdefault("mobile", f"98140{20000 + len(STATE['debtors'])}")
+                dealer.setdefault("mobile", "")
                 dealer.setdefault("creditDays", 30)
                 dealer.setdefault("status", "active")
                 dealer.setdefault("outstandingPaise", 0)
@@ -5946,7 +5962,7 @@ async def upload_excel_file(file: UploadFile = File(...)):
                         target_d["salesperson"] = dealer["salesperson"]
                     updated += 1
                 else:
-                    dealer.setdefault("mobile", f"98140{20000 + len(STATE['debtors'])}")
+                    dealer.setdefault("mobile", "")
                     dealer.setdefault("creditDays", 30)
                     dealer.setdefault("status", "active")
                     dealer.setdefault("outstandingPaise", 0)
@@ -6344,7 +6360,7 @@ async def apply_debtor_bytes(
                 dealer["outstandingPaise"] = bal_paise
                 dealer["overduePaise"] = bal_paise
                 dealer["isOverdue"] = bal_paise > 0
-                dealer.setdefault("mobile", f"98140{20000 + len(STATE['debtors'])}")
+                dealer.setdefault("mobile", "")
                 dealer.setdefault("creditDays", 30)
                 dealer.setdefault("status", "active")
                 db.save_party(dealer)
