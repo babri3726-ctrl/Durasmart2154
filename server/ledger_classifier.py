@@ -149,6 +149,9 @@ def classify_party_name(name: str) -> str:
     if not norm or norm_lower in ("total", "grand total", "(as per details)"):
         return "expense"
 
+    if norm_upper in ("V.S UDYOG", "BALAJI STEEL AVINASH"):
+        return "asset"
+
     # Known Sundry Creditors (Suppliers, Mills, Vendors, Transporters) check
     if norm_upper in KNOWN_SUNDRY_CREDITORS:
         return "supplier"

@@ -339,6 +339,7 @@ def init_db(seed_state: dict[str, Any] | None = None):
             "plot jogiana", "plot khaddar bhandar", "plot no 8 country villa 521g",
             "plot pawa", "plot sua road", "shares market", "shop public markeet",
             "showroom badal road", "show room barewal road", "show room bti 17667",
+            "v.s udyog", "balaji steel avinash",
         )
         placeholders = ",".join(["?"] * len(non_debtor_ledgers))
         conn.execute(
