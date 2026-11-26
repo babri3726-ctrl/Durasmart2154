@@ -1,6 +1,6 @@
 name: demo_operations_mobile
 description: Demo Operations - cross-platform business management UI prototype.
-version: 1.1.5+14
+version: 1.1.6+15
 publish_to: 'none'
 
 environment:
@@ -17,6 +17,7 @@ dependencies:
   url_launcher: ^6.3.2
   firebase_core: ^3.6.0
   firebase_auth: ^5.3.1
+  path_provider:
 
 dev_dependencies:
   flutter_test:

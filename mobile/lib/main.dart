@@ -16,11 +16,15 @@ void main() async {
   } catch (e) {
     debugPrint('Firebase init note: $e');
   }
-  ApiSyncService.initAuthToken();
+  await ApiSyncService.initStorage();
+  final repo = MockRepository();
+  final restored = repo.restoreSession();
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => MockRepository(),
-      child: const OperationsApp(),
+    ChangeNotifierProvider.value(
+      value: repo,
+      child: OperationsApp(
+        initialRoute: restored ? '/home' : '/login',
+      ),
     ),
   );
 }

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 
 /// Handles transparent HTTP sync between the Flutter Mobile app and the FastAPI backend.
 class ApiSyncService {
@@ -396,29 +397,96 @@ class ApiSyncService {
 
   /// Stored active JWT bearer token
   static String? authToken;
+  static Directory? _persistentDir;
 
-  static File get _tokenFile => File('${Directory.systemTemp.path}/durasmart_auth.json');
+  static File get _legacyTokenFile =>
+      File('${Directory.systemTemp.path}/durasmart_auth.json');
+
+  static File get _sessionFile =>
+      File('${(_persistentDir ?? Directory.systemTemp).path}/durasmart_session.json');
+
+  /// Initializes persistent storage directory so session survives OS cache clears & app restarts.
+  static Future<void> initStorage() async {
+    try {
+      _persistentDir = await getApplicationSupportDirectory();
+      if (!_persistentDir!.existsSync()) {
+        _persistentDir!.createSync(recursive: true);
+      }
+      if (!_sessionFile.existsSync() && _legacyTokenFile.existsSync()) {
+        final content = _legacyTokenFile.readAsStringSync();
+        _sessionFile.writeAsStringSync(content);
+      }
+    } catch (_) {
+      // Fallback to Directory.systemTemp in headless/unit-test environments
+    }
+  }
+
+  static Map<String, dynamic> _readSessionMap() {
+    try {
+      final f = _sessionFile.existsSync() ? _sessionFile : _legacyTokenFile;
+      if (f.existsSync()) {
+        final decoded = jsonDecode(f.readAsStringSync());
+        if (decoded is Map<String, dynamic>) return decoded;
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  static void _writeSessionMap(Map<String, dynamic> data) {
+    try {
+      _sessionFile.writeAsStringSync(jsonEncode(data));
+    } catch (_) {}
+  }
 
   static void setAuthToken(String? token) {
     authToken = token;
-    try {
-      if (token != null) {
-        _tokenFile.writeAsStringSync(jsonEncode({'token': token}));
-      } else if (_tokenFile.existsSync()) {
-        _tokenFile.deleteSync();
+    final map = _readSessionMap();
+    if (token != null) {
+      map['token'] = token;
+      _writeSessionMap(map);
+    } else {
+      map.remove('token');
+      if (map.isEmpty) {
+        clearSession();
+      } else {
+        _writeSessionMap(map);
       }
+    }
+  }
+
+  static void saveSession({String? token, Map<String, dynamic>? user}) {
+    final map = _readSessionMap();
+    if (token != null) {
+      authToken = token;
+      map['token'] = token;
+    } else if (authToken != null) {
+      map['token'] = authToken;
+    }
+    if (user != null) {
+      map['user'] = user;
+    }
+    _writeSessionMap(map);
+  }
+
+  static Map<String, dynamic>? loadSavedUser() {
+    final map = _readSessionMap();
+    final u = map['user'];
+    if (u is Map<String, dynamic>) return u;
+    return null;
+  }
+
+  static void clearSession() {
+    authToken = null;
+    try {
+      if (_sessionFile.existsSync()) _sessionFile.deleteSync();
+      if (_legacyTokenFile.existsSync()) _legacyTokenFile.deleteSync();
     } catch (_) {}
   }
 
   static String? initAuthToken() {
     if (authToken != null) return authToken;
-    try {
-      if (_tokenFile.existsSync()) {
-        final content = _tokenFile.readAsStringSync();
-        final map = jsonDecode(content) as Map<String, dynamic>;
-        authToken = map['token'] as String?;
-      }
-    } catch (_) {}
+    final map = _readSessionMap();
+    authToken = map['token'] as String?;
     return authToken;
   }
 

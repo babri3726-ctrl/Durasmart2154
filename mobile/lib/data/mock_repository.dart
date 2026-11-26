@@ -86,7 +86,7 @@ class MockRepository extends ChangeNotifier {
   int? serverActiveDealers;
   int? serverSalesTeamCount;
   List<SalespersonSummary> salespersonSummaries = [];
-  static const int currentVersionCode = 14;
+  static const int currentVersionCode = 15;
   static const String currentVersionName = '1.1.4';
   AppUpdateInfo? availableUpdate;
   Timer? _syncTimer;
@@ -137,6 +137,7 @@ class MockRepository extends ChangeNotifier {
         if (password == expected) {
           currentUser = u;
           signedIn = true;
+          ApiSyncService.saveSession(user: u.toJson());
           notifyListeners();
           return u;
         }
@@ -148,12 +149,27 @@ class MockRepository extends ChangeNotifier {
   void setSignedInUser(AppUser user) {
     currentUser = user;
     signedIn = true;
+    ApiSyncService.saveSession(user: user.toJson());
     notifyListeners();
+  }
+
+  /// Restores persisted session from permanent storage on app cold start.
+  bool restoreSession() {
+    ApiSyncService.initAuthToken();
+    final savedUser = ApiSyncService.loadSavedUser();
+    if (savedUser != null) {
+      currentUser = AppUser.fromJson(savedUser);
+      signedIn = true;
+      unawaited(syncWithBackend());
+      return true;
+    }
+    return false;
   }
 
   void logout() {
     currentUser = null;
     signedIn = false;
+    ApiSyncService.clearSession();
     notifyListeners();
   }
 

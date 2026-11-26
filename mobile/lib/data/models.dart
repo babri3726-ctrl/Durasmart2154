@@ -63,6 +63,16 @@ class AppUser {
     );
   }
 
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'email': email,
+        'role': role == UserRole.owner ? 'owner' : 'employee',
+        'department': department,
+        'employeeId': employeeId,
+        'phone': phone,
+      };
+
   String get initials {
     final parts = name.trim().split(RegExp(r'\s+'));
     return parts

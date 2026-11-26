@@ -3648,10 +3648,10 @@ def get_discount_ledger():
 @app.get("/api/v1/app/version")
 def get_app_version():
     return {
-        "version_code": 14,
-        "version_name": "1.1.5",
+        "version_code": 15,
+        "version_name": "1.1.6",
         "download_url": "/api/v1/app/latest-apk",
-        "release_notes": "Tally Debtor Verification Badges, Mismatch Alerts & Diff Analytics across Mobile and Web.",
+        "release_notes": "Persistent login session across restarts, Tally Debtor Verification & Payment Control Tower.",
         "mandatory": False,
         "published_at": datetime.now().isoformat()
     }
