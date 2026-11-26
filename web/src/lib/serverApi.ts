@@ -2259,7 +2259,44 @@ export function listVouchers(
   return send<ServerVoucher[]>(`/vouchers${query}`);
 }
 
-export function cleanupDuplicateVouchers(): Promise<{
+export interface DuplicateCandidateItem {
+  id: string;
+  voucherDate: string;
+  voucherType: string;
+  voucherNo: string;
+  debitPaise: number;
+  creditPaise: number;
+  narration: string;
+  bookSource?: string;
+  createdAt?: string;
+}
+
+export interface DuplicateVoucherGroup {
+  partyId: string;
+  partyName: string;
+  voucherDate: string;
+  voucherType: string;
+  voucherNo: string;
+  debitPaise: number;
+  creditPaise: number;
+  totalEntries: number;
+  original: DuplicateCandidateItem;
+  duplicates: DuplicateCandidateItem[];
+}
+
+export interface DuplicatePreviewResponse {
+  status: string;
+  totalCandidateDuplicates: number;
+  totalGroups: number;
+  groups: DuplicateVoucherGroup[];
+}
+
+export function previewDuplicateVouchers(partyId?: string): Promise<DuplicatePreviewResponse> {
+  const query = partyId ? `?partyId=${encodeURIComponent(partyId)}` : '';
+  return send<DuplicatePreviewResponse>(`/debtors/duplicates/preview${query}`);
+}
+
+export function cleanupDuplicateVouchers(approvedVoucherIds?: string[], partyId?: string): Promise<{
   status: string;
   deletedCount: number;
   affectedPartiesCount: number;
@@ -2267,6 +2304,7 @@ export function cleanupDuplicateVouchers(): Promise<{
 }> {
   return send('/debtors/cleanup-duplicates', {
     method: 'POST',
+    body: JSON.stringify({ approvedVoucherIds, partyId }),
   });
 }
 

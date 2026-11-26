@@ -1746,12 +1746,17 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
         "affectedPartiesCount": len(affected_party_ids),
     }
 
-def deduplicate_all_vouchers(conn=None) -> dict[str, Any]:
+def find_duplicate_voucher_candidates(party_id: str | None = None, conn=None) -> dict[str, Any]:
     """
-    Scans the vouchers table and deletes redundant duplicate entries
-    (e.g. from repeated file uploads or multi-book overlaps).
-    Preserves legitimate multi-row entries while eliminating double-counted transactions.
-    Recomputes balances for all affected parties.
+    Finds actual duplicate voucher candidates where:
+    - Same party_id
+    - Same voucher_date
+    - Same voucher_type
+    - Same voucher_no
+    - AND SAME AMOUNT (debit_paise and credit_paise must match exactly!)
+    If voucher number is the same but amounts differ (e.g. 7 Lakh vs 3 Lakh),
+    they are NEVER considered duplicates.
+    Returns grouped preview so the user can review and explicitly approve deletion.
     """
     import re
 
@@ -1780,131 +1785,179 @@ def deduplicate_all_vouchers(conn=None) -> dict[str, Any]:
 
     try:
         cur = conn.cursor()
-        cur.execute("""
-            SELECT id, party_id, voucher_date, LOWER(voucher_type), voucher_no, debit_paise, credit_paise, narration, book_source, file_sha256, created_at
-            FROM vouchers
-            ORDER BY voucher_date, id
-        """)
+        if party_id:
+            cur.execute("""
+                SELECT id, party_id, party_name, voucher_date, LOWER(voucher_type), voucher_no, debit_paise, credit_paise, narration, book_source, file_sha256, created_at
+                FROM vouchers
+                WHERE party_id = ?
+                ORDER BY voucher_date, id
+            """, (party_id,))
+        else:
+            cur.execute("""
+                SELECT id, party_id, party_name, voucher_date, LOWER(voucher_type), voucher_no, debit_paise, credit_paise, narration, book_source, file_sha256, created_at
+                FROM vouchers
+                ORDER BY voucher_date, id
+            """)
         all_vchs = cur.fetchall()
 
-        seen_invoices = {}
-        seen_exact_content = {}
-        to_delete = set()
-        affected_parties = set()
-
+        # Group 1: Exact Match on (party_id, voucher_date, voucher_type, voucher_no, debit_paise, credit_paise)
+        # Note: Both debit_paise and credit_paise MUST MATCH! If amounts differ, NEVER group as duplicates.
+        grouped_candidates = {}
         for v in all_vchs:
-            vid, pid, dt, vt, vno, dr, cr, narr, bs, fsha, cat = v
+            vid, pid, pname, dt, vt, vno, dr, cr, narr, bs, fsha, cat = v
+            cvno = clean_vno_str(vno)
+            if not is_invoice_no(vno):
+                continue
+            # Amount MUST match!
+            group_key = (pid, dt, vt, cvno, dr, cr)
+            if group_key not in grouped_candidates:
+                grouped_candidates[group_key] = []
+            grouped_candidates[group_key].append(v)
+
+        # Group 2: Cross-Book Exact Content duplicate (same party, date, dr, cr across different file uploads)
+        content_groups = {}
+        for v in all_vchs:
+            vid, pid, pname, dt, vt, vno, dr, cr, narr, bs, fsha, cat = v
             cvno = clean_vno_str(vno)
             cnarr = re.sub(r'\s+', ' ', (narr or '').strip().lower())
+            ckey = (pid, dt, vt, dr, cr, cvno, cnarr)
+            content_groups.setdefault(ckey, []).append(v)
 
-            # Rule 1: Real invoice numbers (e.g. Sales voucher 2305, 1323)
-            # A party cannot legitimately have two invoices with identical invoice number on the same date for the same type.
-            # If two entries exist (e.g. taxable base amount vs gross invoice total with GST), preserve the gross total.
-            if is_invoice_no(vno):
-                inv_key = (pid, dt, vt, cvno)
-                if inv_key in seen_invoices:
-                    prev_v = seen_invoices[inv_key]
-                    prev_amt = max(prev_v[5], prev_v[6])
-                    curr_amt = max(dr, cr)
-                    if curr_amt > prev_amt:
-                        to_delete.add(prev_v[0])
-                        seen_invoices[inv_key] = v
-                    else:
-                        to_delete.add(vid)
-                    affected_parties.add(pid)
-                    continue
-                else:
-                    seen_invoices[inv_key] = v
+        duplicate_groups = []
+        total_candidate_duplicates = 0
+        seen_dup_vids = set()
 
-            # Rule 2: Exact full content duplicate across DIFFERENT file uploads (never drop distinct rows from same file_sha)
-            content_key = (pid, dt, vt, dr, cr, cvno, cnarr, bs)
-            if content_key in seen_exact_content:
-                prev_fsha = seen_exact_content[content_key][9]
-                if not fsha or not prev_fsha or fsha != prev_fsha:
-                    to_delete.add(vid)
-                    affected_parties.add(pid)
-                    continue
-            else:
-                seen_exact_content[content_key] = v
+        for gkey, v_list in grouped_candidates.items():
+            if len(v_list) > 1:
+                # First one is original (to keep), subsequent ones are proposed duplicates
+                orig = v_list[0]
+                dups = []
+                for d in v_list[1:]:
+                    if d[0] not in seen_dup_vids:
+                        seen_dup_vids.add(d[0])
+                        dups.append({
+                            "id": d[0],
+                            "voucherNo": d[5],
+                            "bookSource": d[9],
+                            "narration": d[8],
+                            "createdAt": d[11]
+                        })
+                if dups:
+                    total_candidate_duplicates += len(dups)
+                    amt_paise = orig[6] if orig[6] > 0 else orig[7]
+                    direction = "Dr." if orig[6] > 0 else "Cr."
+                    duplicate_groups.append({
+                        "partyId": orig[1],
+                        "partyName": orig[2],
+                        "voucherDate": orig[3],
+                        "voucherType": orig[4].capitalize(),
+                        "voucherNo": orig[5],
+                        "debitPaise": orig[6],
+                        "creditPaise": orig[7],
+                        "amountFormatted": f"₹{amt_paise / 100.0:,.2f} {direction}",
+                        "original": {
+                            "id": orig[0],
+                            "voucherNo": orig[5],
+                            "bookSource": orig[9],
+                            "narration": orig[8],
+                            "createdAt": orig[11]
+                        },
+                        "duplicates": dups
+                    })
 
-        # Rule 3: Cross-Book generic Day Book duplicates (e.g. Kalra Steel DB-49 vs JV-1200)
-        # Group remaining vouchers by (pid, dt, vt, dr, cr)
-        remaining_vchs = [v for v in all_vchs if v[0] not in to_delete]
-        sig_groups = {}
-        for v in remaining_vchs:
-            vid, pid, dt, vt, vno, dr, cr, narr, bs, fsha, cat = v
-            sig_key = (pid, dt, vt, dr, cr)
-            if sig_key not in sig_groups:
-                sig_groups[sig_key] = []
-            sig_groups[sig_key].append(v)
-
-        for sig_key, group in sig_groups.items():
-            if len(group) <= 1:
-                continue
-
-            def _is_generic_db(vno_val):
-                return (
-                    not vno_val
-                    or bool(re.match(r'^db\s*[-_:]\s*', str(vno_val), flags=re.IGNORECASE))
-                    or any(str(vno_val).lower().startswith(p) for p in ('aug ', 'spt ', 'oct ', 'nov ', 'dec ', 'jan ', 'feb ', 'mar ', 'apr ', 'may ', 'jun ', 'jul '))
-                )
-
-            # Only non-Day Book rows (Bank/Cash/Sales/Journal/Authoritative Ledger) count as cross-book specialized
-            non_daybook = [v for v in group if v[8] != 'Day Book']
-            daybook_rows = [v for v in group if v[8] == 'Day Book']
-
-            if non_daybook and daybook_rows:
-                # Prefer removing generic DB- / blank Day Book rows first, matched 1-to-1
-                db_ordered = sorted(daybook_rows, key=lambda v: (0 if _is_generic_db(v[4]) else 1, v[0]))
-                matched_count = min(len(non_daybook), len(db_ordered))
-                for gv in db_ordered[:matched_count]:
-                    to_delete.add(gv[0])
-                    affected_parties.add(gv[1])
-                daybook_rows = db_ordered[matched_count:]
-
-            # For remaining Day Book rows: NEVER delete rows from the same file_sha256;
-            # only deduplicate overlapping Day Book re-uploads across DIFFERENT file_sha256s.
-            if len(daybook_rows) > 1:
-                # Sub-group by clean voucher no when it's a real invoice no so distinct bills never collide
-                sub_groups = {}
-                for gv in daybook_rows:
-                    sub_key = clean_vno_str(gv[4]) if is_invoice_no(gv[4]) else "__generic__"
-                    sub_groups.setdefault(sub_key, []).append(gv)
-
-                for sub_rows in sub_groups.values():
-                    if len(sub_rows) <= 1:
-                        continue
-                    by_sha = {}
-                    for gv in sub_rows:
-                        sha_key = gv[9] or "__no_sha__"
-                        by_sha.setdefault(sha_key, []).append(gv)
-                    if len(by_sha) > 1:
-                        # Keep at most max_per_sha rows (preserving all rows from the primary/first upload)
-                        max_keep = max(len(r) for r in by_sha.values())
-                        kept = 0
-                        for sha_key, sha_rows in by_sha.items():
-                            for gv in sha_rows:
-                                if kept < max_keep:
-                                    kept += 1
-                                else:
-                                    to_delete.add(gv[0])
-                                    affected_parties.add(gv[1])
-
-        if to_delete:
-            del_list = list(to_delete)
-            for i in range(0, len(del_list), 500):
-                chunk = del_list[i:i+500]
-                placeholders = ','.join('?' for _ in chunk)
-                cur.execute(f"DELETE FROM vouchers WHERE id IN ({placeholders})", chunk)
-
-            for pid in affected_parties:
-                recompute_party_balance(pid, conn)
-
-            conn.commit()
+        # Check content groups across different file_sha
+        for ckey, v_list in content_groups.items():
+            if len(v_list) > 1:
+                shas = set(v[10] for v in v_list if v[10])
+                if len(shas) > 1:
+                    orig = v_list[0]
+                    dups = []
+                    for d in v_list[1:]:
+                        if d[0] not in seen_dup_vids:
+                            seen_dup_vids.add(d[0])
+                            dups.append({
+                                "id": d[0],
+                                "voucherNo": d[5],
+                                "bookSource": d[9],
+                                "narration": d[8],
+                                "createdAt": d[11]
+                            })
+                    if dups:
+                        total_candidate_duplicates += len(dups)
+                        amt_paise = orig[6] if orig[6] > 0 else orig[7]
+                        direction = "Dr." if orig[6] > 0 else "Cr."
+                        duplicate_groups.append({
+                            "partyId": orig[1],
+                            "partyName": orig[2],
+                            "voucherDate": orig[3],
+                            "voucherType": orig[4].capitalize(),
+                            "voucherNo": orig[5] or "Cross-Book",
+                            "debitPaise": orig[6],
+                            "creditPaise": orig[7],
+                            "amountFormatted": f"₹{amt_paise / 100.0:,.2f} {direction}",
+                            "original": {
+                                "id": orig[0],
+                                "voucherNo": orig[5],
+                                "bookSource": orig[9],
+                                "narration": orig[8],
+                                "createdAt": orig[11]
+                            },
+                            "duplicates": dups
+                        })
 
         return {
-            "deletedCount": len(to_delete),
+            "totalCandidateDuplicates": total_candidate_duplicates,
+            "totalGroups": len(duplicate_groups),
+            "groups": duplicate_groups
+        }
+    finally:
+        if should_close:
+            conn.close()
+
+def deduplicate_all_vouchers(approved_voucher_ids: list[str] | None = None, conn=None) -> dict[str, Any]:
+    """
+    Deletes ONLY the voucher IDs that have been explicitly previewed and approved by the user.
+    If no approved_voucher_ids are provided, it NEVER deletes anything automatically.
+    Recomputes party balances for all affected parties after approved deletions.
+    """
+    if not approved_voucher_ids:
+        return {
+            "status": "no_action",
+            "deletedCount": 0,
+            "affectedPartiesCount": 0,
+            "message": "No voucher entries were approved for deletion."
+        }
+
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+
+    try:
+        cur = conn.cursor()
+        clean_ids = [str(vid).strip() for vid in approved_voucher_ids if str(vid).strip()]
+        if not clean_ids:
+            return {"status": "no_action", "deletedCount": 0, "affectedPartiesCount": 0, "message": "No valid voucher IDs provided."}
+
+        placeholders = ",".join("?" for _ in clean_ids)
+        cur.execute(f"SELECT DISTINCT party_id FROM vouchers WHERE id IN ({placeholders})", tuple(clean_ids))
+        affected_parties = [r[0] for r in cur.fetchall() if r[0]]
+
+        # Delete approved vouchers
+        cur.execute(f"DELETE FROM vouchers WHERE id IN ({placeholders})", tuple(clean_ids))
+        deleted_count = cur.rowcount
+        conn.commit()
+
+        # Recompute balances for all affected parties
+        for pid in affected_parties:
+            recompute_party_balance(pid, conn)
+        conn.commit()
+
+        return {
+            "status": "success",
+            "deletedCount": deleted_count,
             "affectedPartiesCount": len(affected_parties),
+            "message": f"Successfully deleted {deleted_count} approved duplicate voucher(s) across {len(affected_parties)} party ledger(s)."
         }
     finally:
         if should_close:

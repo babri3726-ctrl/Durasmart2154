@@ -85,6 +85,8 @@ import {
   syncDebtorBenchmarks,
   uploadDebtorBenchmarks,
   cleanupDuplicateVouchers,
+  previewDuplicateVouchers,
+  type DuplicatePreviewResponse,
   uploadPartyLedger,
   listEmployees,
   serverHost,
@@ -139,6 +141,330 @@ function parseVoucherDate(str: string): Date {
   }
   const d = new Date(clean);
   return isNaN(d.getTime()) ? new Date() : d;
+}
+
+function DuplicateReviewModal({
+  partyId,
+  partyName,
+  onClose,
+  onSuccess,
+}: {
+  partyId?: string;
+  partyName?: string;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<DuplicatePreviewResponse | null>(null);
+  const [selectedVoucherIds, setSelectedVoucherIds] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    previewDuplicateVouchers(partyId)
+      .then((res) => {
+        if (!active) return;
+        setPreview(res);
+        const allDupeIds = new Set<string>();
+        res.groups.forEach((g) => {
+          g.duplicates.forEach((d) => allDupeIds.add(d.id));
+        });
+        setSelectedVoucherIds(allDupeIds);
+      })
+      .catch((err: any) => {
+        if (!active) return;
+        setError(err.message || 'Failed to preview duplicate vouchers');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [partyId]);
+
+  const toggleVoucher = (id: string) => {
+    setSelectedVoucherIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (!preview) return;
+    const allDupeIds = new Set<string>();
+    preview.groups.forEach((g) => {
+      g.duplicates.forEach((d) => allDupeIds.add(d.id));
+    });
+    setSelectedVoucherIds(allDupeIds);
+  };
+
+  const handleDeselectAll = () => {
+    setSelectedVoucherIds(new Set());
+  };
+
+  const handleApproveDelete = async () => {
+    if (selectedVoucherIds.size === 0) {
+      alert('Please select at least one duplicate voucher to delete.');
+      return;
+    }
+    const confirmMsg = `Are you sure you want to delete ${selectedVoucherIds.size} approved duplicate voucher(s)?\n\nThis will keep the original vouchers intact and safely recompute party balances.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setDeleting(true);
+    try {
+      const res = await cleanupDuplicateVouchers(Array.from(selectedVoucherIds), partyId);
+      alert(res.message || `Cleaned up ${res.deletedCount} duplicate vouchers safely!`);
+      onSuccess();
+      onClose();
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete duplicate vouchers');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      <div className="flex flex-col w-full max-w-4xl max-h-[90vh] rounded-2xl bg-white shadow-2xl border border-line overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-line px-6 py-4 bg-slate-50/80">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-amber-500/10 text-amber-600">
+                <Trash2 size={18} />
+              </span>
+              <h3 className="text-base font-bold text-ink">
+                Duplicate Voucher Review & Safe Approval
+              </h3>
+            </div>
+            <p className="text-xs text-muted mt-0.5">
+              {partyName ? `Reviewing duplicates for ${partyName}` : 'Database-wide scan across all debtors'}
+              {' · '}
+              <span className="text-slate-600 font-medium">
+                Amount-checked: Split entries with different amounts are protected and never touched.
+              </span>
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-muted hover:text-ink hover:bg-slate-200 transition"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted">
+              <RefreshCw size={24} className="animate-spin text-amber-600" />
+              <p className="text-xs font-medium">Scanning for duplicate vouchers with identical date, number & amount...</p>
+            </div>
+          ) : error ? (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-700">
+              <div className="flex items-center gap-2 font-bold mb-1">
+                <AlertTriangle size={16} /> Error scanning duplicates
+              </div>
+              <p>{error}</p>
+            </div>
+          ) : !preview || preview.totalCandidateDuplicates === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mb-3">
+                <CheckCircle2 size={24} />
+              </div>
+              <h4 className="text-sm font-bold text-ink mb-1">No Duplicate Vouchers Found</h4>
+              <p className="text-xs text-muted max-w-md">
+                Every transaction in the database is verified. Multiple vouchers sharing the same voucher reference have distinct amounts (e.g. split journal entries) and are strictly preserved.
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Alert notice */}
+              <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4 text-xs text-amber-900 flex items-start gap-3">
+                <AlertTriangle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold">
+                    Found {preview.totalCandidateDuplicates} candidate duplicate(s) across {preview.totalGroups} group(s).
+                  </div>
+                  <p className="mt-1 text-amber-800">
+                    Candidate duplicate entries have <strong>identical Date, Voucher Type, Voucher No, AND Amount</strong>.
+                    Original entries are safely preserved (marked in green). Review and approve the duplicate copies below before deletion.
+                  </p>
+                  <div className="mt-2.5 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSelectAll}
+                      className="rounded bg-amber-100 hover:bg-amber-200 px-2 py-1 text-[11px] font-semibold text-amber-900 transition"
+                    >
+                      Select All Duplicates
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDeselectAll}
+                      className="rounded bg-amber-100 hover:bg-amber-200 px-2 py-1 text-[11px] font-semibold text-amber-900 transition"
+                    >
+                      Deselect All
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Group cards */}
+              <div className="space-y-4">
+                {preview.groups.map((group, gIdx) => {
+                  const amtPaise = group.debitPaise || group.creditPaise || 0;
+                  const amtFormatted = money(amtPaise);
+                  const isDebit = group.debitPaise > 0;
+                  return (
+                    <div
+                      key={`${group.partyId}-${group.voucherDate}-${group.voucherNo}-${gIdx}`}
+                      className="rounded-xl border border-line bg-white shadow-sm overflow-hidden"
+                    >
+                      {/* Group Header */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-slate-50 border-b border-line text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-ink">{group.partyName}</span>
+                          <span className="text-muted">·</span>
+                          <span className="font-mono text-slate-600">{group.voucherDate}</span>
+                          <span className="text-muted">·</span>
+                          <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
+                            {group.voucherType} #{group.voucherNo || '-'}
+                          </span>
+                        </div>
+                        <div className="font-bold text-ink">
+                          Amount: <span className={isDebit ? 'text-blue-700' : 'text-emerald-700'}>₹{amtFormatted} {isDebit ? 'Dr' : 'Cr'}</span>
+                        </div>
+                      </div>
+
+                      {/* Entries inside group */}
+                      <div className="p-3 space-y-2 text-xs">
+                        {/* Original Voucher */}
+                        <div className="flex items-center justify-between rounded-lg bg-emerald-50/60 border border-emerald-200/60 p-2.5">
+                          <div className="flex items-center gap-2.5">
+                            <span className="rounded bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 uppercase tracking-wider">
+                              Keep Original
+                            </span>
+                            <span className="font-mono text-[11px] text-emerald-950 font-semibold">
+                              ID: {group.original.id.slice(0, 14)}...
+                            </span>
+                            {group.original.bookSource && (
+                              <span className="rounded bg-white/80 border border-emerald-300 px-1.5 py-0.5 text-[10px] text-emerald-800">
+                                {group.original.bookSource}
+                              </span>
+                            )}
+                            <span className="text-slate-600 italic text-[11px]">
+                              {group.original.narration || '(No narration)'}
+                            </span>
+                          </div>
+                          <span className="text-[11px] font-bold text-emerald-800">
+                            ₹{amtFormatted}
+                          </span>
+                        </div>
+
+                        {/* Duplicates to review / delete */}
+                        {group.duplicates.map((dupe) => {
+                          const isSelected = selectedVoucherIds.has(dupe.id);
+                          return (
+                            <label
+                              key={dupe.id}
+                              className={`flex items-center justify-between rounded-lg border p-2.5 cursor-pointer transition ${
+                                isSelected
+                                  ? 'bg-rose-50/70 border-rose-300'
+                                  : 'bg-white border-line hover:bg-slate-50'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5">
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => toggleVoucher(dupe.id)}
+                                  className="h-4 w-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500"
+                                />
+                                <span className={`rounded text-[10px] font-bold px-2 py-0.5 uppercase tracking-wider ${
+                                  isSelected ? 'bg-rose-600 text-white' : 'bg-slate-200 text-slate-700'
+                                }`}>
+                                  Duplicate Copy
+                                </span>
+                                <span className="font-mono text-[11px] text-slate-700">
+                                  ID: {dupe.id.slice(0, 14)}...
+                                </span>
+                                {dupe.bookSource && (
+                                  <span className="rounded bg-slate-100 border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600">
+                                    {dupe.bookSource}
+                                  </span>
+                                )}
+                                <span className="text-slate-600 italic text-[11px]">
+                                  {dupe.narration || '(No narration)'}
+                                </span>
+                              </div>
+                              <div className="text-right">
+                                <span className={`text-[11px] font-bold ${isSelected ? 'text-rose-700' : 'text-slate-600'}`}>
+                                  ₹{amtFormatted}
+                                </span>
+                                <div className="text-[10px] text-rose-600 font-semibold">
+                                  {isSelected ? '✓ Marked for deletion' : 'Unticked (Keep)'}
+                                </div>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between border-t border-line px-6 py-3.5 bg-slate-50">
+          <div className="text-xs text-muted">
+            {preview && preview.totalCandidateDuplicates > 0 ? (
+              <span>
+                <strong>{selectedVoucherIds.size}</strong> of {preview.totalCandidateDuplicates} duplicate voucher(s) selected for deletion
+              </span>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={deleting}
+              className="rounded-lg border border-line bg-white hover:bg-slate-100 px-4 py-2 text-xs font-semibold text-ink transition"
+            >
+              Cancel / Keep All
+            </button>
+            {preview && preview.totalCandidateDuplicates > 0 && (
+              <button
+                type="button"
+                onClick={handleApproveDelete}
+                disabled={deleting || selectedVoucherIds.size === 0}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 px-4 py-2 text-xs font-bold text-white shadow-sm transition disabled:opacity-50"
+              >
+                {deleting ? (
+                  <>
+                    <RefreshCw size={13} className="animate-spin" /> Deleting Selected...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={13} /> Approve & Delete Selected ({selectedVoucherIds.size})
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose: () => void }) {
@@ -349,20 +675,7 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
     });
   }, [chronologicalVouchers, currentOpeningPaise]);
 
-  const [cleaningDupes, setCleaningDupes] = useState(false);
-  const handleCleanDuplicates = async () => {
-    setCleaningDupes(true);
-    try {
-      const res = await cleanupDuplicateVouchers();
-      alert(res.message || `Cleaned up ${res.deletedCount} duplicate vouchers`);
-      reloadVouchers();
-      invalidate(syncKeys.debtors, syncKeys.customers);
-    } catch (e: any) {
-      alert(e.message || 'Failed to cleanup duplicates');
-    } finally {
-      setCleaningDupes(false);
-    }
-  };
+  const [showDuplicateReviewModal, setShowDuplicateReviewModal] = useState(false);
 
   const totalDebits = uniqueVouchers.reduce((sum, v) => sum + (v.debit_paise || 0), 0);
   const totalCredits = uniqueVouchers.reduce((sum, v) => sum + (v.credit_paise || 0), 0);
@@ -663,13 +976,12 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
           <div className="flex items-center gap-2 no-print">
             <button
               type="button"
-              onClick={handleCleanDuplicates}
-              disabled={cleaningDupes}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition disabled:opacity-50"
-              title="Deduplicate all identical and double-uploaded vouchers"
+              onClick={() => setShowDuplicateReviewModal(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition"
+              title="Review candidate duplicates before approval"
             >
-              <RefreshCw size={13} className={cleaningDupes ? 'animate-spin' : ''} />
-              {cleaningDupes ? 'Cleaning...' : 'Clean Duplicates'}
+              <RefreshCw size={13} />
+              Clean Duplicates
             </button>
             <button
               type="button"
@@ -1432,6 +1744,19 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
           </div>
         </div>
       )}
+
+      {/* Duplicate Review & Approval Modal */}
+      {showDuplicateReviewModal && (
+        <DuplicateReviewModal
+          partyId={debtor.id}
+          partyName={debtor.name || debtor.customerName}
+          onClose={() => setShowDuplicateReviewModal(false)}
+          onSuccess={() => {
+            reloadVouchers();
+            invalidate(syncKeys.debtors, syncKeys.customers);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1451,21 +1776,7 @@ function DebtorListCard() {
   const [booksMessage, setBooksMessage] = useState<string | null>(null);
   const [uploadingOpening, setUploadingOpening] = useState(false);
   const [openingMessage, setOpeningMessage] = useState<string | null>(null);
-  const [cleaningAllDupes, setCleaningAllDupes] = useState(false);
-
-  const handleCleanAllDuplicates = async () => {
-    setCleaningAllDupes(true);
-    try {
-      const res = await cleanupDuplicateVouchers();
-      alert(res.message || `Cleaned up ${res.deletedCount} duplicate vouchers`);
-      invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
-      retry();
-    } catch (e: any) {
-      alert(e.message || 'Failed to cleanup duplicate vouchers');
-    } finally {
-      setCleaningAllDupes(false);
-    }
-  };
+  const [showAllDuplicateReviewModal, setShowAllDuplicateReviewModal] = useState(false);
 
   // Salespeople for dropdown selection
   const [salespeople, setSalespeople] = useState<string[]>([]);
@@ -1836,13 +2147,12 @@ function DebtorListCard() {
           </button>
           <button
             type="button"
-            onClick={handleCleanAllDuplicates}
-            disabled={cleaningAllDupes}
+            onClick={() => setShowAllDuplicateReviewModal(true)}
             className="btn-secondary !py-1.5 text-xs font-bold inline-flex items-center gap-1.5 text-amber-700 border-amber-300 hover:bg-amber-50"
-            title="Scan database and remove any duplicate vouchers imported from repeated Excel uploads"
+            title="Scan database, review candidate duplicates and approve deletion"
           >
-            <RefreshCw size={13} className={cleaningAllDupes ? 'animate-spin' : ''} />
-            {cleaningAllDupes ? 'Cleaning...' : '🧹 Clean Duplicates'}
+            <RefreshCw size={13} />
+            🧹 Clean Duplicates
           </button>
           <button
             type="button"
@@ -2481,6 +2791,17 @@ function DebtorListCard() {
         <DebtorLedgerModal
           debtor={selectedDebtorLedger}
           onClose={() => setSelectedDebtorLedger(null)}
+        />
+      )}
+
+      {/* Database-Wide Duplicate Review & Approval Modal */}
+      {showAllDuplicateReviewModal && (
+        <DuplicateReviewModal
+          onClose={() => setShowAllDuplicateReviewModal(false)}
+          onSuccess={() => {
+            invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
+            retry();
+          }}
         />
       )}
     </Card>

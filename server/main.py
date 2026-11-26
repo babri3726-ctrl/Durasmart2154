@@ -3066,22 +3066,41 @@ def sync_debtor_benchmarks():
         "details": res
     }
 
+@app.get("/api/v1/debtors/duplicates/preview")
+def preview_duplicate_vouchers(partyId: Optional[str] = None):
+    """
+    Previews candidate duplicate vouchers matching in party, date, type, voucher number,
+    AND amount. Never deletes automatically — returns candidate duplicates for user review and approval.
+    """
+    res = db.find_duplicate_voucher_candidates(party_id=partyId)
+    return {
+        "status": "success",
+        "totalCandidateDuplicates": res["totalCandidateDuplicates"],
+        "totalGroups": res["totalGroups"],
+        "groups": res["groups"]
+    }
+
+class CleanupDuplicatesPayload(BaseModel):
+    approvedVoucherIds: Optional[list[str]] = None
+    partyId: Optional[str] = None
+
 @app.post("/api/v1/debtors/cleanup-duplicates")
-def cleanup_duplicate_vouchers():
+def cleanup_duplicate_vouchers(payload: Optional[CleanupDuplicatesPayload] = None):
     """
-    Cleans up any duplicate voucher entries in the database caused by re-uploaded files.
-    Recalculates ledger balances for all affected parties and syncs ground truth.
+    Deletes ONLY the voucher IDs that have been previewed and explicitly approved by the user.
+    Never deletes anything automatically.
     """
-    res = db.deduplicate_all_vouchers()
+    approved_ids = payload.approvedVoucherIds if payload else None
+    res = db.deduplicate_all_vouchers(approved_voucher_ids=approved_ids)
     persisted = db.load_all_persisted_state()
     for k in ["debtors", "customers"]:
         if k in persisted:
             STATE[k] = persisted[k]
     return {
-        "status": "success",
+        "status": res.get("status", "success"),
         "deletedCount": res["deletedCount"],
         "affectedPartiesCount": res["affectedPartiesCount"],
-        "message": f"Successfully removed {res['deletedCount']} duplicate voucher(s) across {res['affectedPartiesCount']} party ledger(s)."
+        "message": res["message"]
     }
 
 @app.post("/api/v1/debtors/benchmarks/upload")
