@@ -2132,7 +2132,7 @@ function DebtorListCard() {
           <label
             htmlFor="debtor-workbook-file-input"
             className="btn-primary !py-1.5 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-sm bg-indigo-600 hover:bg-indigo-700 text-white"
-            title="Upload and import sales.xlsx, individual customer ledgers (e.g. S S Kalra Zira.xlsx), or HR-PB.xlsx"
+            title="Upload and import sales.xlsx, individual customer ledgers (e.g. S S Kalra Zira.xlsx), or Book1.xlsx"
           >
             <FileSearch size={13} /> 📁 Upload Excel File
           </label>
@@ -2143,7 +2143,7 @@ function DebtorListCard() {
             className="btn-secondary !py-1.5 text-xs font-bold"
           >
             <RefreshCw size={13} className={syncingHrPb ? 'animate-spin' : ''} />
-            {syncingHrPb ? 'Syncing...' : '1-Click Sync HR-PB'}
+            {syncingHrPb ? 'Syncing...' : '📁 Sync Book1.xlsx'}
           </button>
           <button
             type="button"
@@ -2376,7 +2376,7 @@ function DebtorListCard() {
       {state === 'ready' && rows.length === 0 && (
         <EmptyState
           title={term ? 'No party matches that search' : 'No debtors found'}
-          hint="Click 1-Click Sync HR-PB above to import all dealers from HR-PB.xlsx automatically."
+          hint="Import sales targets from Book1.xlsx or upload individual party ledgers."
         />
       )}
       {state === 'ready' && rows.length > 0 && (

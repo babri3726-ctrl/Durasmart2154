@@ -1,19 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Award,
   ClipboardList,
   Flag,
   PlusCircle,
-  RefreshCw,
   ShoppingBag,
   TrendingUp,
   Truck,
+  UploadCloud,
   Users,
 } from 'lucide-react';
 import { Card, KpiCard } from '../components/ui/Card';
 import HrPbTargetsCard from '../components/HrPbTargetsCard';
-import { listSalesTargets, syncHrPbTargets } from '../lib/serverApi';
+import { listSalesTargets, uploadExcelWorkbook } from '../lib/serverApi';
 import { toast } from '../lib/toast';
 
 interface SalespersonSummary {
@@ -32,13 +32,16 @@ export default function Sales() {
   const [totalDispatched, setTotalDispatched] = useState<number>(0);
   const [totalPending, setTotalPending] = useState<number>(0);
   const [overallAchievement, setOverallAchievement] = useState<number>(0);
-  const [syncing, setSyncing] = useState<boolean>(false);
+  const [totalDealers, setTotalDealers] = useState<number>(167);
+  const [uploading, setUploading] = useState<boolean>(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadData = async () => {
     try {
       const res = await listSalesTargets();
       const sps = (res.salesperson_summary as unknown as SalespersonSummary[]) || [];
       setSummary(sps);
+      setTotalDealers(typeof res.total === 'number' ? res.total : 167);
 
       const targetSum = sps.reduce((acc, s) => acc + (parseFloat(s.total_target_mt) || 0), 0);
       const dispatchedSum = sps.reduce((acc, s) => acc + (parseFloat(s.total_dispatched_mt) || 0), 0);
@@ -57,17 +60,20 @@ export default function Sales() {
     loadData();
   }, []);
 
-  const handle1ClickSync = async () => {
-    setSyncing(true);
+  const handleBook1Upload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
     try {
-      await syncHrPbTargets();
-      toast.success('HR-PB targets synchronized successfully!');
-      loadData();
+      await uploadExcelWorkbook(file);
+      toast.success('Book1.xlsx targets imported successfully!');
+      await loadData();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Error';
-      toast.error(`Sync failed: ${msg}`);
+      const msg = err instanceof Error ? err.message : 'Upload failed';
+      toast.error(`Import failed: ${msg}`);
     } finally {
-      setSyncing(false);
+      setUploading(false);
+      e.target.value = '';
     }
   };
 
@@ -78,10 +84,26 @@ export default function Sales() {
         <div>
           <h1 className="text-[22px] font-black tracking-tight text-ink">Sales Command Cockpit</h1>
           <p className="mt-0.5 text-sm text-muted">
-            Regional sales targets, party orders, and material dispatches synced from OneDrive (HR-PB.xlsx)
+            Regional sales targets, dealer allocations, and material dispatches imported from Book1.xlsx
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            className="hidden"
+            onChange={handleBook1Upload}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-xs font-bold text-blue-700 shadow-sm hover:bg-blue-100 transition disabled:opacity-60"
+          >
+            <UploadCloud size={14} className={uploading ? 'animate-spin text-blue-600' : 'text-blue-600'} />
+            {uploading ? 'Importing Book1.xlsx…' : '📁 Import Book1.xlsx'}
+          </button>
           <Link
             to="/orders"
             className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 transition"
@@ -103,15 +125,6 @@ export default function Sales() {
             <ShoppingBag size={15} className="text-purple-600" />
             Day Book
           </Link>
-          <button
-            type="button"
-            onClick={handle1ClickSync}
-            disabled={syncing}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 transition disabled:opacity-60"
-          >
-            <RefreshCw size={14} className={syncing ? 'animate-spin text-blue-600' : 'text-blue-600'} />
-            {syncing ? 'Syncing HR-PB…' : '1-Click Sync HR-PB'}
-          </button>
         </div>
       </div>
 
@@ -147,7 +160,7 @@ export default function Sales() {
         />
         <KpiCard
           label="Active Dealers"
-          value="137"
+          value={String(totalDealers)}
           hint="Across Punjab & Haryana"
           gradient="from-cyan-600 to-blue-600"
           icon={<Users size={20} />}
@@ -155,7 +168,7 @@ export default function Sales() {
         />
         <KpiCard
           label="Sales Team"
-          value={String(summary.length || 13)}
+          value={String(summary.length || 9)}
           hint="Field representatives"
           gradient="from-rose-600 to-red-600"
           icon={<Award size={20} />}
@@ -192,7 +205,7 @@ export default function Sales() {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">Sales Team Quota & Achievement</h2>
-          <span className="text-xs text-slate-500 font-medium">Synced from HR-PB Target Book</span>
+          <span className="text-xs text-slate-500 font-medium">Imported from Book1.xlsx</span>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {summary.slice(0, 8).map((sp) => {

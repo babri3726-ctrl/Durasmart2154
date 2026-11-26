@@ -13,31 +13,25 @@ import openpyxl
 from .stock_parser import get_file_sha256, make_safe_temp_copy
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BOOK1_ROOT = os.path.join(BASE_DIR, "Book1.xlsx")
+BOOK1_DATA = os.path.join(BASE_DIR, "data", "Book1.xlsx")
 DATA_FALLBACK_HRPB = os.path.join(BASE_DIR, "data", "HR-PB.xlsx")
 
 def get_default_hrpb_path() -> str:
-    if os.environ.get("ONEDRIVE_HRPB_PATH") and os.path.exists(os.environ["ONEDRIVE_HRPB_PATH"]):
-        return os.environ["ONEDRIVE_HRPB_PATH"]
-    user_profile = os.environ.get("USERPROFILE", "")
-    candidates = [
-        os.path.join(user_profile, "OneDrive", "HR-PB.xlsx"),
-        os.path.join(user_profile, "Holla - Personal", "HR-PB.xlsx"),
-        os.path.join(user_profile, "OneDrive - Personal", "HR-PB.xlsx"),
-    ]
-    for candidate in candidates:
-        if os.path.exists(candidate):
-            try:
-                import shutil, subprocess
-                if not os.path.exists(DATA_FALLBACK_HRPB) or os.path.getmtime(candidate) > os.path.getmtime(DATA_FALLBACK_HRPB):
-                    if os.name == 'nt':
-                        cmd = f"Copy-Item -Path '{candidate}' -Destination '{DATA_FALLBACK_HRPB}' -Force"
-                        subprocess.run(["powershell", "-NoProfile", "-Command", cmd], capture_output=True)
-                    else:
-                        shutil.copy2(candidate, DATA_FALLBACK_HRPB)
-            except Exception:
-                pass
-            return candidate
-    return DATA_FALLBACK_HRPB
+    """
+    Returns the target file path. Priority:
+    1. Book1.xlsx in workspace root
+    2. Book1.xlsx in data/ directory
+    3. data/HR-PB.xlsx
+    No OneDrive dependency.
+    """
+    if os.path.exists(BOOK1_ROOT):
+        return BOOK1_ROOT
+    if os.path.exists(BOOK1_DATA):
+        return BOOK1_DATA
+    if os.path.exists(DATA_FALLBACK_HRPB):
+        return DATA_FALLBACK_HRPB
+    return BOOK1_ROOT
 
 DEFAULT_HRPB_PATH = get_default_hrpb_path()
 

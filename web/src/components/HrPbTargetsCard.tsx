@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { RefreshCw, Target, UploadCloud } from 'lucide-react';
+import { Target, UploadCloud } from 'lucide-react';
 import { Card } from './ui/Card';
-import { listSalesTargets, syncHrPbTargets, uploadExcelWorkbook } from '../lib/serverApi';
+import { listSalesTargets, uploadExcelWorkbook } from '../lib/serverApi';
 
 interface SalesTargetRow {
   id: string;
@@ -27,7 +27,6 @@ interface SalespersonSummary {
 }
 
 export default function HrPbTargetsCard() {
-  const [syncing, setSyncing] = useState(false);
   const [uploadingHrPb, setUploadingHrPb] = useState(false);
   const hrPbFileRef = useRef<HTMLInputElement>(null);
 
@@ -38,7 +37,7 @@ export default function HrPbTargetsCard() {
     setMessage(null);
     try {
       await uploadExcelWorkbook(file);
-      setMessage('HR-PB.xlsx uploaded and synced successfully!');
+      setMessage('Book1.xlsx uploaded and imported successfully!');
       fetchTargets();
     } catch (err: unknown) {
       const errObj = err as { message?: string };
@@ -69,21 +68,6 @@ export default function HrPbTargetsCard() {
     fetchTargets();
   }, []);
 
-  const handleSync = async () => {
-    setSyncing(true);
-    setMessage(null);
-    try {
-      const res = await syncHrPbTargets();
-      setMessage(res.message || 'HR-PB targets synced!');
-      fetchTargets();
-    } catch (e: unknown) {
-      const errObj = e as { message?: string };
-      setMessage(errObj?.message || 'Sync failed');
-    } finally {
-      setSyncing(false);
-    }
-  };
-
   const filtered = targets.filter((t) => {
     if (territory !== 'All' && t.state.toLowerCase() !== territory.toLowerCase()) return false;
     if (selectedSp && t.salesperson.toLowerCase() !== selectedSp.toLowerCase()) return false;
@@ -97,10 +81,10 @@ export default function HrPbTargetsCard() {
         <div>
           <h2 className="text-[15px] font-black text-ink flex items-center gap-2">
             <Target size={18} className="text-brand-blue" />
-            Dealer Sales Targets (OneDrive: HR-PB.xlsx)
+            Dealer Sales Targets (Book1.xlsx)
           </h2>
           <p className="text-[11px] text-muted">
-            Party-wise target allocation and salesperson check for Punjab & Haryana dealers.
+            Party-wise target allocation and salesperson check for Punjab & Haryana dealers from Book1.xlsx.
           </p>
           {message && <p className="mt-1 text-xs font-bold text-brand-green">{message}</p>}
         </div>
@@ -108,7 +92,7 @@ export default function HrPbTargetsCard() {
           <input
             ref={hrPbFileRef}
             type="file"
-            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             className="hidden"
             onChange={handleHrPbUpload}
           />
@@ -116,19 +100,10 @@ export default function HrPbTargetsCard() {
             type="button"
             onClick={() => hrPbFileRef.current?.click()}
             disabled={uploadingHrPb}
-            className="btn-secondary !py-1.5 text-xs font-bold flex items-center gap-1.5"
-          >
-            <UploadCloud size={13} />
-            {uploadingHrPb ? 'Uploading...' : 'Upload HR-PB.xlsx'}
-          </button>
-          <button
-            type="button"
-            onClick={handleSync}
-            disabled={syncing}
             className="btn-primary !py-1.5 text-xs font-bold flex items-center gap-1.5"
           >
-            <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} />
-            {syncing ? 'Syncing...' : '1-Click Sync HR-PB'}
+            <UploadCloud size={13} />
+            {uploadingHrPb ? 'Importing Book1.xlsx...' : '📁 Import Book1.xlsx'}
           </button>
         </div>
       </div>
@@ -137,6 +112,9 @@ export default function HrPbTargetsCard() {
       {(() => {
         const pbOfficers = summary.filter((s) => s.territory?.toLowerCase() === 'punjab');
         const hrOfficers = summary.filter((s) => s.territory?.toLowerCase() === 'haryana');
+
+        const pbDealersCount = targets.filter((t) => t.state?.toLowerCase() === 'punjab').length || 137;
+        const hrDealersCount = targets.filter((t) => t.state?.toLowerCase() === 'haryana').length || 30;
 
         const pbTarget = pbOfficers.reduce((sum, o) => sum + parseFloat(o.total_target_mt || '0'), 0);
         const pbDisp = pbOfficers.reduce((sum, o) => sum + parseFloat(o.total_dispatched_mt || '0'), 0);
@@ -172,7 +150,7 @@ export default function HrPbTargetsCard() {
                       🌾 Punjab Sales Team
                     </span>
                     <p className="text-[10px] text-muted">
-                      {pbOfficers.length} Officers • 100 Dealers • {pbTarget.toFixed(1)} MT Target
+                      {pbOfficers.length} Officers • {pbDealersCount} Dealers • {pbTarget.toFixed(1)} MT Target
                     </p>
                   </div>
                   <div className="text-right">
@@ -229,7 +207,7 @@ export default function HrPbTargetsCard() {
                       🏢 Haryana Sales Team
                     </span>
                     <p className="text-[10px] text-muted">
-                      {hrOfficers.length} Officers • 37 Dealers • {hrTarget.toFixed(1)} MT Target
+                      {hrOfficers.length} Officers • {hrDealersCount} Dealers • {hrTarget.toFixed(1)} MT Target
                     </p>
                   </div>
                   <div className="text-right">

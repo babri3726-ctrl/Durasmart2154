@@ -15,7 +15,7 @@ import secrets
 import shutil
 import tempfile
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger("operations-api")
 
@@ -291,13 +291,13 @@ STATE = {
     "hrpb_snapshot": None
 }
 
-# Auto-load HR-PB targets and real dealers
+# Auto-load Book1 / HR-PB sales targets
 try:
-    if os.path.exists(DEFAULT_HRPB_PATH):
-        _hrpb = extract_hr_pb_targets(DEFAULT_HRPB_PATH)
+    target_path = get_default_hrpb_path()
+    if os.path.exists(target_path):
+        _hrpb = extract_hr_pb_targets(target_path)
         STATE["hrpb_snapshot"] = _hrpb
         STATE["targets"] = _hrpb["all_targets"]
-        STATE["debtors"] = _hrpb["dealers_master"]
         sp_set = sorted({t.get("salesperson") for t in _hrpb["all_targets"] if t.get("salesperson")})
         sp_territory = {}
         sp_target = {}
@@ -330,36 +330,8 @@ try:
             for i, sp_name in enumerate(sp_set)
         ]
         STATE["employees"] = list(sp_employees)
-
-        # Ensure all dealers have unified party attributes and alias customers to debtors
-        for idx, d in enumerate(STATE["debtors"]):
-            sp_name = (d.get("salesperson") or "").strip()
-            sp_id = next((e["id"] for e in STATE["employees"] if e["name"].lower() == sp_name.lower()), "") if sp_name and sp_name.lower() != "unassigned" else ""
-            bal = float(d.get("balance", 0.0))
-            bal_paise = int(round(bal * 100))
-            d.setdefault("mobile", f"98140{20000 + idx}")
-            d["salespersonId"] = d.get("salespersonId") if (d.get("salespersonId") and sp_name.lower() != "unassigned") else sp_id
-            d.setdefault("creditDays", 30)
-            d.setdefault("contactPerson", d["name"])
-            d.setdefault("source", "hr-pb")
-            d.setdefault("openingPaise", bal_paise)
-            d.setdefault("outstandingPaise", bal_paise)
-            d.setdefault("advancePaise", 0)
-            d.setdefault("unbilledValuePaise", 0)
-            d.setdefault("overduePaise", bal_paise if d.get("status") == "active" else 0)
-            d.setdefault("isOverdue", bal > 0)
-            d.setdefault("invoiceCount", 0)
-            d.setdefault("orderCount", 0)
-            d.setdefault("lastPaymentDate", None)
-            d.setdefault("address", f"{d.get('city', '')}, {d.get('state', '')}")
-            d.setdefault("notes", f"HR-PB active dealer. Officer: {sp_name}")
-            d.setdefault("ledgerGroup", "Sundry Debtors")
-            d.setdefault("creditTerms", "30 days net")
-            d.setdefault("approvedBy", "USR-OWNER")
-            d.setdefault("approvedAt", datetime.now().isoformat() + "+05:30")
-        STATE["customers"] = STATE["debtors"]
 except Exception as e:
-    print(f"Warning: Failed to load HR-PB targets: {e}")
+    print(f"Warning: Failed to load sales targets from Book1: {e}")
 
 # Hydrate SQLite Persistent Database
 try:
@@ -376,29 +348,31 @@ try:
     if _persisted.get("stock_movements"):
         STATE["stock_movements"] = _persisted["stock_movements"]
     if _persisted.get("debtors"):
-        _existing_d_ids = {d["id"] for d in STATE.get("debtors", [])}
-        for _d in _persisted["debtors"]:
-            bal_flt = float(_d.get("balance", 0.0))
-            bal_p = int(round(bal_flt * 100))
-            if _d["id"] not in _existing_d_ids:
-                _d["outstandingPaise"] = bal_p
-                if bal_p <= 0:
-                    _d["overduePaise"] = 0
-                    _d["isOverdue"] = False
-                STATE["debtors"].append(_d)
-                _existing_d_ids.add(_d["id"])
+        STATE["debtors"] = _persisted["debtors"]
+
+    # Link salesperson and station info from targets without touching financial balances
+    if STATE.get("hrpb_snapshot") and STATE["hrpb_snapshot"].get("dealers_master"):
+        existing_names = {d["name"].strip().lower(): d for d in STATE.get("debtors", [])}
+        for d in STATE["hrpb_snapshot"]["dealers_master"]:
+            norm = d["name"].strip().lower()
+            if norm in existing_names:
+                curr = existing_names[norm]
+                if d.get("salesperson") and d["salesperson"] != "Unassigned":
+                    curr["salesperson"] = d["salesperson"]
+                if d.get("city") and not curr.get("city"):
+                    curr["city"] = d["city"]
+                if d.get("state") and not curr.get("state"):
+                    curr["state"] = d["state"]
             else:
-                _match = next((m for m in STATE["debtors"] if m["id"] == _d["id"]), None)
-                if _match:
-                    _match["balance"] = bal_flt
-                    _match["balance_formatted"] = f"{bal_flt:.2f}"
-                    _match["outstandingPaise"] = bal_p
-                    if bal_p <= 0:
-                        _match["overduePaise"] = 0
-                        _match["isOverdue"] = False
-                    else:
-                        _match["overduePaise"] = min(bal_p, _match.get("overduePaise", bal_p))
-    # Set STATE["customers"] to STATE["debtors"] for unified single source of truth
+                d.setdefault("mobile", f"98140{20000 + len(STATE['debtors'])}")
+                d.setdefault("creditDays", 30)
+                d.setdefault("status", "active")
+                d.setdefault("outstandingPaise", 0)
+                d.setdefault("overduePaise", 0)
+                d.setdefault("isOverdue", False)
+                STATE["debtors"].append(d)
+                existing_names[norm] = d
+
     STATE["customers"] = STATE["debtors"]
 
     # Reclassify existing parties and fix city/district/state locations
@@ -2854,48 +2828,45 @@ def update_opening_balance_endpoint(debtor_id: str, body: OpeningBalanceUpdateRe
             STATE[k] = persisted[k]
     return res
 
-# ----------------- 1-Click HR-PB Sales Targets & Dealers Sync -----------------
+# ----------------- Book1 / HR-PB Sales Targets & Dealers Sync -----------------
 @app.post("/api/v1/imports/excel/hr-pb/sync")
+@app.post("/api/v1/imports/excel/targets/sync")
 def sync_hr_pb_excel():
-    if not os.path.exists(DEFAULT_HRPB_PATH):
-        raise HTTPException(status_code=404, detail=f"HR-PB.xlsx not found at {DEFAULT_HRPB_PATH}")
+    target_path = get_default_hrpb_path()
+    if not os.path.exists(target_path):
+        raise HTTPException(status_code=404, detail=f"Sales targets workbook not found at {target_path}")
     try:
-        snap = extract_hr_pb_targets(DEFAULT_HRPB_PATH)
+        snap = extract_hr_pb_targets(target_path)
         STATE["hrpb_snapshot"] = snap
         STATE["targets"] = snap["all_targets"]
 
-        # Update or add dealers into Debtors Master and Customers list
-        existing_debtors_by_name = {d["name"].lower(): d for d in STATE["debtors"]}
-        existing_customers_by_name = {c["name"].lower(): c for c in STATE["customers"]}
+        # Update salesperson, city, and state into Debtors Master without touching balances
+        existing_debtors_by_name = {d["name"].strip().lower(): d for d in STATE.get("debtors", [])}
         added_count = 0
         updated_count = 0
 
-        for dealer in snap["dealers_master"]:
-            d_name = dealer["name"].lower()
-            bal_paise = round(float(dealer.get("balance", 0.0)) * 100)
+        for dealer in snap.get("dealers_master", []):
+            d_name = dealer["name"].strip().lower()
             if d_name in existing_debtors_by_name:
                 target_d = existing_debtors_by_name[d_name]
-                target_d["balance"] = dealer["balance"]
-                target_d["balance_formatted"] = dealer.get("balance_formatted", f"{dealer['balance']:.2f}")
-                target_d["city"] = dealer.get("city", target_d.get("city", ""))
-                target_d["state"] = dealer.get("state", target_d.get("state", ""))
-                target_d["salesperson"] = dealer.get("salesperson", target_d.get("salesperson", "Unassigned"))
-                target_d["outstandingPaise"] = bal_paise
-                target_d["overduePaise"] = bal_paise
-                target_d["isOverdue"] = bal_paise > 0
+                if dealer.get("city") and not target_d.get("city"):
+                    target_d["city"] = dealer["city"]
+                if dealer.get("state") and not target_d.get("state"):
+                    target_d["state"] = dealer["state"]
+                if dealer.get("salesperson") and dealer["salesperson"] != "Unassigned":
+                    target_d["salesperson"] = dealer["salesperson"]
                 updated_count += 1
             else:
-                dealer["outstandingPaise"] = bal_paise
-                dealer["overduePaise"] = bal_paise
-                dealer["isOverdue"] = bal_paise > 0
                 dealer.setdefault("mobile", f"98140{20000 + len(STATE['debtors'])}")
                 dealer.setdefault("creditDays", 30)
                 dealer.setdefault("status", "active")
+                dealer.setdefault("outstandingPaise", 0)
+                dealer.setdefault("overduePaise", 0)
+                dealer.setdefault("isOverdue", False)
                 STATE["debtors"].append(dealer)
                 existing_debtors_by_name[d_name] = dealer
+                db.save_party(dealer)
                 added_count += 1
-
-            db.save_party(dealer)
 
         sp_set = sorted({t.get("salesperson") for t in snap["all_targets"] if t.get("salesperson")})
         sp_territory = {}
@@ -5945,51 +5916,48 @@ async def upload_excel_file(file: UploadFile = File(...)):
             result["type"] = "stock"
             result["items_parsed"] = snap["summary"]["metal_items_count"] + snap["summary"]["upvc_matrix_count"]
         elif is_hrpb_file:
-            default_hrpb = os.path.join(db.DATA_DIR, "HR-PB.xlsx")
-            if "book1" in file.filename.lower() or (len(sheet_names) == 1 and target_path != default_hrpb):
-                try:
-                    import subprocess
-                    subprocess.run(["python", "-m", "scripts.update_hr_pb_from_book1"], capture_output=True)
-                except Exception:
-                    pass
-            elif target_path != default_hrpb:
-                shutil.copyfile(target_path, default_hrpb)
-            snap = extract_hr_pb_targets(default_hrpb if os.path.exists(default_hrpb) else target_path)
+            # Direct parse of uploaded file (Book1.xlsx or HR-PB.xlsx)
+            snap = extract_hr_pb_targets(target_path)
             STATE["hrpb_snapshot"] = snap
             STATE["targets"] = snap["all_targets"]
+
+            # Save persistent copies to data/Book1.xlsx and root Book1.xlsx
+            try:
+                shutil.copyfile(target_path, os.path.join(db.DATA_DIR, "Book1.xlsx"))
+                shutil.copyfile(target_path, os.path.join(db.DATA_DIR, "HR-PB.xlsx"))
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                shutil.copyfile(target_path, os.path.join(base_dir, "Book1.xlsx"))
+            except Exception as _copy_err:
+                print(f"Notice: could not save persistent target copy: {_copy_err}")
             
-            existing_debtors_by_name = {d["name"].lower(): d for d in STATE["debtors"]}
-            existing_customers_by_name = {c["name"].lower(): c for c in STATE["customers"]}
+            # Enrich salesperson, city, state in debtors without overwriting balances
+            existing_debtors_by_name = {d["name"].strip().lower(): d for d in STATE.get("debtors", [])}
             added = 0
             updated = 0
             for dealer in snap.get("dealers_master", []):
-                d_name = dealer["name"].lower()
-                bal_paise = round(float(dealer.get("balance", 0.0)) * 100)
+                d_name = dealer["name"].strip().lower()
                 if d_name in existing_debtors_by_name:
                     target_d = existing_debtors_by_name[d_name]
-                    target_d["balance"] = dealer["balance"]
-                    target_d["balance_formatted"] = dealer.get("balance_formatted", f"{dealer['balance']:.2f}")
-                    target_d["city"] = dealer.get("city", target_d.get("city", ""))
-                    target_d["state"] = dealer.get("state", target_d.get("state", ""))
-                    target_d["salesperson"] = dealer.get("salesperson", target_d.get("salesperson", "Unassigned"))
-                    target_d["outstandingPaise"] = bal_paise
-                    target_d["overduePaise"] = bal_paise
-                    target_d["isOverdue"] = bal_paise > 0
+                    if dealer.get("city") and not target_d.get("city"):
+                        target_d["city"] = dealer["city"]
+                    if dealer.get("state") and not target_d.get("state"):
+                        target_d["state"] = dealer["state"]
+                    if dealer.get("salesperson") and dealer["salesperson"] != "Unassigned":
+                        target_d["salesperson"] = dealer["salesperson"]
                     updated += 1
                 else:
-                    dealer["outstandingPaise"] = bal_paise
-                    dealer["overduePaise"] = bal_paise
-                    dealer["isOverdue"] = bal_paise > 0
                     dealer.setdefault("mobile", f"98140{20000 + len(STATE['debtors'])}")
                     dealer.setdefault("creditDays", 30)
                     dealer.setdefault("status", "active")
+                    dealer.setdefault("outstandingPaise", 0)
+                    dealer.setdefault("overduePaise", 0)
+                    dealer.setdefault("isOverdue", False)
                     STATE["debtors"].append(dealer)
                     existing_debtors_by_name[d_name] = dealer
+                    db.save_party(dealer)
                     added += 1
 
-                db.save_party(dealer)
-
-            result["type"] = "hr_pb"
+            result["type"] = "sales_targets"
             result["targets_parsed"] = len(snap["all_targets"])
             result["dealers_count"] = len(snap.get("dealers_master", []))
             result["dealers_updated"] = updated
