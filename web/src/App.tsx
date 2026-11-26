@@ -13,7 +13,6 @@ import Profile from './pages/Profile';
 import Dashboard from './pages/Dashboard';
 import Sales from './pages/Sales';
 import Payment from './pages/Payment';
-import Marketing from './pages/Marketing';
 import Dispatch from './pages/Dispatch';
 import DispatchHistory from './pages/DispatchHistory';
 import DispatchNew from './pages/DispatchNew';
@@ -118,7 +117,6 @@ export default function App() {
             <Route path="/debtors/provisional" element={<Navigate to="/debtors" replace />} />
           </Route>
           <Route path="/payment" element={<Payment />} />
-          <Route path="/marketing" element={<Marketing />} />
           <Route path="/dispatch" element={<Dispatch />} />
           {/* The dispatch desk is not under `RequireOwner`, and it is not a new menu item either: the
               capability on the employee record is what opens it (`GET /dispatches` answers `403`

@@ -8,6 +8,8 @@ import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock_repository.dart';
 import '../../data/models.dart';
+import '../payments/payment_dashboard_screen.dart';
+import '../sales/debtor_list_screen.dart';
 import 'more_screen.dart';
 
 /// Root shell shown after sign-in: app bar (notifications + profile avatar),
@@ -301,6 +303,8 @@ class _HomeShellState extends State<HomeShell> {
         index: _index,
         children: [
           _HomeDashboard(user: user),
+          const DebtorListScreen(),
+          const PaymentDashboardScreen(),
           const MoreScreen(),
         ],
       ),
@@ -312,6 +316,16 @@ class _HomeShellState extends State<HomeShell> {
             icon: Icon(Icons.dashboard_outlined),
             selectedIcon: Icon(Icons.dashboard_rounded),
             label: 'Home',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.account_balance_wallet_outlined),
+            selectedIcon: Icon(Icons.account_balance_wallet_rounded),
+            label: 'Debtors',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.payments_outlined),
+            selectedIcon: Icon(Icons.payments_rounded),
+            label: 'Payments',
           ),
           NavigationDestination(
             icon: Icon(Icons.grid_view_outlined),
@@ -362,40 +376,26 @@ class _HomeDashboard extends StatelessWidget {
       showForEmployee: false,
     ),
     _MenuEntry(
-      'Vaccant Area',
-      '/areas',
-      Icons.map_rounded,
-      'Open territories to claim',
-      AppGradients.area,
+      'Creditor Master',
+      '/creditors',
+      Icons.factory_rounded,
+      'Sundry creditors & payables',
+      AppGradients.employee,
       showForEmployee: false,
     ),
     _MenuEntry(
-      'Tour Plan',
-      '/tours',
-      Icons.alt_route_rounded,
-      'Field visit schedules',
-      AppGradients.tour,
-    ),
-    _MenuEntry(
-      'New Customer Add',
-      '/new-customer',
-      Icons.person_add_alt_1_rounded,
-      'Register a dealer',
-      AppGradients.customer,
-    ),
-    _MenuEntry(
-      'New Order',
-      '/new-order',
-      Icons.add_shopping_cart_rounded,
-      'Create a sales order',
+      'Orders',
+      '/orders',
+      Icons.receipt_long_rounded,
+      'Sales orders list',
       AppGradients.order,
     ),
     _MenuEntry(
-      'Task Alarm',
-      '/tasks',
-      Icons.alarm_rounded,
-      'Your assignments & dues',
-      AppGradients.task,
+      'Dispatch Queue',
+      '/dispatch',
+      Icons.local_shipping_rounded,
+      'Delivery queue & consignments',
+      AppGradients.dispatch,
     ),
     _MenuEntry(
       'Stock Inventory',
@@ -405,10 +405,32 @@ class _HomeDashboard extends StatelessWidget {
       AppGradients.dispatch,
     ),
     _MenuEntry(
-      'Staff Invite Codes',
+      'Tour Plan',
+      '/tours',
+      Icons.alt_route_rounded,
+      'Field visit schedules',
+      AppGradients.tour,
+    ),
+    _MenuEntry(
+      'Vaccant Area',
+      '/areas',
+      Icons.map_rounded,
+      'Open territories to claim',
+      AppGradients.area,
+      showForEmployee: false,
+    ),
+    _MenuEntry(
+      'Task Alarm',
+      '/tasks',
+      Icons.alarm_rounded,
+      'Your assignments & dues',
+      AppGradients.task,
+    ),
+    _MenuEntry(
+      'Staff Management',
       '/employees',
-      Icons.vpn_key_rounded,
-      'Generate & manage staff invites',
+      Icons.badge_rounded,
+      'Staff list & invite codes',
       AppGradients.brand,
       showForEmployee: false,
     ),

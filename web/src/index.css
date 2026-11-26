@@ -27,49 +27,52 @@ body {
 
 @layer components {
   .card {
-    @apply rounded-card bg-white shadow-card;
+    @apply rounded-2xl bg-white border border-line shadow-card;
+  }
+  .card-hover {
+    @apply card transition-all duration-150 hover:shadow-card-hover hover:border-slate-300;
   }
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-field px-4 py-2.5 text-sm font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold transition-all duration-150 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn bg-brand-blue text-white hover:bg-[#2b63d4];
+    @apply btn bg-brand-blue text-white shadow-sm hover:bg-[#2b63d4];
   }
   .btn-grad {
-    @apply btn bg-brand-grad text-white hover:opacity-90;
+    @apply btn bg-brand-grad text-white shadow-sm hover:opacity-95;
   }
   .btn-ghost {
-    @apply btn border border-line bg-white text-ink hover:bg-canvas;
+    @apply btn border border-line bg-white text-ink shadow-sm hover:bg-slate-50;
   }
   .btn-danger {
-    @apply btn bg-brand-red text-white hover:bg-[#c93e4b];
+    @apply btn bg-brand-red text-white shadow-sm hover:bg-[#c93e4b];
   }
   .btn-sm {
-    @apply px-3 py-1.5 text-xs;
+    @apply px-3 py-1.5 text-xs rounded-lg;
   }
   .input {
-    @apply w-full rounded-field border border-line bg-white px-3.5 py-2.5 text-sm outline-none placeholder:text-faint focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15;
+    @apply w-full rounded-xl border border-line bg-white px-3.5 py-2.5 text-xs font-medium outline-none placeholder:text-faint focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15 transition-all;
   }
   .input-error {
     @apply border-brand-red focus:border-brand-red;
   }
   .label {
-    @apply mb-1 block text-xs font-bold text-muted;
+    @apply mb-1.5 block text-xs font-bold tracking-wide text-muted;
   }
   .chip {
     @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-bold;
   }
   .th {
-    @apply whitespace-nowrap px-4 py-3 text-left text-[11px] font-extrabold uppercase tracking-wide text-muted;
+    @apply whitespace-nowrap px-4 py-3 text-left text-[11px] font-extrabold uppercase tracking-wider text-muted bg-slate-50/80 border-b border-line;
   }
   .td {
-    @apply px-4 py-3 text-sm;
+    @apply px-4 py-3 text-xs border-b border-line/60;
   }
   .row-hover {
-    @apply cursor-pointer transition-colors hover:bg-canvas/70;
+    @apply cursor-pointer transition-colors hover:bg-slate-50/80;
   }
   .section-title {
-    @apply text-[15px] font-black text-ink;
+    @apply text-base font-black tracking-tight text-ink;
   }
 }
 
