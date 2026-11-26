@@ -347,6 +347,18 @@ def init_db(seed_state: dict[str, Any] | None = None):
             non_debtor_ledgers,
         )
 
+        # Reclassify non-debtor loan, asset, and sales ledgers according to their nature
+        for p_type, p_name in (
+            ("loan", "vipin goyal trading"),
+            ("loan", "goniana rakesh ji"),
+            ("asset", "new car inova pb10 gy 8228"),
+            ("sales", "sales dura"),
+        ):
+            conn.execute(
+                "UPDATE parties SET party_type = ? WHERE LOWER(TRIM(name)) = ?",
+                (p_type, p_name),
+            )
+
         # Check if parties table is empty and seed if available
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) as count FROM parties")

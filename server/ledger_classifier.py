@@ -48,7 +48,7 @@ ASSET_INVESTMENT_PATTERNS = [
     r"\bmechnery\b|\bmachinery\b(?!.*\b(?:store|trader|sales|corp|enterprises)\b)",
     r"\bplant\s*(?:&|and)\s*machinery\b",
     r"\bmutul\s*fund\b|\bmutual\s*fund\b|\bshares?\s*market\b|\binvestment\b",
-    r"\b(?:land|plot|kothi|flat|farm\s*house|complex|comlex|factory|fac|fec|show\s*room)\b",
+    r"\b(?:land|plot|kothi|flat|farm\s*house|complex|comlex|factory|fac|fec|show\s*room|new\s*car|inova|innova)\b",
     r"^house\s*\d+",
     r"^shop\s*(?:public|\d+)",
 ]
@@ -150,6 +150,12 @@ def classify_party_name(name: str) -> str:
         return "expense"
 
     if norm_upper in ("V.S UDYOG", "BALAJI STEEL AVINASH"):
+        return "asset"
+    if norm_upper in ("VIPIN GOYAL TRADING", "GONIANA RAKESH JI"):
+        return "loan"
+    if norm_upper == "SALES DURA":
+        return "sales"
+    if norm_upper == "NEW CAR INOVA PB10 GY 8228":
         return "asset"
 
     # Known Sundry Creditors (Suppliers, Mills, Vendors, Transporters) check
