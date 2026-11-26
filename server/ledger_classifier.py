@@ -16,17 +16,19 @@ PNL_PATTERNS = [
 EXPENSE_PATTERNS = [
     r"\bexp(?:enses?|s)?\b",
     r"\bselery\b|\bsalary\b",
-    r"\binterst\b|\binterest\b",
+    r"\binterst\b|\binterest\b|\bintersrt\b",
     r"\bfreight\b|\bfrt\b|\bcartage\b",
     r"\bloading\b|\bunloading\b",
     r"\brepair\b|\brepairs\b|\bmaint(?:enance)?\b",
-    r"\bbrokerage\b|\bcommission\b",
+    r"\bbrokerage\b|\bcommission\b|\bcomission\b",
     r"\binsurence\b|\binsurance\b",
     r"\bdiwali\b|\bpooja\b|\bfestival\b",
     r"\baudit\b|\bauditor\b|\blegal\b|\bc\s*a\b",
     r"\bcharity\b|\bdonation\b|\btrust\b|\bfoundation\b|\bdharmarth\b",
     r"\bdepreciation\b|\bdiscount\b|\bround\s*off\b",
     r"\bbank\s*(?:chg|charges|penal)\b",
+    r"\bmistry\b|\bcontractor\b|\bcontt\b",
+    r"\btravle\b|\blouge\b",
 ]
 
 CASH_PATTERNS = [
@@ -36,11 +38,12 @@ CASH_PATTERNS = [
     r"^petty\s+cash$",
     r"khan\s*cash",
     r"cash\s*gbd",
+    r"\(cash\)$",
 ]
 
 BANK_LOAN_PATTERNS = [
     r"\b(?:hdfc|sbi|icici|axis|pnb|yes\s*bank|canara|bob|kotak|rbl|indusind)\s*(?:bank|dura|loan|p\.o|account)?\b",
-    r"\bfd\s+in\b|\bfixed\s+deposit\b",
+    r"\bfd\s*(?:in|acc|a/c)?\b|\bfixed\s+deposit\b",
     r"\bvehicle\s+loan\b|\bcar\s+loan\b|\bterm\s+loan\b|\bhousing\s+loan\b|\bloan\s+acc\b",
 ]
 
@@ -48,9 +51,12 @@ ASSET_INVESTMENT_PATTERNS = [
     r"\bmechnery\b|\bmachinery\b(?!.*\b(?:store|trader|sales|corp|enterprises)\b)",
     r"\bplant\s*(?:&|and)\s*machinery\b",
     r"\bmutul\s*fund\b|\bmutual\s*fund\b|\bshares?\s*market\b|\binvestment\b",
-    r"\b(?:land|plot|kothi|flat|farm\s*house|complex|comlex|factory|fac|fec|show\s*room|new\s*car|inova|innova)\b",
+    r"\b(?:land|plot|kothi|flat|farm\s*house|complex|comlex|factory|fac|fec|show\s*room|new\s*car|inova|innova|creta)\b",
     r"^house\s*\d+",
     r"^shop\s*(?:public|\d+)",
+    r"\bsecuerity\b|\bsecurity\b",
+    r"\bzenrater\b|\bgenerator\b",
+    r"\bsharing\s*machine\b",
 ]
 
 CAPITAL_PERSONAL_PATTERNS = [
@@ -62,6 +68,7 @@ CAPITAL_PERSONAL_PATTERNS = [
     r"\bdes\s*raj\b",
     r"\bpardeep\s*naman\b",
     r"\bvijay\s*goel\b",
+    r"\bkitty\b",
 ]
 
 TAX_PATTERNS = [
@@ -127,6 +134,47 @@ DEALER_KEYWORDS = re.compile(
     re.IGNORECASE
 )
 
+# Non-debtor ledgers explicitly requested to be excluded from Sundry Debtors
+EXCLUDED_NON_DEBTOR_LEDGERS = {
+    "MOEN CONCAST(CASH)": "cash",
+    "MOEN CONCAST (CASH)": "cash",
+    "OLIVE TRAVLE LOUGE": "expense",
+    "OLIVE TRAVEL LOUNGE": "expense",
+    "A.B STEEL ABHEY FAZILKA": "supplier",
+    "MISTRY NARINDER GBD": "expense",
+    "CRETA PB 03 AR 6375": "asset",
+    "JSW SECUERTY": "asset",
+    "JSW SECURITY": "asset",
+    "SHYAM LAL SANGRIA": "loan",
+    "GOOGLE DHARMINDER": "expense",
+    "NAGI HYOLIC": "supplier",
+    "ELECTICAL SECUERITY": "asset",
+    "ELECTRICAL SECURITY": "asset",
+    "INTERSRT ON P O FUNDING": "expense",
+    "INTEREST ON P O FUNDING": "expense",
+    "CONTAINER SECURITY": "asset",
+    "COMISSION": "expense",
+    "COMMISSION": "expense",
+    "SS MECH.(SHARING MACHINE PANIPAT)": "asset",
+    "SS MECH. (SHARING MACHINE PANIPAT)": "asset",
+    "NAMO FOILS": "supplier",
+    "HERTZ CONTROLL": "supplier",
+    "HERTZ CONTROL": "supplier",
+    "ZENRATER SET": "asset",
+    "GENERATOR SET": "asset",
+    "YES FD ACC": "bank",
+    "YES FD A/C": "bank",
+    "KITTY DEEPA": "capital",
+    "RAJESH CONTT": "expense",
+    "RAJESH CONTRACTOR": "expense",
+    "V.S UDYOG": "asset",
+    "BALAJI STEEL AVINASH": "asset",
+    "VIPIN GOYAL TRADING": "loan",
+    "GONIANA RAKESH JI": "loan",
+    "SALES DURA": "sales",
+    "NEW CAR INOVA PB10 GY 8228": "asset",
+}
+
 def classify_party_name(name: str) -> str:
     """
     Classifies a ledger / party name into:
@@ -149,14 +197,12 @@ def classify_party_name(name: str) -> str:
     if not norm or norm_lower in ("total", "grand total", "(as per details)"):
         return "expense"
 
-    if norm_upper in ("V.S UDYOG", "BALAJI STEEL AVINASH"):
-        return "asset"
-    if norm_upper in ("VIPIN GOYAL TRADING", "GONIANA RAKESH JI"):
-        return "loan"
-    if norm_upper == "SALES DURA":
-        return "sales"
-    if norm_upper == "NEW CAR INOVA PB10 GY 8228":
-        return "asset"
+    if norm_upper in EXCLUDED_NON_DEBTOR_LEDGERS:
+        return EXCLUDED_NON_DEBTOR_LEDGERS[norm_upper]
+
+    # Any party ending with (cash) is a Cash account
+    if norm_lower.endswith("(cash)"):
+        return "cash"
 
     # Known Sundry Creditors (Suppliers, Mills, Vendors, Transporters) check
     if norm_upper in KNOWN_SUNDRY_CREDITORS:
