@@ -1545,6 +1545,7 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
     new_parties_count = 0
     affected_party_ids = set()
     claimed_cross_ids: set[str] = set()
+    newly_inserted_ids: set[str] = set()
 
     with get_connection() as conn:
         party_cache = build_party_cache(conn)
@@ -1594,7 +1595,7 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
 
             cur.execute(
                 """
-                SELECT id, voucher_no, narration, book_source FROM vouchers
+                SELECT id, voucher_no, narration, book_source, file_sha256 FROM vouchers
                 WHERE voucher_date = ?
                   AND LOWER(voucher_type) = LOWER(?)
                   AND (party_id = ? OR LOWER(TRIM(party_name)) = LOWER(TRIM(?)))
@@ -1606,8 +1607,10 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
             candidates = cur.fetchall()
 
             cross_match_id = None
-            for cand_id, cand_vno, cand_narr, cand_bs in candidates:
-                if cand_id in claimed_cross_ids:
+            for cand_id, cand_vno, cand_narr, cand_bs, cand_fsha in candidates:
+                if cand_id in claimed_cross_ids or cand_id in newly_inserted_ids:
+                    continue
+                if file_sha and cand_fsha == file_sha and cand_bs == cur_book:
                     continue
                 cand_clean_vno, cand_is_synthetic = clean_vno_value(cand_vno)
                 cand_clean_narr = re.sub(r'\s+', ' ', (cand_narr or "").strip().lower())
@@ -1660,6 +1663,7 @@ def save_vouchers_batch(vouchers: list[dict[str, Any]], file_sha: str = "") -> d
             if cur.rowcount > 0:
                 inserted += 1
                 existing_v_ids.add(v_id)
+                newly_inserted_ids.add(v_id)
             else:
                 skipped += 1
 
@@ -1737,12 +1741,14 @@ def deduplicate_all_vouchers(conn=None) -> dict[str, Any]:
                 else:
                     seen_invoices[inv_key] = v
 
-            # Rule 2: Exact full content duplicate across multiple file uploads or duplicate rows
+            # Rule 2: Exact full content duplicate across DIFFERENT file uploads (never drop distinct rows from same file_sha)
             content_key = (pid, dt, vt, dr, cr, cvno, cnarr, bs)
             if content_key in seen_exact_content:
-                to_delete.add(vid)
-                affected_parties.add(pid)
-                continue
+                prev_fsha = seen_exact_content[content_key][9]
+                if not fsha or not prev_fsha or fsha != prev_fsha:
+                    to_delete.add(vid)
+                    affected_parties.add(pid)
+                    continue
             else:
                 seen_exact_content[content_key] = v
 
@@ -1759,27 +1765,37 @@ def deduplicate_all_vouchers(conn=None) -> dict[str, Any]:
 
         for sig_key, group in sig_groups.items():
             if len(group) > 1:
-                # Check if there is at least one specialized entry and one generic Day Book entry
                 specialized = []
                 generic_db = []
                 for v in group:
                     vid, pid, dt, vt, vno, dr, cr, narr, bs, fsha, cat = v
-                    is_generic = (bs == 'Day Book') or not vno or bool(re.match(r'^(db|hdfc|yes|cash|khan|jv)\s*[-_:]\s*', str(vno), flags=re.IGNORECASE)) or any(str(vno).lower().startswith(p) for p in ('aug ', 'spt ', 'oct ', 'nov ', 'dec ', 'jan ', 'feb ', 'mar ', 'apr ', 'may ', 'jun ', 'jul '))
+                    is_generic = (bs == 'Day Book') and (
+                        not vno
+                        or bool(re.match(r'^db\s*[-_:]\s*', str(vno), flags=re.IGNORECASE))
+                        or any(str(vno).lower().startswith(p) for p in ('aug ', 'spt ', 'oct ', 'nov ', 'dec ', 'jan ', 'feb ', 'mar ', 'apr ', 'may ', 'jun ', 'jul '))
+                    )
                     if is_generic:
                         generic_db.append(v)
                     else:
                         specialized.append(v)
 
                 if specialized and generic_db:
-                    # Specialized entry exists! The generic Day Book entries are redundant copies.
-                    for gv in generic_db:
+                    # Match 1-to-1 so legitimate additional same-day Day Book rows are preserved
+                    for gv in generic_db[:len(specialized)]:
                         to_delete.add(gv[0])
                         affected_parties.add(gv[1])
                 elif len(generic_db) > 1:
-                    # Multiple generic Day Book duplicates for the exact same transaction
-                    for gv in generic_db[1:]:
-                        to_delete.add(gv[0])
-                        affected_parties.add(gv[1])
+                    # Only deduplicate generic Day Book entries across DIFFERENT file_sha256 uploads
+                    seen_shas = set()
+                    for gv in generic_db:
+                        gv_sha = gv[9] or ""
+                        if gv_sha and gv_sha in seen_shas:
+                            continue
+                        if seen_shas and not gv_sha:
+                            to_delete.add(gv[0])
+                            affected_parties.add(gv[1])
+                        elif gv_sha:
+                            seen_shas.add(gv_sha)
 
         if to_delete:
             del_list = list(to_delete)

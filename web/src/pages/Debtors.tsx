@@ -287,8 +287,8 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
   // Monthly breakdown for Tally-style summary
   const monthlySummary = useMemo(() => {
     const monthNames = [
-      'April', 'May', 'June', 'July', 'August', 'September',
-      'October', 'November', 'December', 'January', 'February', 'March'
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
     ];
     const monthBuckets: Record<string, { label: string; yearMonth: string; debits: number; credits: number; count: number }> = {};
 
