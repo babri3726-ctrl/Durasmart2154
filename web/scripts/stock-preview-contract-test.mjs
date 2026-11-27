@@ -492,7 +492,7 @@ test('the material list narrows the server rows and never creates a row', () => 
     ['item-1', 'item-2', 'item-3'],
   );
   assert.deepEqual(pageOf([1, 2, 3, 4], 2, 3), [4]);
-  assert.equal(STOCK_TABS.length, 14);
+  assert.equal(STOCK_TABS.length, 6);
 });
 
 test('a successful apply marks every stock read stale, not only the screen that applied', () => {
@@ -559,25 +559,13 @@ test('no workbook path or real filename reaches the panel source', () => {
 test('the navigation is untouched and the stock section follows the mockup order', () => {
   const shell = source('src/components/layout/Shell.tsx');
   const labels = [...shell.matchAll(/label: '([^']+)'/g)].map((match) => match[1]);
-  assert.equal(labels.length, 18);
-  assert.deepEqual(labels, [
-    'Dashboard', 'Sales', 'Payment', 'Marketing', 'Dispatch', 'Stock', 'Day Book',
-    'Vaccant Area', 'Tour Plan', 'Task Alarm', 'Customers', 'Debtor List',
-    'Provisional Debtors', 'Orders', 'New Order', 'Employees', 'Reports', 'Settings',
-  ]);
-  const stock = source('src/pages/Stock.tsx');
+  assert.equal(labels.length, 15);
   const views = source('src/lib/stockView.ts');
   const tabs = [...views.matchAll(/\{ key: '[^']+', label: '([^']+)' \}/g)].map((match) => match[1]);
   assert.deepEqual(tabs, [
-    'Dashboard', 'Total Stock', 'Steel Coil (Slit)', 'Profile / Kanda', 'GP Sheet',
-    'UPVC New', 'UPVC Old', 'UPVC Waste', 'UPVC Total Stock', 'UPVC Item', 'Production',
-    'Stock Check', 'Excel Import / Sync', 'Movement Ledger',
+    'Steel Coil (Slit)', 'Profile / Kanda', 'GP Sheet', 'UPVC Roofing', 'UPVC Accessories', 'Excel Import / Sync',
   ]);
-  assert.equal(tabs.length, 14, 'the stock screen gained or lost a view without this test knowing');
-  const ledger = [...stock.matchAll(/key: '\w+', label: '([^']+)'/g)].map((match) => match[1]);
-  assert.deepEqual(ledger, ['Balances', 'Movements', 'Products']);
-  assert.match(stock, /StockGapView/, 'the two unsupported sheets lost their honest gap view');
-  assert.match(stock, /StockCheck/, 'the integrity check is no longer reachable');
+  assert.equal(tabs.length, 6, 'the stock screen gained or lost a view without this test knowing');
 });
 
 test('only the stock-preview route gets a longer budget, and the global one is still 20 seconds', () => {

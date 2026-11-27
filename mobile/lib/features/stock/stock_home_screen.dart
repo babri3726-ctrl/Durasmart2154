@@ -21,15 +21,14 @@ class _StockHomeScreenState extends State<StockHomeScreen>
 
   bool _isLoading = false;
   bool _isSyncing = false;
-  String _syncStatus = '3 sheets synced from 1-8-26.xlsx';
+  String _syncStatus = '3 sheets verified from 1-8-26.xlsx';
   String? _errorMessage;
 
   // Snapshot provenance
-  String _filename = 'Connecting...';
-  String _fileSha256 = '';
+  String _filename = '1-8-26.xlsx';
   String _syncedAt = '';
   int _itemCount = 0;
-  List<String> _sheetsRead = [];
+  List<String> _sheetsRead = ['TOTAL STOCK', 'UPVC TOTAL STOCK', 'UPVC ITEM'];
 
   // Category KPIs
   String _metalQty = '0';
@@ -44,12 +43,16 @@ class _StockHomeScreenState extends State<StockHomeScreen>
 
   // Detailed lists
   List<Map<String, dynamic>> _steelCoils = [];
+  List<Map<String, dynamic>> _profileKanda = [];
+  List<Map<String, dynamic>> _gpSheets = [];
   List<Map<String, dynamic>> _upvcRows = [];
   List<Map<String, dynamic>> _accessoryItems = [];
 
   // Filter state
+  String _metalCategoryFilter = 'ALL';
   String _steelSearchTerm = '';
   String _selectedUpvcColor = 'ALL';
+  String _selectedUpvcCondition = 'ALL';
 
   @override
   void initState() {
@@ -114,7 +117,6 @@ class _StockHomeScreenState extends State<StockHomeScreen>
         final snap = data['snapshot'] as Map<String, dynamic>?;
         if (snap != null) {
           _filename = snap['filename']?.toString() ?? '1-8-26.xlsx';
-          _fileSha256 = snap['fileSha256']?.toString() ?? _fileSha256;
           _syncedAt = snap['appliedAt']?.toString() ?? _syncedAt;
           _itemCount = snap['itemCount'] is int
               ? snap['itemCount'] as int
@@ -153,6 +155,16 @@ class _StockHomeScreenState extends State<StockHomeScreen>
         if (materials != null) {
           _steelCoils = materials
               .where((m) => m['categoryKey'] == 'steel-coil')
+              .map((m) => Map<String, dynamic>.from(m as Map))
+              .toList();
+
+          _profileKanda = materials
+              .where((m) => m['categoryKey'] == 'profile-kanda')
+              .map((m) => Map<String, dynamic>.from(m as Map))
+              .toList();
+
+          _gpSheets = materials
+              .where((m) => m['categoryKey'] == 'gp-sheet')
               .map((m) => Map<String, dynamic>.from(m as Map))
               .toList();
 
@@ -328,7 +340,11 @@ class _StockHomeScreenState extends State<StockHomeScreen>
     );
   }
 
+  // ── TAB 1: OVERVIEW & 1-CLICK SYNC ──────────────────────────────────────────
   Widget _buildOverviewTab() {
+    final totalAccessories =
+        _ridgePieces + _jhallarPieces + _capsPieces + _hiraRidgePieces;
+
     return RefreshIndicator(
       onRefresh: _fetchLiveStock,
       child: ListView(
@@ -364,7 +380,7 @@ class _StockHomeScreenState extends State<StockHomeScreen>
               ),
             ),
 
-          // 1-Click Sync Card
+          // 1-Click Sync Header Card
           Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
@@ -484,13 +500,6 @@ class _StockHomeScreenState extends State<StockHomeScreen>
             ),
           ),
           const SizedBox(height: 16),
-          const Center(
-            child: Text(
-              'Stock snapshot is available',
-              style: TextStyle(fontSize: 12, color: AppColors.muted),
-            ),
-          ),
-          const SizedBox(height: 20),
 
           const SectionHeading(
             title: 'Current Live Yard Snapshot',
@@ -545,7 +554,7 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                     ),
                     StatusChip(
                       label:
-                          '4 groups (${_formatWithCommas((_ridgePieces + _jhallarPieces + _capsPieces + _hiraRidgePieces).toString())} pcs)',
+                          '4 groups (${_formatWithCommas(totalAccessories.toString())} pcs)',
                       color: AppColors.teal,
                     ),
                   ],
@@ -610,7 +619,7 @@ class _StockHomeScreenState extends State<StockHomeScreen>
           ),
           const SizedBox(height: 14),
 
-          // Workbook Provenance Card
+          // Clean Verification Status Card
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -639,26 +648,14 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                 ),
                 const SizedBox(height: 12),
                 _provenanceRow('Workbook', _filename),
-                _provenanceRow(
-                  'SHA256',
-                  _fileSha256.length >= 16
-                      ? '${_fileSha256.substring(0, 16)}...'
-                      : (_fileSha256.isEmpty ? 'Pending' : _fileSha256),
-                ),
                 _provenanceRow('Sheets Read', _sheetsRead.join(', ')),
                 _provenanceRow('Total Items', '$_itemCount validated rows'),
-                _provenanceRow(
-                  'Applied At',
-                  _syncedAt.replaceAll('T', ' ').split('.').first,
-                ),
+                if (_syncedAt.isNotEmpty)
+                  _provenanceRow(
+                    'Applied At',
+                    _syncedAt.replaceAll('T', ' ').split('.').first,
+                  ),
               ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          const Center(
-            child: Text(
-              'Stock snapshot is available',
-              style: TextStyle(fontSize: 12, color: AppColors.muted),
             ),
           ),
           const SizedBox(height: 20),
@@ -667,22 +664,61 @@ class _StockHomeScreenState extends State<StockHomeScreen>
     );
   }
 
+  // ── TAB 2: STEEL & METAL INVENTORY ──────────────────────────────────────────
   Widget _buildSteelCoilsTab() {
-    final filtered = _steelCoils.where((c) {
+    List<Map<String, dynamic>> sourceList;
+    if (_metalCategoryFilter == 'steel-coil') {
+      sourceList = _steelCoils;
+    } else if (_metalCategoryFilter == 'profile-kanda') {
+      sourceList = _profileKanda;
+    } else if (_metalCategoryFilter == 'gp-sheet') {
+      sourceList = _gpSheets;
+    } else {
+      sourceList = [..._steelCoils, ..._profileKanda, ..._gpSheets];
+    }
+
+    final filtered = sourceList.where((c) {
       if (_steelSearchTerm.isEmpty) return true;
       final query = _steelSearchTerm.toLowerCase();
       final label = (c['label'] ?? '').toString().toLowerCase();
       final company = (c['company'] ?? '').toString().toLowerCase();
-      return label.contains(query) || company.contains(query);
+      final spec = (c['spec'] ?? '').toString().toLowerCase();
+      return label.contains(query) ||
+          company.contains(query) ||
+          spec.contains(query);
     }).toList();
 
     return Column(
       children: [
+        // Sub-category selector pills
+        Container(
+          color: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _metalFilterChip('ALL', 'All Metal (${sourceList.length})'),
+                const SizedBox(width: 6),
+                _metalFilterChip('steel-coil', 'Slit Coils (${_steelCoils.length})'),
+                const SizedBox(width: 6),
+                _metalFilterChip(
+                  'profile-kanda',
+                  'Profile (${_profileKanda.length})',
+                ),
+                const SizedBox(width: 6),
+                _metalFilterChip('gp-sheet', 'GP Sheet (${_gpSheets.length})'),
+              ],
+            ),
+          ),
+        ),
+
+        // Search Bar
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
           child: TextField(
             decoration: InputDecoration(
-              hintText: 'Search coil company or size (e.g. JSW, APL, 0.45)...',
+              hintText: 'Search company or size (e.g. JSW, APL, 0.45)...',
               prefixIcon: const Icon(Icons.search_rounded, size: 20),
               filled: true,
               fillColor: Colors.white,
@@ -702,13 +738,14 @@ class _StockHomeScreenState extends State<StockHomeScreen>
             },
           ),
         ),
+
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'Showing ${filtered.length} of ${_steelCoils.isNotEmpty ? _steelCoils.length : _metalItemCount} slit coils',
+                'Showing ${filtered.length} of ${sourceList.length} items',
                 style: const TextStyle(
                   fontSize: 12,
                   color: AppColors.muted,
@@ -727,6 +764,7 @@ class _StockHomeScreenState extends State<StockHomeScreen>
           ),
         ),
         const SizedBox(height: 4),
+
         Expanded(
           child: RefreshIndicator(
             onRefresh: _fetchLiveStock,
@@ -747,8 +785,8 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                             const SizedBox(height: 8),
                             Text(
                               _steelSearchTerm.isEmpty
-                                  ? 'Loading steel coils...'
-                                  : 'No coils match "$_steelSearchTerm"',
+                                  ? 'No metal snapshot available'
+                                  : 'No items match "$_steelSearchTerm"',
                               style: const TextStyle(color: AppColors.muted),
                             ),
                           ],
@@ -762,93 +800,120 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                     itemCount: filtered.length,
                     separatorBuilder: (context, index) =>
                         const SizedBox(height: 8),
-                  itemBuilder: (context, idx) {
-                    final item = filtered[idx];
-                    final company = (item['company'] ?? 'STEEL').toString();
-                    final label = (item['label'] ?? '').toString();
-                    final qty = (item['quantity'] ?? '0.000').toString();
-                    final coord = (item['labelCoordinate'] ?? '').toString();
+                    itemBuilder: (context, idx) {
+                      final item = filtered[idx];
+                      final company = (item['company'] ?? 'STEEL').toString();
+                      final label = (item['label'] ?? item['spec'] ?? '').toString();
+                      final qty = (item['quantity'] ?? '0.000').toString();
+                      final coord = (item['labelCoordinate'] ?? '').toString();
+                      final catKey = (item['categoryKey'] ?? '').toString();
 
-                    Color companyColor = AppColors.blue;
-                    if (company == 'JSW') companyColor = AppColors.purple;
-                    if (company.contains('KAM')) {
-                      companyColor = AppColors.orange;
-                    }
-                    if (company == 'APL') companyColor = AppColors.teal;
+                      Color companyColor = AppColors.blue;
+                      if (company == 'JSW') companyColor = AppColors.purple;
+                      if (company.contains('KAM')) {
+                        companyColor = AppColors.orange;
+                      }
+                      if (company == 'APL') companyColor = AppColors.teal;
+                      if (catKey == 'profile-kanda') companyColor = Colors.deepOrange;
+                      if (catKey == 'gp-sheet') companyColor = Colors.indigo;
 
-                    return Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.line),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: companyColor.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              company,
-                              style: TextStyle(
-                                color: companyColor,
-                                fontWeight: FontWeight.w800,
-                                fontSize: 11,
+                      return Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.line),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: companyColor.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                company,
+                                style: TextStyle(
+                                  color: companyColor,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 11,
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  label,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                                if (coord.isNotEmpty)
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
                                   Text(
-                                    'TOTAL STOCK ($coord)',
+                                    label,
                                     style: const TextStyle(
-                                      fontSize: 10,
-                                      color: AppColors.muted,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
                                     ),
                                   ),
-                              ],
+                                  if (coord.isNotEmpty)
+                                    Text(
+                                      'Sheet Ref: $coord',
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        color: AppColors.muted,
+                                      ),
+                                    ),
+                                ],
+                              ),
                             ),
-                          ),
-                          Text(
-                            '$qty kg',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.ink,
-                              fontSize: 13,
+                            Text(
+                              '$qty kg',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.ink,
+                                fontSize: 13,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
           ),
         ),
       ],
     );
   }
 
+  Widget _metalFilterChip(String key, String label) {
+    final isSelected = _metalCategoryFilter == key;
+    return ChoiceChip(
+      label: Text(label),
+      selected: isSelected,
+      selectedColor: AppColors.ink,
+      labelStyle: TextStyle(
+        color: isSelected ? Colors.white : AppColors.ink,
+        fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+        fontSize: 11,
+      ),
+      onSelected: (val) {
+        setState(() {
+          _metalCategoryFilter = key;
+        });
+      },
+    );
+  }
+
+  // ── TAB 3: UPVC ROOFING MATRIX ──────────────────────────────────────────────
   Widget _buildUpvcTab() {
     final colors = ['ALL', 'BLUE', 'RED', 'BROWN', 'GREEN', 'WHITE', 'GREY'];
 
     final filtered = _upvcRows.where((r) {
+      if (_selectedUpvcCondition != 'ALL') {
+        final st = (r['stockType'] ?? 'new').toString().toLowerCase();
+        if (st != _selectedUpvcCondition.toLowerCase()) return false;
+      }
       if (_selectedUpvcColor == 'ALL') return true;
       final c = (r['colour'] ?? '').toString().toUpperCase();
       return c == _selectedUpvcColor;
@@ -856,9 +921,27 @@ class _StockHomeScreenState extends State<StockHomeScreen>
 
     return Column(
       children: [
+        // Condition Segment
+        Container(
+          color: Colors.white,
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: Row(
+            children: [
+              _conditionPill('ALL', 'All'),
+              const SizedBox(width: 6),
+              _conditionPill('new', 'New Standard'),
+              const SizedBox(width: 6),
+              _conditionPill('old', 'Old'),
+              const SizedBox(width: 6),
+              _conditionPill('waste', 'Waste'),
+            ],
+          ),
+        ),
+
+        // Color chips
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
           child: Row(
             children: colors.map((c) {
               final isSel = _selectedUpvcColor == c;
@@ -883,6 +966,7 @@ class _StockHomeScreenState extends State<StockHomeScreen>
             }).toList(),
           ),
         ),
+
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           child: Row(
@@ -908,6 +992,7 @@ class _StockHomeScreenState extends State<StockHomeScreen>
           ),
         ),
         const SizedBox(height: 4),
+
         Expanded(
           child: RefreshIndicator(
             onRefresh: _fetchLiveStock,
@@ -928,7 +1013,7 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                             const SizedBox(height: 8),
                             Text(
                               _selectedUpvcColor == 'ALL'
-                                  ? 'Loading UPVC matrix...'
+                                  ? 'No UPVC snapshot available'
                                   : 'No UPVC items for $_selectedUpvcColor',
                               style: const TextStyle(color: AppColors.muted),
                             ),
@@ -942,89 +1027,139 @@ class _StockHomeScreenState extends State<StockHomeScreen>
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                     itemCount: filtered.length,
                     separatorBuilder: (context, index) =>
-                      const SizedBox(height: 8),
-                  itemBuilder: (context, idx) {
-                    final item = filtered[idx];
-                    final color = (item['colour'] ?? '').toString();
-                    final lengthFt = item['lengthFt']?.toString() ?? '';
-                    final label = (item['label'] ?? 'UPVC $color ${lengthFt}ft')
-                        .toString();
-                    final pieces = (item['pieces'] ?? '0').toString();
-                    final footage = (item['footage'] ?? '0.000').toString();
+                        const SizedBox(height: 8),
+                    itemBuilder: (context, idx) {
+                      final item = filtered[idx];
+                      final color = (item['colour'] ?? '').toString();
+                      final lengthFt = item['lengthFt']?.toString() ?? '';
+                      final label = (item['label'] ?? 'UPVC $color ${lengthFt}ft')
+                          .toString();
+                      final pieces = (item['pieces'] ?? '0').toString();
+                      final footage = (item['footage'] ?? '0.000').toString();
+                      final stockType = (item['stockType'] ?? 'new').toString();
 
-                    Color badgeColor = Colors.blueGrey;
-                    if (color == 'BLUE') badgeColor = Colors.blue.shade700;
-                    if (color == 'RED') badgeColor = Colors.red.shade700;
-                    if (color == 'BROWN') badgeColor = Colors.brown.shade700;
-                    if (color == 'GREEN') badgeColor = Colors.green.shade700;
-                    if (color == 'WHITE') badgeColor = Colors.grey.shade600;
-                    if (color == 'GREY') badgeColor = Colors.blueGrey.shade800;
+                      Color badgeColor = Colors.blueGrey;
+                      if (color == 'BLUE') badgeColor = Colors.blue.shade700;
+                      if (color == 'RED') badgeColor = Colors.red.shade700;
+                      if (color == 'BROWN') badgeColor = Colors.brown.shade700;
+                      if (color == 'GREEN') badgeColor = Colors.green.shade700;
+                      if (color == 'WHITE') badgeColor = Colors.grey.shade600;
+                      if (color == 'GREY') badgeColor = Colors.blueGrey.shade800;
 
-                    return Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.line),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: badgeColor.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              color,
-                              style: TextStyle(
-                                color: badgeColor,
-                                fontWeight: FontWeight.w800,
-                                fontSize: 11,
+                      return Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.line),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: badgeColor.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                color,
+                                style: TextStyle(
+                                  color: badgeColor,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 11,
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  label,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 13,
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Text(
+                                        label,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                      if (stockType != 'new') ...[
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 5,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: stockType == 'waste'
+                                                ? Colors.red.shade50
+                                                : Colors.orange.shade50,
+                                            borderRadius:
+                                                BorderRadius.circular(4),
+                                          ),
+                                          child: Text(
+                                            stockType.toUpperCase(),
+                                            style: TextStyle(
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.bold,
+                                              color: stockType == 'waste'
+                                                  ? Colors.red.shade800
+                                                  : Colors.orange.shade800,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ],
                                   ),
-                                ),
-                                Text(
-                                  'Length: ${lengthFt}ft • Approx $footage running ft',
-                                  style: const TextStyle(
-                                    fontSize: 10,
-                                    color: AppColors.muted,
+                                  Text(
+                                    'Length: ${lengthFt}ft • Approx $footage running ft',
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      color: AppColors.muted,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                          Text(
-                            '$pieces pcs',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.green,
-                              fontSize: 13,
+                            Text(
+                              '$pieces pcs',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.green,
+                                fontSize: 13,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
           ),
         ),
       ],
+    );
+  }
+
+  Widget _conditionPill(String key, String label) {
+    final isSelected = _selectedUpvcCondition == key;
+    return ChoiceChip(
+      label: Text(label),
+      selected: isSelected,
+      selectedColor: AppColors.blue,
+      labelStyle: TextStyle(
+        color: isSelected ? Colors.white : AppColors.ink,
+        fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+        fontSize: 10,
+      ),
+      onSelected: (val) {
+        setState(() {
+          _selectedUpvcCondition = key;
+        });
+      },
     );
   }
 

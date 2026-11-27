@@ -11,36 +11,34 @@
 import type { ServerStockMaterial } from './serverApi';
 
 export type StockView =
+  | 'steel'
+  | 'upvc'
+  | 'accessories'
+  | 'sync'
   | 'dashboard'
   | 'total'
-  | 'steel'
+  | 'steel-coil'
   | 'profile'
+  | 'profile-kanda'
   | 'gp'
+  | 'gp-sheet'
   | 'upvc-new'
   | 'upvc-old'
   | 'upvc-waste'
   | 'upvc-item'
   | 'upvc-total'
+  | 'upvc-roofing'
   | 'production'
   | 'check'
-  | 'sync'
   | 'ledger';
 
 export const STOCK_TABS: { key: StockView; label: string }[] = [
-  { key: 'dashboard', label: 'Dashboard' },
-  { key: 'total', label: 'Total Stock' },
   { key: 'steel', label: 'Steel Coil (Slit)' },
   { key: 'profile', label: 'Profile / Kanda' },
   { key: 'gp', label: 'GP Sheet' },
-  { key: 'upvc-new', label: 'UPVC New' },
-  { key: 'upvc-old', label: 'UPVC Old' },
-  { key: 'upvc-waste', label: 'UPVC Waste' },
-  { key: 'upvc-total', label: 'UPVC Total Stock' },
-  { key: 'upvc-item', label: 'UPVC Item' },
-  { key: 'production', label: 'Production' },
-  { key: 'check', label: 'Stock Check' },
+  { key: 'upvc', label: 'UPVC Roofing' },
+  { key: 'accessories', label: 'UPVC Accessories' },
   { key: 'sync', label: 'Excel Import / Sync' },
-  { key: 'ledger', label: 'Movement Ledger' },
 ];
 
 /** The material categories a tab narrows the source rows to. `null` means "every category",
@@ -54,19 +52,21 @@ export const VIEW_CATEGORY: Partial<Record<StockView, string>> = {
   'upvc-waste': 'upvc-waste',
   'upvc-total': 'upvc-total',
   'upvc-item': 'upvc-item',
+  accessories: 'upvc-item',
 };
 
 /** Where a dashboard category card opens. A category the panel has no dedicated tab for still
  *  has an address, so a new server category cannot produce a dead card. */
 export const CATEGORY_VIEW: Record<string, StockView> = {
   'steel-coil': 'steel',
-  'profile-kanda': 'profile',
-  'gp-sheet': 'gp',
-  'upvc-new': 'upvc-new',
-  'upvc-old': 'upvc-old',
-  'upvc-waste': 'upvc-waste',
-  'upvc-total': 'upvc-total',
-  'upvc-item': 'upvc-item',
+  'profile-kanda': 'steel',
+  'gp-sheet': 'steel',
+  'upvc-new': 'upvc',
+  'upvc-old': 'upvc',
+  'upvc-waste': 'upvc',
+  'upvc-total': 'upvc',
+  'upvc-roofing': 'upvc',
+  'upvc-item': 'accessories',
 };
 
 /** The integer part of a decimal string, grouped for reading. The fraction is left exactly as

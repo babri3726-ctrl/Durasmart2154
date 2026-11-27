@@ -3659,10 +3659,10 @@ def get_discount_ledger():
 @app.get("/api/v1/app/version")
 def get_app_version():
     return {
-        "version_code": 19,
-        "version_name": "1.1.8",
+        "version_code": 20,
+        "version_name": "1.1.9",
         "download_url": "/api/v1/app/latest-apk",
-        "release_notes": "Preserve split journal vouchers with different amounts, preview duplicates before deletion, unified Book1 sales targets, real party mobile numbers & WhatsApp statement sharing.",
+        "release_notes": "Streamlined Stock Inventory UI: Metal & Steel sub-categories (Slit Coils, Profile, GP), UPVC Roofing Matrix, and real Accessories.",
         "mandatory": False,
         "published_at": datetime.now().isoformat()
     }
