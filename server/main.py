@@ -19,7 +19,7 @@ from typing import Any, Optional
 
 logger = logging.getLogger("operations-api")
 
-from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -29,6 +29,10 @@ from server import db
 
 from .hr_pb_parser import DEFAULT_HRPB_PATH, extract_hr_pb_targets, get_default_hrpb_path
 from .stock_parser import DEFAULT_ONEDRIVE_PATH, extract_3sheet_stock, get_file_sha256, get_default_stock_path
+try:
+    from .whatsapp_broadcast import parse_excel_for_broadcast, broadcast_whatsapp_messages
+except ImportError:
+    from whatsapp_broadcast import parse_excel_for_broadcast, broadcast_whatsapp_messages
 
 try:
     import firebase_admin
@@ -7158,6 +7162,98 @@ def get_stock_movements(page: int = 1, pageSize: int = 20):
         "total": len(movs),
         "nextCursor": None
     }
+
+# ----------------- WhatsApp Excel Broadcast Endpoints -----------------
+@app.post("/api/v1/whatsapp/broadcast-excel/preview")
+async def preview_whatsapp_excel_broadcast(
+    file: UploadFile = File(...),
+    template: str = Form("Hello {name}, your outstanding balance is Rs. {balance}."),
+    sheet_name: Optional[str] = Form(None),
+    default_country_code: str = Form("91")
+):
+    """
+    Parses an uploaded Excel file containing phone numbers, names, and balances.
+    Returns preview of valid recipients, generated messages, and invalid rows before broadcasting.
+    """
+    if not file.filename.lower().endswith((".xlsx", ".xls", ".xlsm")):
+        raise HTTPException(status_code=400, detail="Uploaded file must be an Excel spreadsheet (.xlsx, .xls)")
+
+    try:
+        content = await file.read()
+        parsed = parse_excel_for_broadcast(
+            content,
+            template=template,
+            sheet_name=sheet_name,
+            default_country_code=default_country_code
+        )
+        return {
+            "success": True,
+            "filename": file.filename,
+            "headers": parsed["headers"],
+            "summary": parsed["summary"],
+            "valid_recipients": parsed["valid_recipients"],
+            "invalid_rows": parsed["invalid_rows"]
+        }
+    except Exception as e:
+        logger.error(f"Error parsing Excel for WhatsApp broadcast: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to parse Excel file: {str(e)}")
+
+
+@app.post("/api/v1/whatsapp/broadcast-excel/send")
+async def send_whatsapp_excel_broadcast(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    template: str = Form("Hello {name}, your outstanding balance is Rs. {balance}."),
+    sheet_name: Optional[str] = Form(None),
+    default_country_code: str = Form("91"),
+    sender_api_url: str = Form("http://localhost:3001/api/send-message"),
+    min_delay: float = Form(3.0),
+    max_delay: float = Form(6.0)
+):
+    """
+    Parses the Excel file, extracts phone numbers, and queues WhatsApp broadcast in background tasks.
+    """
+    if not file.filename.lower().endswith((".xlsx", ".xls", ".xlsm")):
+        raise HTTPException(status_code=400, detail="Uploaded file must be an Excel spreadsheet (.xlsx, .xls)")
+
+    try:
+        content = await file.read()
+        parsed = parse_excel_for_broadcast(
+            content,
+            template=template,
+            sheet_name=sheet_name,
+            default_country_code=default_country_code
+        )
+
+        valid_recipients = parsed["valid_recipients"]
+        if not valid_recipients:
+            raise HTTPException(
+                status_code=400,
+                detail="No valid phone numbers found in the uploaded Excel file. Ensure there is a column for Phone/Mobile."
+            )
+
+        # Enqueue the background broadcast task
+        background_tasks.add_task(
+            broadcast_whatsapp_messages,
+            recipients=valid_recipients,
+            sender_api_url=sender_api_url,
+            min_delay=min_delay,
+            max_delay=max_delay
+        )
+
+        return {
+            "success": True,
+            "message": f"WhatsApp broadcast successfully queued for {len(valid_recipients)} recipients.",
+            "queued_count": len(valid_recipients),
+            "invalid_count": len(parsed["invalid_rows"]),
+            "summary": parsed["summary"],
+            "sample_first_recipient": valid_recipients[0] if valid_recipients else None
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error queuing WhatsApp broadcast from Excel: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to queue broadcast: {str(e)}")
 
 # ----------------- Single Page Application (SPA) Frontend Mount -----------------
 WEB_DIST_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web", "dist")

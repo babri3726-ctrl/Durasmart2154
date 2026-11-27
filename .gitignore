@@ -57,6 +57,8 @@ durasmart.db
 data/imports/
 data/*.db
 data/operations.db
+wechaty/
+
 
 
 
