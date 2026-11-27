@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/formatters.dart';
+import '../../core/statement_pdf_service.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock_repository.dart';
@@ -243,10 +244,68 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
       vouchers: vouchers,
     );
 
+    final pdfData = StatementPdfData(
+      partyName: customer.name,
+      partyId: customer.id,
+      city: customer.city,
+      state: debtor?.state ?? 'Punjab',
+      mobile: effectiveMobile,
+      openingBalance: openingBalance,
+      totalDebits: billed,
+      totalCredits: collected,
+      closingBalance: outstanding,
+      bucket0_30: bucket0_30,
+      bucket31_60: bucket31_60,
+      bucket61_90: bucket61_90,
+      bucket90Plus: bucket90Plus,
+      vouchers: chronoVouchers.map((v) => StatementVoucherRow(
+        date: v.voucherDate,
+        type: v.voucherType,
+        vchNo: v.voucherNo,
+        particulars: v.narration.isNotEmpty ? v.narration : (v.bookSource.isNotEmpty ? v.bookSource : 'Tally Entry'),
+        debit: v.debit,
+        credit: v.credit,
+        balance: runningBalanceById[v.id] ?? 0.0,
+      )).toList(),
+    );
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Customer Ledger'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.picture_as_pdf_rounded),
+            tooltip: 'Download Statement PDF',
+            onPressed: () async {
+              try {
+                final file = await StatementPdfService.saveStatementPdfLocally(pdfData);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Statement PDF downloaded: ${file.path.split(Platform.pathSeparator).last}'),
+                      backgroundColor: AppColors.green,
+                      action: SnackBarAction(
+                        label: 'Share',
+                        textColor: Colors.white,
+                        onPressed: () => StatementPdfService.shareStatementPdf(pdfData),
+                      ),
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error downloading PDF: $e'), backgroundColor: AppColors.red),
+                  );
+                }
+              }
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.print_rounded),
+            tooltip: 'Print Statement',
+            onPressed: () => StatementPdfService.printStatementPdf(pdfData),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Reload Vouchers',
@@ -1003,9 +1062,72 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
 
             // ── Share on WhatsApp ─────────────────────────────────────────
             WhatsAppButton(
-              label: 'Share ledger statement on WhatsApp',
+              label: 'Share on WhatsApp',
               phone: effectiveMobile,
               message: statementText,
+            ),
+            const SizedBox(height: 10),
+
+            // ── Download PDF & Print (Matching Web buttons) ────────────────
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      side: const BorderSide(color: AppColors.line),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      backgroundColor: Colors.white,
+                    ),
+                    onPressed: () async {
+                      try {
+                        final file = await StatementPdfService.saveStatementPdfLocally(pdfData);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Statement PDF downloaded: ${file.path.split(Platform.pathSeparator).last}'),
+                              backgroundColor: AppColors.green,
+                              action: SnackBarAction(
+                                label: 'Share',
+                                textColor: Colors.white,
+                                onPressed: () => StatementPdfService.shareStatementPdf(pdfData),
+                              ),
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Error downloading PDF: $e'), backgroundColor: AppColors.red),
+                          );
+                        }
+                      }
+                    },
+                    icon: const Icon(Icons.download_rounded, size: 18, color: AppColors.ink),
+                    label: const Text(
+                      'Download PDF',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.ink),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      side: const BorderSide(color: AppColors.line),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      backgroundColor: Colors.white,
+                    ),
+                    onPressed: () => StatementPdfService.printStatementPdf(pdfData),
+                    icon: const Icon(Icons.print_rounded, size: 18, color: AppColors.ink),
+                    label: const Text(
+                      'Print',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.ink),
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             SizedBox(
