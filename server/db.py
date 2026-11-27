@@ -1292,6 +1292,7 @@ def load_all_persisted_state() -> dict[str, Any]:
             disp_cnt = o["dispatch_count"] if "dispatch_count" in o.keys() and o["dispatch_count"] is not None else 0
             last_disp_date = o["last_dispatch_date"] if "last_dispatch_date" in o.keys() else ""
 
+            tot_ordered_qty = sum(float(l.get("orderedQuantity") or l.get("quantity") or 0.0) for l in lines)
             orders.append({
                 "id": o["id"],
                 "number": o["order_number"],
@@ -1307,6 +1308,7 @@ def load_all_persisted_state() -> dict[str, Any]:
                 "paymentTerms": o["payment_terms"],
                 "status": o["status"],
                 "dispatchStatus": disp_status,
+                "orderedQuantity": f"{tot_ordered_qty:.3f}",
                 "dispatchedQuantity": disp_qty_str,
                 "dispatchCount": disp_cnt,
                 "lastDispatchDate": last_disp_date,

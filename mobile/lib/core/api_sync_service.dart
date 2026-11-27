@@ -143,19 +143,27 @@ class ApiSyncService {
   }
 
   /// Synchronizes an order to the backend /api/v1/orders
-  static Future<bool> postOrder(Map<String, dynamic> orderPayload) async {
+  static Future<Map<String, dynamic>?> postOrder(Map<String, dynamic> orderPayload) async {
     try {
       final host = await resolveWorkingHost();
-      if (host == null) return false;
+      if (host == null) return null;
       final client = HttpClient()
-        ..connectionTimeout = const Duration(seconds: 4);
+        ..connectionTimeout = const Duration(seconds: 8);
       final req = await client.postUrl(Uri.parse('$host/api/v1/orders'));
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
       req.headers.contentType = ContentType.json;
       req.write(jsonEncode(orderPayload));
       final resp = await req.close();
-      return resp.statusCode == 200 || resp.statusCode == 201;
+      if (resp.statusCode == 200 || resp.statusCode == 201) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data is Map<String, dynamic>) return data;
+      }
+      return null;
     } catch (_) {
-      return false;
+      return null;
     }
   }
 
@@ -186,6 +194,53 @@ class ApiSyncService {
       final req = await client.putUrl(Uri.parse('$host/api/v1/debtors/$debtorId'));
       req.headers.contentType = ContentType.json;
       req.write(jsonEncode({'mobile': mobile}));
+      final resp = await req.close();
+      return resp.statusCode == 200 || resp.statusCode == 201;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Adds a Journal Entry (Credit Note / Debit Note / Discount) for a debtor
+  static Future<bool> addJournalEntry(String debtorId, {
+    required String type, // 'CREDIT' or 'DEBIT'
+    required double amount,
+    String? reference,
+    String? notes,
+  }) async {
+    try {
+      final host = await resolveWorkingHost();
+      if (host == null) return false;
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.postUrl(Uri.parse('$host/api/v1/debtors/$debtorId/journal'));
+      req.headers.contentType = ContentType.json;
+      req.write(jsonEncode({
+        'type': type,
+        'amount': amount,
+        'reference': reference ?? '',
+        'notes': notes ?? '',
+      }));
+      final resp = await req.close();
+      return resp.statusCode == 200 || resp.statusCode == 201;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Updates party opening balance on backend
+  static Future<bool> updateOpeningBalance(String debtorId, double amount, {String? asOf}) async {
+    try {
+      final host = await resolveWorkingHost();
+      if (host == null) return false;
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.putUrl(Uri.parse('$host/api/v1/debtors/$debtorId/opening-balance'));
+      req.headers.contentType = ContentType.json;
+      req.write(jsonEncode({
+        'amount': amount,
+        'asOf': asOf ?? '2026-04-01',
+      }));
       final resp = await req.close();
       return resp.statusCode == 200 || resp.statusCode == 201;
     } catch (_) {
@@ -316,19 +371,27 @@ class ApiSyncService {
   }
 
   /// Synchronizes a dispatch to the backend /api/v1/dispatches
-  static Future<bool> postDispatch(Map<String, dynamic> dispatchPayload) async {
+  static Future<Map<String, dynamic>?> postDispatch(Map<String, dynamic> dispatchPayload) async {
     final host = await resolveWorkingHost();
-    if (host == null) return false;
+    if (host == null) return null;
     try {
       final client = HttpClient()
-        ..connectionTimeout = const Duration(seconds: 4);
+        ..connectionTimeout = const Duration(seconds: 8);
       final req = await client.postUrl(Uri.parse('$host/api/v1/dispatches'));
+      if (authToken != null) {
+        req.headers.set('Authorization', 'Bearer $authToken');
+      }
       req.headers.contentType = ContentType.json;
       req.write(jsonEncode(dispatchPayload));
       final resp = await req.close();
-      return resp.statusCode == 200 || resp.statusCode == 201;
+      if (resp.statusCode == 200 || resp.statusCode == 201) {
+        final body = await resp.transform(utf8.decoder).join();
+        final data = jsonDecode(body);
+        if (data is Map<String, dynamic>) return data;
+      }
+      return null;
     } catch (_) {
-      return false;
+      return null;
     }
   }
 

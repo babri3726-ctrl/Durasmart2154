@@ -18,6 +18,16 @@ class _OrderListScreenState extends State<OrderListScreen> {
   String _query = '';
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<MockRepository>().syncWithBackend();
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final repo = context.watch<MockRepository>();
 
@@ -40,6 +50,13 @@ class _OrderListScreenState extends State<OrderListScreen> {
         backgroundColor: AppColors.background,
         appBar: AppBar(
           title: const Text('Orders'),
+          actions: [
+            IconButton(
+              tooltip: 'Refresh orders',
+              onPressed: () => repo.syncWithBackend(),
+              icon: const Icon(Icons.refresh_rounded),
+            ),
+          ],
           bottom: TabBar(
             isScrollable: true,
             tabAlignment: TabAlignment.start,

@@ -1,9 +1,11 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/formatters.dart';
+import '../../core/share_service.dart';
 import '../../core/statement_pdf_service.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
@@ -274,32 +276,14 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
         title: const Text('Customer Ledger'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.post_add_rounded),
+            tooltip: 'Add JV / Note',
+            onPressed: () => _showAddJvDialog(context, repo, customer, debtor),
+          ),
+          IconButton(
             icon: const Icon(Icons.picture_as_pdf_rounded),
             tooltip: 'Download Statement PDF',
-            onPressed: () async {
-              try {
-                final file = await StatementPdfService.saveStatementPdfLocally(pdfData);
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Statement PDF downloaded: ${file.path.split(Platform.pathSeparator).last}'),
-                      backgroundColor: AppColors.green,
-                      action: SnackBarAction(
-                        label: 'Share',
-                        textColor: Colors.white,
-                        onPressed: () => StatementPdfService.shareStatementPdf(pdfData),
-                      ),
-                    ),
-                  );
-                }
-              } catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error downloading PDF: $e'), backgroundColor: AppColors.red),
-                  );
-                }
-              }
-            },
+            onPressed: () => StatementPdfService.downloadAndOpenPdf(context, pdfData),
           ),
           IconButton(
             icon: const Icon(Icons.print_rounded),
@@ -507,16 +491,20 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
             Row(
               children: [
                 Expanded(
-                  child: MetricCard(
-                    title: 'Opening balance',
-                    value: rupeesDrCr(openingBalance),
-                    caption: openingBalance < 0
-                        ? 'Advance credit brought forward'
-                        : 'As of 01-04-2026',
-                    icon: Icons.account_balance_rounded,
-                    gradient: openingBalance < 0
-                        ? AppGradients.customer
-                        : AppGradients.employee,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () => _showEditOpeningBalanceDialog(context, repo, customer, debtor),
+                    child: MetricCard(
+                      title: 'Opening balance ✎',
+                      value: rupeesDrCr(openingBalance),
+                      caption: openingBalance < 0
+                          ? 'Advance credit (Tap to Edit)'
+                          : 'As of 01-04-26 (Tap to Edit)',
+                      icon: Icons.account_balance_rounded,
+                      gradient: openingBalance < 0
+                          ? AppGradients.customer
+                          : AppGradients.employee,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -1060,75 +1048,6 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
             ),
             const SizedBox(height: 14),
 
-            // ── Share on WhatsApp ─────────────────────────────────────────
-            WhatsAppButton(
-              label: 'Share on WhatsApp',
-              phone: effectiveMobile,
-              message: statementText,
-            ),
-            const SizedBox(height: 10),
-
-            // ── Download PDF & Print (Matching Web buttons) ────────────────
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      side: const BorderSide(color: AppColors.line),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      backgroundColor: Colors.white,
-                    ),
-                    onPressed: () async {
-                      try {
-                        final file = await StatementPdfService.saveStatementPdfLocally(pdfData);
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Statement PDF downloaded: ${file.path.split(Platform.pathSeparator).last}'),
-                              backgroundColor: AppColors.green,
-                              action: SnackBarAction(
-                                label: 'Share',
-                                textColor: Colors.white,
-                                onPressed: () => StatementPdfService.shareStatementPdf(pdfData),
-                              ),
-                            ),
-                          );
-                        }
-                      } catch (e) {
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Error downloading PDF: $e'), backgroundColor: AppColors.red),
-                          );
-                        }
-                      }
-                    },
-                    icon: const Icon(Icons.download_rounded, size: 18, color: AppColors.ink),
-                    label: const Text(
-                      'Download PDF',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.ink),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      side: const BorderSide(color: AppColors.line),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      backgroundColor: Colors.white,
-                    ),
-                    onPressed: () => StatementPdfService.printStatementPdf(pdfData),
-                    icon: const Icon(Icons.print_rounded, size: 18, color: AppColors.ink),
-                    label: const Text(
-                      'Print',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.ink),
-                    ),
-                  ),
-                ),
-              ],
-            ),
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
@@ -1138,7 +1057,364 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                 onTap: () => Navigator.of(context).pushNamed('/outstanding'),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: Colors.grey.shade300)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x14000000),
+                blurRadius: 10,
+                offset: Offset(0, -2),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                flex: 6,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF16A34A),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    elevation: 0,
+                  ),
+                  onPressed: () => _shareOnWhatsApp(context, effectiveMobile, statementText, pdfData),
+                  icon: const Icon(Icons.chat_rounded, size: 16),
+                  label: const Text(
+                    'Share on WhatsApp',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 6,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: const Color(0xFF0F172A),
+                    side: BorderSide(color: Colors.grey.shade400),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () => StatementPdfService.downloadAndOpenPdf(context, pdfData),
+                  icon: const Icon(Icons.download_rounded, size: 16, color: Color(0xFF0F172A)),
+                  label: const Text(
+                    'Download PDF',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: Color(0xFF0F172A)),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                style: IconButton.styleFrom(
+                  backgroundColor: const Color(0xFFF1F5F9),
+                  foregroundColor: const Color(0xFF475569),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    side: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  padding: const EdgeInsets.all(12),
+                ),
+                onPressed: () => StatementPdfService.printStatementPdf(pdfData),
+                icon: const Icon(Icons.print_rounded, size: 18),
+                tooltip: 'Print Statement',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _shareOnWhatsApp(BuildContext context, String phone, String text, StatementPdfData pdfData) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Share Statement - ${pdfData.partyName}',
+                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: const CircleAvatar(
+                  backgroundColor: Color(0xFF16A34A),
+                  child: Icon(Icons.picture_as_pdf_rounded, color: Colors.white),
+                ),
+                title: const Text('Send PDF Statement on WhatsApp', style: TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: const Text('Shares official formatted PDF document with party summary'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  StatementPdfService.shareStatementPdf(pdfData, text: text);
+                },
+              ),
+              const Divider(),
+              ListTile(
+                leading: const CircleAvatar(
+                  backgroundColor: Color(0xFF25D366),
+                  child: Icon(Icons.chat_rounded, color: Colors.white),
+                ),
+                title: const Text('Send Text Summary on WhatsApp', style: TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text(phone.isNotEmpty ? 'Send to +91 $phone directly' : 'Choose contact in WhatsApp'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  shareWhatsAppText(context, phone: phone, message: text);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showAddJvDialog(BuildContext context, MockRepository repo, Customer customer, DebtorItem? debtor) {
+    String jvType = 'CREDIT';
+    final amountCtrl = TextEditingController();
+    final refCtrl = TextEditingController();
+    final notesCtrl = TextEditingController();
+    bool busy = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('Add Journal Entry (JV)\n${customer.name}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Entry Type', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF475569))),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => setDialogState(() => jvType = 'CREDIT'),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          decoration: BoxDecoration(
+                            color: jvType == 'CREDIT' ? const Color(0xFFF0FDF4) : Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: jvType == 'CREDIT' ? const Color(0xFF16A34A) : const Color(0xFFCBD5E1)),
+                          ),
+                          child: Center(
+                            child: Text(
+                              'Credit Note (-)',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w800,
+                                color: jvType == 'CREDIT' ? const Color(0xFF16A34A) : const Color(0xFF64748B),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => setDialogState(() => jvType = 'DEBIT'),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          decoration: BoxDecoration(
+                            color: jvType == 'DEBIT' ? const Color(0xFFFEF2F2) : Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: jvType == 'DEBIT' ? const Color(0xFFDC2626) : const Color(0xFFCBD5E1)),
+                          ),
+                          child: Center(
+                            child: Text(
+                              'Debit Note (+)',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w800,
+                                color: jvType == 'DEBIT' ? const Color(0xFFDC2626) : const Color(0xFF64748B),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: amountCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Amount (₹) *',
+                    hintText: 'e.g. 50000',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: refCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Voucher / Ref No (Optional)',
+                    hintText: 'e.g. JV-2026-01',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: notesCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Particulars / Narration',
+                    hintText: 'e.g. Round off discount / Transfer from SST',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF4F46E5),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: busy
+                  ? null
+                  : () async {
+                      final amount = double.tryParse(amountCtrl.text.trim());
+                      if (amount == null || amount <= 0) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Please enter a valid amount greater than 0')),
+                        );
+                        return;
+                      }
+                      setDialogState(() => busy = true);
+                      final ok = await repo.addJournalEntry(
+                        customer.id,
+                        type: jvType,
+                        amount: amount,
+                        reference: refCtrl.text.trim(),
+                        notes: notesCtrl.text.trim(),
+                      );
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(ok ? 'Journal Entry added successfully' : 'Failed to add Journal Entry'),
+                            backgroundColor: ok ? const Color(0xFF16A34A) : Colors.red,
+                          ),
+                        );
+                        _loadVouchers();
+                      }
+                    },
+              child: Text(busy ? 'Saving...' : 'Add JV'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showEditOpeningBalanceDialog(BuildContext context, MockRepository repo, Customer customer, DebtorItem? debtor) {
+    final currentBal = debtor?.openingBalance ?? 0.0;
+    final balCtrl = TextEditingController(text: currentBal.abs().toStringAsFixed(2));
+    String drCr = currentBal >= 0 ? 'Dr' : 'Cr';
+    bool busy = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('Edit Opening Balance\n${customer.name}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('As of 01-Apr-2026', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: balCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(
+                        labelText: 'Opening Balance (₹)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  DropdownButton<String>(
+                    value: drCr,
+                    items: const [
+                      DropdownMenuItem(value: 'Dr', child: Text('Dr (Receivable)')),
+                      DropdownMenuItem(value: 'Cr', child: Text('Cr (Advance)')),
+                    ],
+                    onChanged: (v) {
+                      if (v != null) setDialogState(() => drCr = v);
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF4F46E5),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: busy
+                  ? null
+                  : () async {
+                      final val = double.tryParse(balCtrl.text.trim()) ?? 0.0;
+                      final finalVal = drCr == 'Cr' ? -val.abs() : val.abs();
+                      setDialogState(() => busy = true);
+                      final ok = await repo.updateOpeningBalance(customer.id, finalVal);
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(ok ? 'Opening balance updated' : 'Failed to update opening balance'),
+                            backgroundColor: ok ? const Color(0xFF16A34A) : Colors.red,
+                          ),
+                        );
+                        _loadVouchers();
+                      }
+                    },
+              child: Text(busy ? 'Saving...' : 'Save'),
+            ),
           ],
         ),
       ),

@@ -266,7 +266,7 @@ class SalesOrder {
     final dStatus = (json['dispatchStatus']?.toString() ?? '').toLowerCase();
     final status = dStatus == 'dispatched'
         ? OrderStatus.dispatched
-        : (dStatus == 'pending' && stStr == 'confirmed')
+        : (dStatus == 'partial' || (dStatus == 'pending' && stStr == 'confirmed'))
             ? OrderStatus.pendingDispatch
             : stStr == 'confirmed'
                 ? OrderStatus.confirmed

@@ -40,6 +40,16 @@ class _DispatchScreenState extends State<DispatchScreen> {
   String? _formError;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<MockRepository>().syncWithBackend();
+      }
+    });
+  }
+
+  @override
   void dispose() {
     _vehicle.dispose();
     _driver.dispose();
@@ -206,12 +216,24 @@ class _DispatchScreenState extends State<DispatchScreen> {
           .map(
             (l) => {
               'product': l.product,
+              'productName': l.product,
               'quantity': l.quantity.toStringAsFixed(3),
               'unit': l.unit,
             },
           )
           .toList(),
-    }).then((_) => repo.syncWithBackend()).catchError((_) {});
+    }).then((createdRes) {
+      if (createdRes != null && createdRes['id'] != null) {
+        final realDisp = Dispatch.fromJson(createdRes);
+        final idx = repo.dispatches.indexWhere((d) => d.id == dispatch.id);
+        if (idx != -1) {
+          repo.dispatches[idx] = realDisp;
+        } else {
+          repo.dispatches.insert(0, realDisp);
+        }
+      }
+      repo.syncWithBackend();
+    }).catchError((_) {});
 
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
@@ -236,6 +258,11 @@ class _DispatchScreenState extends State<DispatchScreen> {
       appBar: AppBar(
         title: const Text('Dispatch Desk'),
         actions: [
+          IconButton(
+            tooltip: 'Refresh orders',
+            onPressed: () => repo.syncWithBackend(),
+            icon: const Icon(Icons.refresh_rounded),
+          ),
           IconButton(
             tooltip: 'Dispatch history',
             onPressed: () =>

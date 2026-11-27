@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/api_sync_service.dart';
 import '../../core/formatters.dart';
+import '../../core/statement_pdf_service.dart';
 import '../../core/theme.dart';
 import '../../core/widgets.dart';
 import '../../data/mock_repository.dart';
@@ -935,6 +936,15 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                                       children: [
                                         IconButton(
                                           icon: const Icon(
+                                            Icons.picture_as_pdf_rounded,
+                                            size: 20,
+                                          ),
+                                          color: const Color(0xFFDC2626),
+                                          tooltip: 'Download PDF Statement',
+                                          onPressed: () => _downloadDebtorPdf(context, item),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(
                                             Icons.receipt_long_rounded,
                                             size: 20,
                                           ),
@@ -980,5 +990,62 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _downloadDebtorPdf(BuildContext context, DebtorItem item) async {
+    final repo = context.read<MockRepository>();
+    final vouchers = repo.vouchersFor(item.id);
+    if (vouchers.isEmpty) {
+      try {
+        await repo.fetchVouchersFor(item.id);
+      } catch (_) {}
+    }
+    final refreshedVouchers = repo.vouchersFor(item.id);
+
+    final chronoVouchers = List<VoucherItem>.from(refreshedVouchers)
+      ..sort((a, b) {
+        final cmp = a.voucherDate.compareTo(b.voucherDate);
+        if (cmp != 0) return cmp;
+        return a.id.compareTo(b.id);
+      });
+
+    final runningBalanceById = <String, double>{};
+    double runBal = item.openingBalance;
+    for (final v in chronoVouchers) {
+      runBal += v.debit - v.credit;
+      runningBalanceById[v.id] = runBal;
+    }
+
+    final totalDebits = refreshedVouchers.fold(0.0, (s, v) => s + v.debit);
+    final totalCredits = refreshedVouchers.fold(0.0, (s, v) => s + v.credit);
+
+    final pdfData = StatementPdfData(
+      partyName: item.name,
+      partyId: item.id,
+      city: item.city.isNotEmpty ? item.city : item.district,
+      state: item.state.isNotEmpty ? item.state : 'Punjab',
+      mobile: item.mobile,
+      openingBalance: item.openingBalance,
+      totalDebits: totalDebits,
+      totalCredits: totalCredits,
+      closingBalance: item.balance,
+      bucket0_30: 0.0,
+      bucket31_60: 0.0,
+      bucket61_90: 0.0,
+      bucket90Plus: 0.0,
+      vouchers: chronoVouchers.map((v) => StatementVoucherRow(
+        date: v.voucherDate,
+        type: v.voucherType,
+        vchNo: v.voucherNo,
+        particulars: v.narration.isNotEmpty ? v.narration : (v.bookSource.isNotEmpty ? v.bookSource : 'Tally Entry'),
+        debit: v.debit,
+        credit: v.credit,
+        balance: runningBalanceById[v.id] ?? 0.0,
+      )).toList(),
+    );
+
+    if (context.mounted) {
+      await StatementPdfService.downloadAndOpenPdf(context, pdfData);
+    }
   }
 }

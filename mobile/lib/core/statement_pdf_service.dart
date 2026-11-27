@@ -352,7 +352,7 @@ class StatementPdfService {
     );
   }
 
-  /// Downloads or saves statement PDF to device Downloads/Documents, and presents Print / Share sheet
+  /// Downloads statement PDF to device Downloads directory and returns file
   static Future<File> saveStatementPdfLocally(StatementPdfData data) async {
     final bytes = await generatePdfBytes(data);
     final safeName = data.partyName.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
@@ -360,6 +360,14 @@ class StatementPdfService {
 
     Directory dir;
     if (Platform.isAndroid) {
+      final downloadDir = Directory('/storage/emulated/0/Download');
+      if (await downloadDir.exists()) {
+        try {
+          final file = File('${downloadDir.path}/$filename');
+          await file.writeAsBytes(bytes, flush: true);
+          return file;
+        } catch (_) {}
+      }
       final ext = await getExternalStorageDirectory();
       dir = ext ?? await getApplicationDocumentsDirectory();
     } else {
@@ -369,6 +377,40 @@ class StatementPdfService {
     final file = File('${dir.path}/$filename');
     await file.writeAsBytes(bytes, flush: true);
     return file;
+  }
+
+  /// Downloads PDF, shows snackbar confirmation, and invokes share/view dialog
+  static Future<void> downloadAndOpenPdf(BuildContext context, StatementPdfData data) async {
+    final bytes = await generatePdfBytes(data);
+    final safeName = data.partyName.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+    final filename = 'Statement_$safeName.pdf';
+
+    File? savedFile;
+    try {
+      savedFile = await saveStatementPdfLocally(data);
+    } catch (_) {}
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            savedFile != null
+                ? 'PDF Downloaded: $filename'
+                : 'Statement PDF generated: $filename',
+          ),
+          backgroundColor: const Color(0xFF16A34A),
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'Share',
+            textColor: Colors.white,
+            onPressed: () => Printing.sharePdf(bytes: bytes, filename: filename),
+          ),
+        ),
+      );
+    }
+
+    // Share / view prompt so user can view or save anywhere immediately
+    await Printing.sharePdf(bytes: bytes, filename: filename);
   }
 
   /// Direct print layout dialog
@@ -382,11 +424,9 @@ class StatementPdfService {
 
   /// Share statement PDF via ShareSheet / WhatsApp
   static Future<void> shareStatementPdf(StatementPdfData data, {String? text}) async {
-    final file = await saveStatementPdfLocally(data);
-    await Share.shareXFiles(
-      [XFile(file.path, mimeType: 'application/pdf', name: file.uri.pathSegments.last)],
-      text: text,
-      subject: 'Statement of Account - ${data.partyName}',
-    );
+    final bytes = await generatePdfBytes(data);
+    final safeName = data.partyName.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+    final filename = 'Statement_$safeName.pdf';
+    await Printing.sharePdf(bytes: bytes, filename: filename);
   }
 }

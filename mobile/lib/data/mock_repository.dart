@@ -86,7 +86,7 @@ class MockRepository extends ChangeNotifier {
   int? serverActiveDealers;
   int? serverSalesTeamCount;
   List<SalespersonSummary> salespersonSummaries = [];
-  static const int currentVersionCode = 20;
+  static const int currentVersionCode = 22;
   static const String currentVersionName = '1.1.9';
   AppUpdateInfo? availableUpdate;
   Timer? _syncTimer;
@@ -332,6 +332,43 @@ class MockRepository extends ChangeNotifier {
     }
   }
 
+  Future<bool> addJournalEntry(String partyId, {
+    required String type,
+    required double amount,
+    String? reference,
+    String? notes,
+  }) async {
+    try {
+      final ok = await ApiSyncService.addJournalEntry(
+        partyId,
+        type: type,
+        amount: amount,
+        reference: reference,
+        notes: notes,
+      );
+      if (ok) {
+        await syncWithBackend();
+        await fetchVouchersFor(partyId);
+      }
+      return ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> updateOpeningBalance(String partyId, double amount, {String? asOf}) async {
+    try {
+      final ok = await ApiSyncService.updateOpeningBalance(partyId, amount, asOf: asOf);
+      if (ok) {
+        await syncWithBackend();
+        await fetchVouchersFor(partyId);
+      }
+      return ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
   void deleteDebtor(String id) {
     debtors.removeWhere((d) => d.id == id);
     customers.removeWhere((c) => c.id == id);
@@ -449,18 +486,13 @@ class MockRepository extends ChangeNotifier {
           ..addAll(parsedCreds);
       }
 
-      // 3. Orders
+      // 3. Orders (Authoritative sync from backend)
       final remoteOrders = await ApiSyncService.fetchOrders();
-      if (remoteOrders != null && remoteOrders.isNotEmpty) {
+      if (remoteOrders != null) {
         final parsedOrders = remoteOrders.map(SalesOrder.fromJson).toList();
-        for (final o in parsedOrders) {
-          final idx = orders.indexWhere((existing) => existing.id == o.id);
-          if (idx != -1) {
-            orders[idx] = o;
-          } else {
-            orders.add(o);
-          }
-        }
+        orders
+          ..clear()
+          ..addAll(parsedOrders);
       }
 
       // 4. Payments
@@ -477,18 +509,13 @@ class MockRepository extends ChangeNotifier {
         }
       }
 
-      // 5. Dispatches
+      // 5. Dispatches (Authoritative sync from backend)
       final remoteDispatches = await ApiSyncService.fetchDispatches();
-      if (remoteDispatches != null && remoteDispatches.isNotEmpty) {
+      if (remoteDispatches != null) {
         final parsedDispatches = remoteDispatches.map(Dispatch.fromJson).toList();
-        for (final d in parsedDispatches) {
-          final idx = dispatches.indexWhere((existing) => existing.id == d.id);
-          if (idx != -1) {
-            dispatches[idx] = d;
-          } else {
-            dispatches.add(d);
-          }
-        }
+        dispatches
+          ..clear()
+          ..addAll(parsedDispatches);
       }
 
       // 6. Tour Plans
@@ -1251,14 +1278,28 @@ class MockRepository extends ChangeNotifier {
           .map(
             (i) => {
               'product': i.product,
+              'productName': i.product,
               'quantity': i.quantity.toStringAsFixed(3),
+              'orderedQuantity': i.quantity.toStringAsFixed(3),
               'unit': i.unit,
               'ratePaise': (i.rate * 100).round(),
               'amountPaise': (i.lineTotal * 100).round(),
             },
           )
           .toList(),
-    }).then((_) => syncWithBackend()).catchError((_) {});
+    }).then((createdRes) {
+      if (createdRes != null && createdRes['id'] != null) {
+        final realOrder = SalesOrder.fromJson(createdRes);
+        final idx = orders.indexWhere((o) => o.id == order.id || o.number == order.number);
+        if (idx != -1) {
+          orders[idx] = realOrder;
+        } else {
+          orders.insert(0, realOrder);
+        }
+        notifyListeners();
+      }
+      syncWithBackend();
+    }).catchError((_) {});
     _pushNotification(
       'Order submitted',
       '${order.number} • ${customer?.name ?? customerId}',

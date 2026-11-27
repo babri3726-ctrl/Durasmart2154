@@ -3659,7 +3659,7 @@ def get_discount_ledger():
 @app.get("/api/v1/app/version")
 def get_app_version():
     return {
-        "version_code": 20,
+        "version_code": 22,
         "version_name": "1.1.9",
         "download_url": "/api/v1/app/latest-apk",
         "release_notes": "Streamlined Stock Inventory UI: Metal & Steel sub-categories (Slit Coils, Profile, GP), UPVC Roofing Matrix, and real Accessories.",
@@ -4206,7 +4206,8 @@ def create_order(
             "orderLineId": idx + 1,
             "lineNo": idx + 1,
             "productId": l.get("productId") or "PRD-CUSTOM",
-            "productName": l.get("productName") or "Steel Material",
+            "productName": l.get("productName") or l.get("product") or "Steel Material",
+            "product": l.get("product") or l.get("productName") or "Steel Material",
             "unit": unit,
             "orderedQuantity": f"{q:.3f}",
             "dispatchedQuantity": "0.000",
@@ -4616,7 +4617,8 @@ def create_dispatch(
                 match_ol = ol
                 break
             prod_query = dl.product or dl.productName or dl.productId
-            if prod_query and (str(prod_query).lower() in (ol.get("productDescription") or ol.get("product") or "").lower() or (ol.get("productDescription") or ol.get("product") or "").lower() in str(prod_query).lower()):
+            ol_name = ol.get("productName") or ol.get("product") or ol.get("productDescription") or ""
+            if prod_query and (str(prod_query).lower() in ol_name.lower() or ol_name.lower() in str(prod_query).lower()):
                 match_ol = ol
                 break
         if not match_ol and order.get("lines"):
@@ -4633,7 +4635,7 @@ def create_dispatch(
         if req_qty <= 0:
             raise HTTPException(status_code=422, detail="Dispatched quantity must be strictly greater than 0.")
 
-        rem_q = float(match_ol.get("remainingQuantity") or 0.0)
+        rem_q = float(match_ol.get("remainingQuantity") or match_ol.get("orderedQuantity") or match_ol.get("quantity") or 0.0)
         if req_qty > rem_q + 0.0001:
             raise HTTPException(
                 status_code=422,
