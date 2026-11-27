@@ -406,7 +406,7 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: Text(_isCreditorMode ? 'Sundry Creditors' : 'Debtor Master (HR-PB)'),
+        title: Text(_isCreditorMode ? 'Sundry Creditors' : 'Debtor Master'),
         actions: [
           IconButton(
             icon: const Icon(Icons.cleaning_services_rounded),
@@ -434,12 +434,12 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.sync_rounded),
-            tooltip: '1-Click Sync HR-PB',
+            tooltip: 'Sync Book1 Targets',
             onPressed: () async {
               final sm = ScaffoldMessenger.of(context);
               sm.showSnackBar(
                 const SnackBar(
-                  content: Text('Syncing HR-PB Dealers & Targets with server...'),
+                  content: Text('Syncing Book1 Targets & Dealers with server...'),
                   duration: Duration(seconds: 1),
                 ),
               );
@@ -450,14 +450,14 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                   SnackBar(
                     content: Text(
                       result != null && result['ok'] == true
-                          ? 'HR-PB Synced: ${result['customers_imported'] ?? result['dealers_matched'] ?? 'completed'}'
-                          : 'HR-PB refreshed with server',
+                          ? 'Book1 Synced: ${result['customers_imported'] ?? result['dealers_matched'] ?? 'completed'}'
+                          : 'Book1 refreshed with server',
                     ),
                   ),
                 );
               } catch (e) {
                 sm.showSnackBar(
-                  SnackBar(content: Text('HR-PB Sync failed: $e')),
+                  SnackBar(content: Text('Book1 Sync failed: $e')),
                 );
               }
             },
@@ -725,7 +725,7 @@ class _DebtorListScreenState extends State<DebtorListScreen> {
                         EmptyState(
                           icon: Icons.account_balance_wallet_outlined,
                           title: 'No debtors found',
-                          subtitle: 'Add a new debtor or pull from HR-PB.',
+                          subtitle: 'Add a new debtor or pull from Book1.',
                         ),
                       ],
                     )

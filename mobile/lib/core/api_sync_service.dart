@@ -176,6 +176,23 @@ class ApiSyncService {
     }
   }
 
+  /// Updates a debtor's real mobile phone number on backend /api/v1/debtors/{id}
+  static Future<bool> updateDebtorMobile(String debtorId, String mobile) async {
+    try {
+      final host = await resolveWorkingHost();
+      if (host == null) return false;
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 4);
+      final req = await client.putUrl(Uri.parse('$host/api/v1/debtors/$debtorId'));
+      req.headers.contentType = ContentType.json;
+      req.write(jsonEncode({'mobile': mobile}));
+      final resp = await req.close();
+      return resp.statusCode == 200 || resp.statusCode == 201;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Synchronizes a payment to the backend /api/v1/payments
   static Future<bool> postPayment(Map<String, dynamic> paymentPayload) async {
     try {

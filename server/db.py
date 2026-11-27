@@ -969,42 +969,70 @@ def apply_single_party_ledger(party_id: str, filepath_or_bytes: str | bytes, fil
             """, (party_id, abs(ob_paise), "debit" if ob_paise >= 0 else "credit"))
 
         # Smart merge authoritative vouchers: do NOT wipe existing vouchers indiscriminately.
-        # Matches existing vouchers by party, date, type, and invoice number to update amounts.
+        # When voucher numbers are the same, amounts MUST ALSO MATCH!
+        # If amounts differ (e.g. split journal entries on the same voucher like 7 Lakh and 3 Lakh),
+        # they are distinct entries and must NEVER overwrite or delete each other.
         now_iso = datetime.now().isoformat()
+        claimed_existing_ids: set[str] = set()
+
         for v in vchs:
-            v_no = v.get("voucherNo", "")
+            v_no = (v.get("voucherNo") or "").strip()
             v_date = v.get("voucherDate", "")
             v_type = v.get("voucherType", "Sales")
             dr_p = v.get("debitPaise", 0)
             cr_p = v.get("creditPaise", 0)
             narr = v.get("narration", "")
 
-            # If an existing voucher matches this invoice number on this date, update its amounts
+            # 1. Search for an unclaimed existing voucher that matches party, date, type, voucher_no, AND EXACT AMOUNT
             matched_id = None
             if v_no and not str(v_no).lower().startswith("db-"):
                 cur.execute(
                     """
                     SELECT id FROM vouchers 
-                    WHERE party_id = ? AND voucher_date = ? AND LOWER(voucher_type) = LOWER(?) AND voucher_no = ?
-                    LIMIT 1
+                    WHERE party_id = ? AND voucher_date = ? AND LOWER(voucher_type) = LOWER(?) 
+                      AND voucher_no = ? AND debit_paise = ? AND credit_paise = ?
+                    ORDER BY id
                     """,
-                    (party_id, v_date, v_type, v_no)
+                    (party_id, v_date, v_type, v_no, dr_p, cr_p)
                 )
-                m_row = cur.fetchone()
-                if m_row:
-                    matched_id = m_row[0]
+                for row in cur.fetchall():
+                    if row[0] not in claimed_existing_ids:
+                        matched_id = row[0]
+                        break
+
+            # 2. If not found by exact voucher_no, search for an unclaimed synthetic/temporary voucher with same date, type & exact amount
+            if not matched_id and (dr_p > 0 or cr_p > 0):
+                cur.execute(
+                    """
+                    SELECT id, voucher_no FROM vouchers 
+                    WHERE party_id = ? AND voucher_date = ? AND LOWER(voucher_type) = LOWER(?) 
+                      AND debit_paise = ? AND credit_paise = ?
+                    ORDER BY id
+                    """,
+                    (party_id, v_date, v_type, dr_p, cr_p)
+                )
+                for row in cur.fetchall():
+                    cand_id, cand_vno = row
+                    if cand_id not in claimed_existing_ids:
+                        if not cand_vno or str(cand_vno).lower().startswith("db-") or cand_vno == v_no:
+                            matched_id = cand_id
+                            break
 
             if matched_id:
+                claimed_existing_ids.add(matched_id)
                 cur.execute(
                     """
                     UPDATE vouchers 
-                    SET debit_paise = ?, credit_paise = ?, narration = COALESCE(NULLIF(?, ''), narration),
+                    SET voucher_no = COALESCE(NULLIF(?, ''), voucher_no),
+                        debit_paise = ?, credit_paise = ?, narration = COALESCE(NULLIF(?, ''), narration),
                         book_source = 'Authoritative Tally Ledger', file_sha256 = ?
                     WHERE id = ?
                     """,
-                    (dr_p, cr_p, narr, f_sha, matched_id)
+                    (v_no, dr_p, cr_p, narr, f_sha, matched_id)
                 )
             else:
+                new_vid = v.get("id") or f"VCH-AUTH-{uuid.uuid4().hex[:12]}"
+                claimed_existing_ids.add(new_vid)
                 cur.execute(
                     """
                     INSERT OR REPLACE INTO vouchers 
@@ -1012,7 +1040,7 @@ def apply_single_party_ledger(party_id: str, filepath_or_bytes: str | bytes, fil
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        v["id"],
+                        new_vid,
                         v_no,
                         v_type,
                         v_date,
@@ -3128,29 +3156,69 @@ def seed_real_users(force: bool = False):
         ))
 
         # Seed master owner invitation code for signup
+        cur = conn.cursor()
         cur.execute("SELECT code FROM invitations WHERE code = 'OWNER-DURASMART-2026'")
         if not cur.fetchone():
             cur.execute("""
                 INSERT INTO invitations (
                     id, code, role, department, employee_id, sales_territory,
                     monthly_target_qty, target_unit, may_dispatch, status,
-                    used_count, max_uses, expires_at, created_by, created_at, updated_at
+                    used_count, max_uses, expires_at, created_by, created_at
                 ) VALUES (
                     'inv-owner-master', 'OWNER-DURASMART-2026', 'owner', 'Management',
                     'EMP-OWNER-01', 'All', 1000.0, 'MT', 1, 'active',
-                    0, 999999, '2030-12-31T23:59:59', 'SYSTEM', ?, ?
+                    0, 999999, '2030-12-31T23:59:59', 'SYSTEM', ?
                 )
-            """, (now, now))
+            """, (now,))
 
-        # Purge any dummy placeholder users from users table
+        # Seed 13 Real Sales Officers with secure hashed passwords
+        emp_pwd_hash, emp_salt = hash_password(DEFAULT_EMPLOYEE_PASSWORD)
+        for emp in DEFAULT_HRPB_EMPLOYEES:
+            emp_id = emp["emp_id"]
+            cur.execute("SELECT id FROM users WHERE lower(employee_id) = lower(?)", (emp_id,))
+            existing_user = cur.fetchone()
+            user_id = existing_user[0] if existing_user else f"usr-{emp_id.lower()}"
+            conn.execute("""
+                INSERT INTO users (
+                    id, username, email, phone, name, password_hash, salt,
+                    role, department, employee_id, sales_territory, active, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'employee', 'Sales', ?, ?, 1, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    username=excluded.username,
+                    email=excluded.email,
+                    name=excluded.name,
+                    password_hash=excluded.password_hash,
+                    salt=excluded.salt,
+                    role=excluded.role,
+                    department=excluded.department,
+                    employee_id=excluded.employee_id,
+                    sales_territory=excluded.sales_territory,
+                    updated_at=excluded.updated_at
+            """, (
+                user_id,
+                emp["username"],
+                emp["email"],
+                emp["phone"],
+                emp["name"],
+                emp_pwd_hash,
+                emp_salt,
+                emp_id,
+                emp["territory"],
+                now,
+                now
+            ))
+
+        # Purge any dummy placeholder users from users table (preserving real sales officers)
         conn.execute("""
             DELETE FROM users 
-            WHERE (email LIKE '%@durasmart.com' AND email NOT IN ('ishu.jindal@durasmart.com', 'babri3726@gmail.com'))
-               OR email LIKE '%@example.test'
-               OR email LIKE '%@demo.test'
-               OR username LIKE 'test%'
-               OR username LIKE 'user_%'
-               OR username IN ('harpreet', 'dummy', 'admin', 'md', 'director', 'demo')
+            WHERE (
+                (email LIKE '%@durasmart.com' AND email NOT IN ('ishu.jindal@durasmart.com', 'babri3726@gmail.com') AND (employee_id IS NULL OR employee_id NOT LIKE 'EMP-SP-%'))
+                OR email LIKE '%@example.test'
+                OR email LIKE '%@demo.test'
+                OR username LIKE 'test%'
+                OR username LIKE 'user_%'
+                OR username IN ('harpreet', 'dummy', 'admin', 'md', 'director', 'demo')
+            )
         """)
         conn.commit()
 

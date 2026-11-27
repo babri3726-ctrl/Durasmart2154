@@ -226,7 +226,7 @@ class MockRepository extends ChangeNotifier {
           name: item.name,
           type: 'Dealer',
           contactPerson: item.name,
-          mobile: '919800000000',
+          mobile: item.mobile.isNotEmpty ? item.mobile : '',
           city: item.city.isNotEmpty
               ? item.city
               : (item.district.isNotEmpty ? item.district : item.state),
@@ -283,8 +283,52 @@ class MockRepository extends ChangeNotifier {
         'district': item.district,
         'salesperson': item.salesperson,
         'balance': item.balance,
+        'mobile': item.mobile,
       }).then((_) => syncWithBackend()).catchError((_) {});
       notifyListeners();
+    }
+  }
+
+  /// Updates party mobile phone number and persists both locally and on backend
+  Future<bool> updatePartyMobile(String partyId, String newMobile) async {
+    final clean = newMobile.trim();
+    final dIdx = debtors.indexWhere((d) => d.id == partyId);
+    if (dIdx != -1) {
+      final old = debtors[dIdx];
+      debtors[dIdx] = DebtorItem(
+        id: old.id,
+        name: old.name,
+        state: old.state,
+        city: old.city,
+        district: old.district,
+        salesperson: old.salesperson,
+        balance: old.balance,
+        mobile: clean,
+        tallyStatus: old.tallyStatus,
+        tallyClosing: old.tallyClosing,
+        tallyDiff: old.tallyDiff,
+      );
+    }
+    final cIdx = customers.indexWhere((c) => c.id == partyId);
+    if (cIdx != -1) {
+      final old = customers[cIdx];
+      customers[cIdx] = Customer(
+        id: old.id,
+        name: old.name,
+        type: old.type,
+        contactPerson: old.contactPerson,
+        mobile: clean,
+        city: old.city,
+        salespersonId: old.salespersonId,
+        status: old.status,
+      );
+    }
+    notifyListeners();
+    try {
+      final ok = await ApiSyncService.updateDebtorMobile(partyId, clean);
+      return ok;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -692,7 +736,7 @@ class MockRepository extends ChangeNotifier {
         id: debtor.id,
         name: debtor.name,
         city: debtor.city.isNotEmpty ? debtor.city : debtor.district,
-        mobile: '9814000000',
+        mobile: debtor.mobile.isNotEmpty ? debtor.mobile : '',
         salespersonId: 'EMP-SP-01',
         contactPerson: debtor.name,
         type: 'Dealer',
@@ -2070,7 +2114,7 @@ class MockRepository extends ChangeNotifier {
           id: d.id,
           name: d.name,
           city: d.city.isNotEmpty ? d.city : (d.district.isNotEmpty ? d.district : d.state),
-          mobile: '919800000000',
+          mobile: d.mobile.isNotEmpty ? d.mobile : '',
           salespersonId: sp.id,
           contactPerson: d.name,
           address: '${d.district}, ${d.state}',

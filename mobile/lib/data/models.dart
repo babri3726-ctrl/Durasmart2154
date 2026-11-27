@@ -159,7 +159,7 @@ class Customer {
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? 'Dealer',
       city: json['city']?.toString() ?? (json['district']?.toString() ?? 'Punjab'),
-      mobile: json['mobile']?.toString() ?? json['phone']?.toString() ?? '919800000000',
+      mobile: json['mobile']?.toString() ?? json['phone']?.toString() ?? '',
       salespersonId: spId,
       contactPerson: json['contactPerson']?.toString() ?? json['name']?.toString() ?? '',
       address: json['address']?.toString() ?? json['state']?.toString() ?? '',
@@ -707,6 +707,7 @@ class DebtorItem {
     this.salesperson = 'Unassigned',
     this.balance = 0.0,
     this.openingBalance = 0.0,
+    this.mobile = '',
     this.status = 'active',
     this.partyType = 'customer',
     this.tallyStatus = 'unbenchmarked',
@@ -723,6 +724,7 @@ class DebtorItem {
   String salesperson;
   double balance;
   double openingBalance;
+  String mobile;
   String status;
   String partyType;
   String tallyStatus;
@@ -798,6 +800,7 @@ class DebtorItem {
       salesperson: json['salesperson']?.toString() ?? 'Unassigned',
       balance: parsedBal,
       openingBalance: parsedOpenBal,
+      mobile: json['mobile']?.toString() ?? '',
       status: json['status']?.toString() ?? 'active',
       partyType: partyType,
       tallyStatus: tallyStatus,
@@ -816,6 +819,7 @@ class DebtorItem {
     'salesperson': salesperson,
     'balance': balance,
     'openingBalance': openingBalance,
+    'mobile': mobile,
     'status': status,
     'partyType': partyType,
     'tallyStatus': tallyStatus,

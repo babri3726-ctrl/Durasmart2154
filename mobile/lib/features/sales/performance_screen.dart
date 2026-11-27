@@ -232,7 +232,7 @@ class PerformanceScreen extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SectionHeading(
-          title: 'HR-PB Dealer Targets',
+          title: 'Book1 Dealer Targets',
           subtitle: 'Punjab & Haryana territory check',
         ),
         const SizedBox(height: 10),

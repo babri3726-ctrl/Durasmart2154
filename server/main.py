@@ -3038,9 +3038,6 @@ def sync_debtor_benchmarks():
     if not debtor_bal_path:
         raise HTTPException(status_code=404, detail="debtor balance.xlsx benchmark file not found")
 
-    # Run full deduplication first to ensure no double-counted vouchers pollute ground truth
-    db.deduplicate_all_vouchers()
-
     from .voucher_parser import parse_debtor_balance_workbook
     parsed = parse_debtor_balance_workbook(debtor_bal_path)
     res = db.apply_debtor_balance_benchmarks(parsed)
@@ -3662,10 +3659,10 @@ def get_discount_ledger():
 @app.get("/api/v1/app/version")
 def get_app_version():
     return {
-        "version_code": 16,
-        "version_name": "1.1.7",
+        "version_code": 18,
+        "version_name": "1.1.8",
         "download_url": "/api/v1/app/latest-apk",
-        "release_notes": "Official PDF statement share on WhatsApp, real party mobile numbers, updated Book1 sales targets and layout overflow fixes.",
+        "release_notes": "Preserve split journal vouchers with different amounts, preview duplicates before deletion, unified Book1 sales targets, real party mobile numbers & WhatsApp statement sharing.",
         "mandatory": False,
         "published_at": datetime.now().isoformat()
     }

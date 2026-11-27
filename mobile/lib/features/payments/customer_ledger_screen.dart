@@ -53,7 +53,7 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
               id: d.id,
               name: d.name,
               city: d.city.isNotEmpty ? d.city : (d.district.isNotEmpty ? d.district : d.state),
-              mobile: '919800000000',
+              mobile: d.mobile.isNotEmpty ? d.mobile : '',
               salespersonId: 'EMP-SP-01',
               type: 'Dealer',
             )).firstOrNull;
@@ -81,6 +81,10 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
           d.name.toLowerCase().trim() == customer.name.toLowerCase().trim(),
     ).firstOrNull;
     final double openingBalance = debtor?.openingBalance ?? 0.0;
+    final String effectiveMobile = (customer.mobile.isNotEmpty
+            ? customer.mobile
+            : (debtor?.mobile ?? ''))
+        .trim();
 
     // Fallback orders & payments if no vouchers exist
     final orders = repo.ordersFor(customer.id);
@@ -949,6 +953,49 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
                     label: 'Party ID',
                     value: customer.id,
                   ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Party Mobile / WhatsApp',
+                            style: TextStyle(color: AppColors.muted, fontSize: 12),
+                          ),
+                        ),
+                        InkWell(
+                          onTap: () => _showEditMobileDialog(context, repo, customer, debtor),
+                          borderRadius: BorderRadius.circular(6),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.phone_rounded,
+                                  size: 13,
+                                  color: effectiveMobile.isNotEmpty ? AppColors.green : AppColors.orange,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  effectiveMobile.isNotEmpty ? effectiveMobile : 'Add Number',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: effectiveMobile.isNotEmpty ? AppColors.ink : AppColors.purple,
+                                    decoration: effectiveMobile.isEmpty ? TextDecoration.underline : null,
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                const Icon(Icons.edit_rounded, size: 12, color: AppColors.muted),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -957,7 +1004,7 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
             // ── Share on WhatsApp ─────────────────────────────────────────
             WhatsAppButton(
               label: 'Share ledger statement on WhatsApp',
-              phone: customer.mobile,
+              phone: effectiveMobile,
               message: statementText,
             ),
             const SizedBox(height: 12),
@@ -972,6 +1019,57 @@ class _CustomerLedgerScreenState extends State<CustomerLedgerScreen> {
             const SizedBox(height: 20),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showEditMobileDialog(BuildContext context, MockRepository repo, Customer customer, DebtorItem? debtor) {
+    final currentMob = (customer.mobile.isNotEmpty ? customer.mobile : (debtor?.mobile ?? '')).trim();
+    final controller = TextEditingController(text: currentMob);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          'WhatsApp Number: ${customer.name}',
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+        ),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.phone,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Mobile / WhatsApp Number',
+            hintText: 'e.g. 9814012345 or +91...',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.green),
+            onPressed: () async {
+              final newMob = controller.text.trim();
+              await repo.updatePartyMobile(customer.id, newMob);
+              if (debtor != null && debtor.id != customer.id) {
+                await repo.updatePartyMobile(debtor.id, newMob);
+              }
+              if (mounted) setState(() {});
+              if (ctx.mounted) Navigator.of(ctx).pop();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(newMob.isNotEmpty ? 'Mobile number saved: $newMob' : 'Mobile number cleared'),
+                    backgroundColor: AppColors.green,
+                  ),
+                );
+              }
+            },
+            child: const Text('Save', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
       ),
     );
   }

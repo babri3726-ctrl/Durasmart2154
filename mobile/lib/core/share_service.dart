@@ -15,7 +15,10 @@ Future<void> shareWhatsAppText(
   required String phone,
   required String message,
 }) async {
-  final cleaned = phone.replaceAll(RegExp(r'[^0-9]'), '');
+  var cleaned = phone.replaceAll(RegExp(r'[^0-9]'), '');
+  if (cleaned.length == 10) {
+    cleaned = '91$cleaned';
+  }
   final encoded = Uri.encodeComponent(message);
   final uri = cleaned.isEmpty
       ? Uri.parse('https://wa.me/?text=$encoded')

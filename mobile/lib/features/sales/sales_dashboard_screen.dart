@@ -44,7 +44,7 @@ class _SalesDashboardScreenState extends State<SalesDashboardScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('HR-PB targets synchronized successfully!'),
+            content: Text('Book1 targets synchronized successfully!'),
             duration: Duration(seconds: 2),
             backgroundColor: Color(0xFF059669),
           ),
@@ -77,7 +77,7 @@ class _SalesDashboardScreenState extends State<SalesDashboardScreen> {
         title: const Text('Sales Dashboard'),
         actions: [
           IconButton(
-            tooltip: '1-Click Sync HR-PB',
+            tooltip: 'Sync Book1 Targets',
             icon: _isSyncing
                 ? const SizedBox(
                     width: 18,
@@ -162,7 +162,7 @@ class _SalesDashboardScreenState extends State<SalesDashboardScreen> {
             SectionHeading(
               title: 'Sales Team Quota & Achievement',
               subtitle: scopeName == 'All team'
-                  ? 'Synced from HR-PB Target Book'
+                  ? 'Synced from Book1 Target Book'
                   : 'Filtered to $scopeName',
             ),
             const SizedBox(height: 10),
