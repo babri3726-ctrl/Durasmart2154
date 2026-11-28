@@ -1258,6 +1258,42 @@ def parse_bank_workbook(
     }
 
 
+def is_debtor_balance_workbook(filepath_or_bytes: str | bytes, filename: str | None = None) -> bool:
+    """Quickly tests if a workbook is a Tally Sundry Debtors Group Summary / closing balance export."""
+    if filename:
+        fn_lower = os.path.basename(filename).lower()
+        if any(k in fn_lower for k in ("debtor balance", "debtor_balance", "debtorbalance", "sundry debtors", "sundry_debtors")):
+            return True
+    if isinstance(filepath_or_bytes, str):
+        fn_lower = os.path.basename(filepath_or_bytes).lower()
+        if any(k in fn_lower for k in ("debtor balance", "debtor_balance", "debtorbalance", "sundry debtors", "sundry_debtors")):
+            return True
+
+    try:
+        import io
+        if isinstance(filepath_or_bytes, bytes):
+            wb = openpyxl.load_workbook(io.BytesIO(filepath_or_bytes), data_only=True, read_only=True)
+        else:
+            wb = openpyxl.load_workbook(filepath_or_bytes, data_only=True, read_only=True)
+        ws = wb.active
+        found_debtors = False
+        found_closing = False
+        found_particulars = False
+
+        for r_idx, row in enumerate(ws.iter_rows(max_row=15, values_only=True), start=1):
+            row_str = " ".join(str(c or "").strip().lower() for c in row)
+            if "sundry debtors" in row_str:
+                found_debtors = True
+            if "closing balance" in row_str or "closing" in row_str:
+                found_closing = True
+            if "particulars" in row_str or "particular" in row_str:
+                found_particulars = True
+        wb.close()
+        return (found_debtors and found_closing) or (found_debtors and found_particulars) or (found_particulars and found_closing)
+    except Exception:
+        return False
+
+
 def parse_debtor_balance_workbook(
     filepath_or_bytes: str | bytes,
     file_sha256: str | None = None
@@ -1265,12 +1301,9 @@ def parse_debtor_balance_workbook(
     """
     Parses Tally Prime 'Sundry Debtors Group Summary' export (e.g. debtor balance.xlsx).
     Extracts Opening Balance, Debit, Credit, and Closing Balance ground truth benchmarks.
-    Auto-detects:
-    1. New Format (split_dr_cr):
-       - Header rows with 'Opening Balance' and 'Closing Balance'
-       - Sub-headers with 'Debit', 'Credit', 'Debit', 'Credit' across columns B, C, D, E
-    2. Legacy Format:
-       - Columns: Particulars, Opening, Debit, Credit, Closing (with Dr/Cr strings)
+    Dynamically maps header columns for:
+    1. Split Dr/Cr format (Opening Dr/Cr, Closing Dr/Cr, optional Transactions Dr/Cr)
+    2. Single-column format with Dr/Cr text strings
     """
     import io
     if isinstance(filepath_or_bytes, bytes):
@@ -1282,23 +1315,42 @@ def parse_debtor_balance_workbook(
 
     # Auto-detect header row and layout
     header_row = 1
-    layout = "legacy"
-    start_row = 2
-
     for r in range(1, min(15, ws.max_row + 1)):
         c1 = ws.cell(r, 1).value
         if c1 and "particular" in str(c1).lower():
             header_row = r
             break
 
+    op_dr_col, op_cr_col = 2, 3
+    cl_dr_col, cl_cr_col = 4, 5
+    layout = "split_dr_cr"
+    start_row = header_row + 1
+
+    # Dynamically scan header rows (from header_row to header_row + 4)
     for r in range(header_row, min(header_row + 4, ws.max_row + 1)):
-        vals = [str(ws.cell(r, c).value or "").lower().strip() for c in range(1, 7)]
-        if "closing balance" in vals[3:5] or ("debit" in vals[3:5] and "credit" in vals[4:6]):
-            layout = "split_dr_cr"
-            start_row = r + 1
-        elif len(vals) >= 5 and vals[1] == "debit" and vals[2] == "credit" and vals[3] == "debit" and vals[4] == "credit":
-            layout = "split_dr_cr"
-            start_row = r + 1
+        for c in range(1, min(15, ws.max_column + 1)):
+            val = str(ws.cell(r, c).value or "").strip().lower()
+            if "closing balance" in val or val == "closing":
+                sub_val1 = str(ws.cell(r + 1, c).value or "").strip().lower()
+                sub_val2 = str(ws.cell(r + 1, c + 1).value or "").strip().lower()
+                if "debit" in sub_val1 or "credit" in sub_val2 or "dr" in sub_val1 or "cr" in sub_val2:
+                    cl_dr_col, cl_cr_col = c, c + 1
+                    layout = "split_dr_cr"
+                    start_row = max(start_row, r + 2)
+                else:
+                    cl_dr_col = c
+                    cl_cr_col = None
+                    layout = "single_col"
+                    start_row = max(start_row, r + 1)
+            elif "opening balance" in val or val == "opening":
+                sub_val1 = str(ws.cell(r + 1, c).value or "").strip().lower()
+                sub_val2 = str(ws.cell(r + 1, c + 1).value or "").strip().lower()
+                if "debit" in sub_val1 or "credit" in sub_val2 or "dr" in sub_val1 or "cr" in sub_val2:
+                    op_dr_col, op_cr_col = c, c + 1
+                    start_row = max(start_row, r + 2)
+                else:
+                    op_dr_col = c
+                    op_cr_col = None
 
     def to_float(val):
         if val is None:
@@ -1341,10 +1393,10 @@ def parse_debtor_balance_workbook(
         pname = clean_party_name(s)
 
         if layout == "split_dr_cr":
-            op_dr = to_float(ws.cell(r, 2).value)
-            op_cr = to_float(ws.cell(r, 3).value)
-            cl_dr = to_float(ws.cell(r, 4).value)
-            cl_cr = to_float(ws.cell(r, 5).value)
+            op_dr = to_float(ws.cell(r, op_dr_col).value) if op_dr_col else 0.0
+            op_cr = to_float(ws.cell(r, op_cr_col).value) if op_cr_col else 0.0
+            cl_dr = to_float(ws.cell(r, cl_dr_col).value) if cl_dr_col else 0.0
+            cl_cr = to_float(ws.cell(r, cl_cr_col).value) if cl_cr_col else 0.0
 
             net_op = op_dr - op_cr
             net_cl = cl_dr - cl_cr
@@ -1354,10 +1406,10 @@ def parse_debtor_balance_workbook(
             dr_paise = int(round(cl_dr * 100)) if cl_dr > 0 else 0
             cr_paise = int(round(cl_cr * 100)) if cl_cr > 0 else 0
         else:
-            op_paise, op_dir = _parse_amt(ws.cell(r, 2).value)
-            dr_paise, _ = _parse_amt(ws.cell(r, 3).value)
-            cr_paise, _ = _parse_amt(ws.cell(r, 4).value)
-            cl_paise, cl_dir = _parse_amt(ws.cell(r, 5).value)
+            op_paise, op_dir = _parse_amt(ws.cell(r, op_dr_col).value) if op_dr_col else (0, 'debit')
+            cl_paise, cl_dir = _parse_amt(ws.cell(r, cl_dr_col).value) if cl_dr_col else (0, 'debit')
+            dr_paise = cl_paise if cl_paise > 0 else 0
+            cr_paise = abs(cl_paise) if cl_paise < 0 else 0
 
         benchmarks.append({
             "partyName": pname,
@@ -1426,6 +1478,8 @@ def detect_excel_type(filepath: str) -> str:
         r3 = str(ws.cell(3, 1).value or "").strip().lower()
         wb.close()
 
+        if is_debtor_balance_workbook(filepath):
+            return "debtor_balance"
         if "sundry debtors" in r2 or "sundry debtors" in r1 or "sundry debtors" in r3:
             return "debtor_balance"
         if "day book" in r2:

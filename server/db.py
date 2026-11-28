@@ -894,12 +894,25 @@ def apply_debtor_balance_benchmarks(benchmarks_data: list[dict] | dict, restore_
                 pid = f"DEBTOR-TALLY-{hashlib.md5(pname.encode()).hexdigest()[:4].upper()}"
 
                 cur.execute("SELECT id FROM parties WHERE id = ? OR UPPER(TRIM(name)) = ?", (pid, pname.upper().strip()))
-                if not cur.fetchone():
+                existing_p = cur.fetchone()
+                if not existing_p:
                     cur.execute("""
                         INSERT INTO parties (id, name, state, city, district, salesperson, balance_paise, credit_days, status, party_type, tally_closing_paise, tally_opening_paise, tally_status, tally_diff_paise, created_at, updated_at)
                         VALUES (?, ?, ?, ?, ?, 'Unassigned', ?, 30, 'active', 'customer', ?, ?, 'verified', 0, ?, ?)
                     """, (pid, pname, state, city, city, t_cl, t_cl, t_op, now_iso, now_iso))
                     inserted_count += 1
+                    exact_count += 1
+                else:
+                    cur.execute("""
+                        UPDATE parties
+                        SET balance_paise = ?,
+                            tally_closing_paise = ?,
+                            tally_opening_paise = ?,
+                            tally_status = 'verified',
+                            tally_diff_paise = 0,
+                            updated_at = ?
+                        WHERE id = ?
+                    """, (t_cl, t_cl, t_op, now_iso, existing_p[0]))
                     exact_count += 1
 
         conn.commit()

@@ -5901,6 +5901,20 @@ async def upload_excel_file(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
     result = {"filename": file.filename, "size": os.path.getsize(target_path)}
     try:
+        from .voucher_parser import is_debtor_balance_workbook, parse_debtor_balance_workbook
+        if is_debtor_balance_workbook(target_path, filename=file.filename):
+            parsed_db = parse_debtor_balance_workbook(target_path)
+            bm_res = db.apply_debtor_balance_benchmarks(parsed_db)
+            persisted = db.load_all_persisted_state()
+            for k in ["debtors", "customers"]:
+                if k in persisted:
+                    STATE[k] = persisted[k]
+            result["type"] = "debtor_balance"
+            result["benchmarks_synced"] = bm_res.get("totalBenchmarks", 0)
+            result["verified_count"] = bm_res.get("totalVerified", 0)
+            result["mismatches"] = bm_res.get("mismatchCount", 0)
+            return {"status": "success", "result": result}
+
         wb_test = openpyxl.load_workbook(target_path, read_only=True)
         sheet_names = wb_test.sheetnames
         wb_test.close()
@@ -6018,7 +6032,83 @@ async def preview_debtor_bytes(request: Request, fileName: str | None = "HR-PB.x
         f.write(body)
 
     try:
-        from .voucher_parser import is_accounting_workbook, parse_accounting_workbook
+        from .voucher_parser import is_accounting_workbook, parse_accounting_workbook, is_debtor_balance_workbook, parse_debtor_balance_workbook
+
+        # 1. Check for Tally Debtor Balance Ground-Truth Benchmark exports
+        file_sha = hashlib.sha256(body).hexdigest()
+        if is_debtor_balance_workbook(tmp_path, filename=fileName):
+            db_res = parse_debtor_balance_workbook(tmp_path, file_sha256=file_sha)
+            benchmarks = db_res.get("benchmarks", [])
+            apply_digest = hashlib.sha256(f"{file_sha}:debtor_benchmark_preview".encode()).hexdigest()
+
+            rows = []
+            for i, bm in enumerate(benchmarks):
+                cl_p = bm.get("closingPaise", 0)
+                debit_p = cl_p if cl_p >= 0 else 0
+                credit_p = abs(cl_p) if cl_p < 0 else 0
+                direction = "debit" if cl_p >= 0 else "credit"
+                rows.append({
+                    "rowNumber": i + 1,
+                    "partyName": bm["partyName"],
+                    "sourceRef": f"TALLY-BM-{i+1}",
+                    "refSource": "tally-benchmarks",
+                    "debitPaise": debit_p,
+                    "creditPaise": credit_p,
+                    "direction": direction,
+                    "verdict": "resolved",
+                    "reason": None,
+                    "customerId": "",
+                    "customerName": bm["partyName"],
+                    "candidateIds": [],
+                    "issues": [],
+                    "rawPartyName": bm.get("rawName") or bm["partyName"],
+                    "resolvedCustomerId": "",
+                    "resolvedCustomerName": bm["partyName"],
+                    "ledgerId": "Sundry Debtors Ground Truth",
+                    "debit": f"{debit_p / 100.0:.2f}",
+                    "credit": f"{credit_p / 100.0:.2f}",
+                    "resolution": "matched"
+                })
+
+            return {
+                "filename": fileName or "debtor balance.xlsx",
+                "fileSha256": file_sha,
+                "sizeBytes": len(body),
+                "sheetName": "Sundry Debtors Group Summary",
+                "sheetNames": ["Sundry Debtors Group Summary"],
+                "source": "tally-benchmarks",
+                "refSource": "Tally Debtor Ground Truth",
+                "headerRowNumber": 8,
+                "partyColumnLabel": "Particulars",
+                "ledgerIdColumnLabel": "Group",
+                "debitColumnLabel": "Closing Debit",
+                "creditColumnLabel": "Closing Credit",
+                "asOf": datetime.now().strftime("%Y-%m-%d"),
+                "asOfVerified": True,
+                "asOfSource": "Tally Sundry Debtors Ground Truth",
+                "periodText": "Tally Sundry Debtors",
+                "dataRowCount": len(benchmarks),
+                "blankRowCount": 0,
+                "totalRowCount": len(benchmarks),
+                "zeroBalanceRowCount": sum(1 for b in benchmarks if b.get("closingPaise", 0) == 0),
+                "resolvedRowCount": len(benchmarks),
+                "missingRowCount": 0,
+                "ambiguousRowCount": 0,
+                "invalidRowCount": 0,
+                "unresolvedRowCount": 0,
+                "rowsListed": len(benchmarks),
+                "rowsTruncated": False,
+                "rows": rows,
+                "warnings": [],
+                "blockers": [],
+                "applyAvailable": True,
+                "applyPreviewDigest": apply_digest,
+                "applyBlockedReason": "",
+                "businessRecordsCreated": False,
+                "databaseRowsWritten": False,
+                "disclaimer": f"Read-only preview of {len(benchmarks)} Tally debtor benchmarks. Ready to apply closing balances to all customer debtor accounts."
+            }
+
         if is_accounting_workbook(tmp_path):
             acct_data = parse_accounting_workbook(tmp_path, filename=fileName)
             book_src = acct_data["bookSource"]
@@ -6090,7 +6180,7 @@ async def preview_debtor_bytes(request: Request, fileName: str | None = "HR-PB.x
                 "sheetNames": [acct_data["bookSource"]],
                 "source": "tally-vouchers",
                 "refSource": acct_data["bookSource"],
-                "headerRowNumber": acct_data["headerRow"],
+                "headerRowNumber": acct_data.get("headerRow", 1),
                 "partyColumnLabel": "Particulars",
                 "ledgerIdColumnLabel": "Vch Type",
                 "debitColumnLabel": "Debit",
@@ -6238,7 +6328,46 @@ async def apply_debtor_bytes(
         f.write(body)
 
     try:
-        from .voucher_parser import is_accounting_workbook, parse_accounting_workbook
+        from .voucher_parser import is_accounting_workbook, parse_accounting_workbook, is_debtor_balance_workbook, parse_debtor_balance_workbook
+
+        # 1. Check for Tally Debtor Balance Ground-Truth Benchmark exports
+        if is_debtor_balance_workbook(tmp_path, filename=fileName):
+            parsed_db = parse_debtor_balance_workbook(tmp_path, file_sha256=file_sha)
+            bm_res = db.apply_debtor_balance_benchmarks(parsed_db)
+
+            # Save persistent copies
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            data_dir = os.path.join(base_dir, "data")
+            for save_dir in [base_dir, data_dir, os.path.join(data_dir, "imports")]:
+                try:
+                    os.makedirs(save_dir, exist_ok=True)
+                    with open(os.path.join(save_dir, "debtor balance.xlsx"), "wb") as f_out:
+                        f_out.write(body)
+                except Exception:
+                    pass
+
+            # Rehydrate in-memory state
+            persisted = db.load_all_persisted_state()
+            for k in ["debtors", "customers", "opening_balances"]:
+                if k in persisted:
+                    STATE[k] = persisted[k]
+
+            return {
+                "filename": fileName or "debtor balance.xlsx",
+                "fileSha256": file_sha,
+                "sheetName": "Sundry Debtors Group Summary",
+                "asOf": datetime.now().strftime("%Y-%m-%d"),
+                "source": "tally-benchmarks",
+                "snapshotRowCount": bm_res.get("totalBenchmarks", 0),
+                "createdRowCount": bm_res.get("newPartiesInserted", 0),
+                "unchangedRowCount": bm_res.get("matchedCount", 0),
+                "replacedRowCount": bm_res.get("totalVerified", 0),
+                "replayed": False,
+                "databaseRowsWritten": True,
+                "businessRecordsCreated": False,
+                "disclaimer": f"Applied {bm_res.get('totalBenchmarks', 0)} Tally debtor benchmarks. {bm_res.get('totalVerified', 0)} customer accounts verified & aligned to Tally closing balance."
+            }
+
         if is_accounting_workbook(tmp_path):
             acct_data = parse_accounting_workbook(tmp_path, file_sha256=file_sha, filename=fileName)
             book_src = acct_data["bookSource"]

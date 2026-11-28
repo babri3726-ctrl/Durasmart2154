@@ -34,6 +34,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, Component, type ErrorInfo, type ReactNode } from 'react';
+import { toast } from '../lib/toast';
 import {
   CheckCircle2,
   FileSearch,
@@ -2147,10 +2148,13 @@ function DebtorListCard() {
     try {
       const res = await syncDebtorBenchmarks();
       setBenchmarksMessage(res.message);
+      toast.success(res.message);
       invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
       retry();
     } catch (e: any) {
-      setBenchmarksMessage(e.message || 'Failed to reconcile Tally benchmarks');
+      const msg = e.message || 'Failed to reconcile Tally benchmarks';
+      setBenchmarksMessage(msg);
+      toast.error(msg);
     } finally {
       setSyncingBenchmarks(false);
     }
@@ -2165,10 +2169,13 @@ function DebtorListCard() {
     try {
       const res = await uploadDebtorBenchmarks(file);
       setBenchmarksMessage(res.message);
+      toast.success(res.message);
       invalidate(syncKeys.debtors, syncKeys.customers, syncKeys.dashboard);
       retry();
     } catch (err: any) {
-      setBenchmarksMessage(err?.message || 'Failed to upload debtor balance.xlsx');
+      const msg = err?.message || 'Failed to upload debtor balance.xlsx';
+      setBenchmarksMessage(msg);
+      toast.error(msg);
     } finally {
       setUploadingDebtorBalance(false);
       e.target.value = '';
@@ -2595,16 +2602,33 @@ function DebtorListCard() {
             </button>
           </div>
 
-          <button
-            type="button"
-            disabled={syncingBenchmarks}
-            onClick={handleSyncBenchmarks}
-            className="flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[11px] font-bold text-amber-800 hover:bg-amber-100 transition shadow-sm"
-            title="Reconcile debtor balances with debtor balance.xlsx Tally export"
-          >
-            <RefreshCw size={12} className={syncingBenchmarks ? "animate-spin" : ""} />
-            {syncingBenchmarks ? "Reconciling..." : "Reconcile with Tally"}
-          </button>
+          <input
+            id="toolbar-debtor-balance-upload"
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            disabled={uploadingDebtorBalance || syncingBenchmarks}
+            onChange={handleUploadDebtorBalance}
+          />
+          <div className="flex items-center rounded-lg border border-amber-300 bg-amber-50 overflow-hidden shadow-sm">
+            <label
+              htmlFor="toolbar-debtor-balance-upload"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold text-amber-800 hover:bg-amber-100 transition cursor-pointer"
+              title="Upload fresh debtor balance.xlsx exported from Tally to reconcile closing balances"
+            >
+              <Upload size={12} className={uploadingDebtorBalance ? "animate-spin" : ""} />
+              {uploadingDebtorBalance ? "Reconciling..." : "📊 Reconcile with Tally (.xlsx)"}
+            </label>
+            <button
+              type="button"
+              disabled={syncingBenchmarks}
+              onClick={handleSyncBenchmarks}
+              className="px-1.5 py-1.5 text-amber-700 hover:bg-amber-100 border-l border-amber-200 transition"
+              title="Quick re-sync from server debtor balance.xlsx"
+            >
+              <RefreshCw size={11} className={syncingBenchmarks ? "animate-spin" : ""} />
+            </button>
+          </div>
 
           <button
             type="button"
