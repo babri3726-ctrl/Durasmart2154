@@ -340,6 +340,10 @@ except Exception as e:
 # Hydrate SQLite Persistent Database
 try:
     db.init_db(STATE)
+    try:
+        db.recompute_all_party_balances()
+    except Exception as e:
+        print(f"Warning: Failed to recompute party balances: {e}")
     _persisted = db.load_all_persisted_state()
     if _persisted.get("orders"):
         STATE["orders"] = _persisted["orders"]
@@ -3041,6 +3045,10 @@ def sync_debtor_benchmarks():
     from .voucher_parser import parse_debtor_balance_workbook
     parsed = parse_debtor_balance_workbook(debtor_bal_path)
     res = db.apply_debtor_balance_benchmarks(parsed)
+    try:
+        db.recompute_all_party_balances()
+    except Exception as e:
+        print(f"Warning: Failed to recompute party balances: {e}")
 
     # Refresh in-memory state
     persisted = db.load_all_persisted_state()

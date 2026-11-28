@@ -1262,42 +1262,50 @@ def load_all_persisted_state() -> dict[str, Any]:
                 ob_info = ob_by_customer.get(p["id"])
                 signed_ob = ob_info[0] if ob_info else 0
                 ob_dir = ob_info[1] if ob_info else "debit"
-                d_row = {
-                    "id": p["id"],
-                    "name": p["name"],
-                    "state": p["state"],
-                    "city": p["city"],
-                    "district": p["district"],
-                    "salesperson": p["salesperson"],
-                    "salespersonId": (p["salesperson_id"] or "") if (p["salesperson"] and p["salesperson"].lower() != "unassigned") else "",
-                    "mobile": p["mobile"] if (p["mobile"] and p["mobile"] != "9814000000" and not str(p["mobile"]).startswith("9814020")) else "",
-                    "balance": bal_rupees,
-                    "balance_formatted": f"{bal_rupees:.2f}",
-                    "creditDays": p["credit_days"] or 30,
-                    "status": p["status"] or "active",
-                    "contactPerson": p["name"],
-                    "source": "database",
-                    "openingPaise": signed_ob,
-                    "openingBalance": round(signed_ob / 100.0, 2),
-                    "openingDirection": ob_dir,
-                    "outstandingPaise": bal_paise,
-                    "advancePaise": 0,
-                    "unbilledValuePaise": 0,
-                    "overduePaise": bal_paise if p["status"] == "active" else 0,
-                    "isOverdue": bal_paise > 0,
-                    "invoiceCount": 0,
-                    "orderCount": 0,
-                    "lastPaymentDate": None,
-                    "tallyClosingPaise": p["tally_closing_paise"] if "tally_closing_paise" in p.keys() else None,
-                    "tallyClosing": round(p["tally_closing_paise"] / 100.0, 2) if ("tally_closing_paise" in p.keys() and p["tally_closing_paise"] is not None) else None,
-                    "tallyOpeningPaise": p["tally_opening_paise"] if "tally_opening_paise" in p.keys() else None,
-                    "tallyOpening": round(p["tally_opening_paise"] / 100.0, 2) if ("tally_opening_paise" in p.keys() and p["tally_opening_paise"] is not None) else None,
-                    "tallyStatus": p["tally_status"] if ("tally_status" in p.keys() and p["tally_status"]) else "unbenchmarked",
-                    "tallyDiffPaise": p["tally_diff_paise"] if ("tally_diff_paise" in p.keys() and p["tally_diff_paise"] is not None) else 0,
-                    "tallyDiff": round((p["tally_diff_paise"] or 0) / 100.0, 2) if "tally_diff_paise" in p.keys() else 0.0,
-                    "hasAuthoritativeLedger": bool(p["has_authoritative_ledger"]) if "has_authoritative_ledger" in p.keys() else False,
-                }
-                debtors.append(d_row)
+            t_cl = p["tally_closing_paise"] if "tally_closing_paise" in p.keys() else None
+            if t_cl is not None:
+                t_diff_paise = bal_paise - t_cl
+                t_status = "verified" if abs(t_diff_paise) <= 100 else "mismatch"
+            else:
+                t_diff_paise = p["tally_diff_paise"] if ("tally_diff_paise" in p.keys() and p["tally_diff_paise"] is not None) else 0
+                t_status = p["tally_status"] if ("tally_status" in p.keys() and p["tally_status"]) else "unbenchmarked"
+
+            d_row = {
+                "id": p["id"],
+                "name": p["name"],
+                "state": p["state"],
+                "city": p["city"],
+                "district": p["district"],
+                "salesperson": p["salesperson"],
+                "salespersonId": (p["salesperson_id"] or "") if (p["salesperson"] and p["salesperson"].lower() != "unassigned") else "",
+                "mobile": p["mobile"] if (p["mobile"] and p["mobile"] != "9814000000" and not str(p["mobile"]).startswith("9814020")) else "",
+                "balance": bal_rupees,
+                "balance_formatted": f"{bal_rupees:.2f}",
+                "creditDays": p["credit_days"] or 30,
+                "status": p["status"] or "active",
+                "contactPerson": p["name"],
+                "source": "database",
+                "openingPaise": signed_ob,
+                "openingBalance": round(signed_ob / 100.0, 2),
+                "openingDirection": ob_dir,
+                "outstandingPaise": bal_paise,
+                "advancePaise": 0,
+                "unbilledValuePaise": 0,
+                "overduePaise": bal_paise if p["status"] == "active" else 0,
+                "isOverdue": bal_paise > 0,
+                "invoiceCount": 0,
+                "orderCount": 0,
+                "lastPaymentDate": None,
+                "tallyClosingPaise": p["tally_closing_paise"] if "tally_closing_paise" in p.keys() else None,
+                "tallyClosing": round(p["tally_closing_paise"] / 100.0, 2) if ("tally_closing_paise" in p.keys() and p["tally_closing_paise"] is not None) else None,
+                "tallyOpeningPaise": p["tally_opening_paise"] if "tally_opening_paise" in p.keys() else None,
+                "tallyOpening": round(p["tally_opening_paise"] / 100.0, 2) if ("tally_opening_paise" in p.keys() and p["tally_opening_paise"] is not None) else None,
+                "tallyStatus": t_status,
+                "tallyDiffPaise": t_diff_paise,
+                "tallyDiff": round(t_diff_paise / 100.0, 2),
+                "hasAuthoritativeLedger": bool(p["has_authoritative_ledger"]) if "has_authoritative_ledger" in p.keys() else False,
+            }
+            debtors.append(d_row)
 
         customers = debtors
 
@@ -1679,8 +1687,76 @@ def find_or_create_party_by_name(conn, party_name: str, party_type: str = "custo
 
     return new_id, True
 
+def deduplicate_vouchers_for_party(vouchers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Applies authoritative deduplication on a party's vouchers:
+    1. Real invoice number match: deduplicate exact duplicate invoices (same date, type, invoice_no, debit, credit).
+    2. Cross-book generic match: if specialized entry exists for same date, type, amount, skip generic Day Book copy.
+    3. Exact full content match: skip identical voucher date, type, no, debit, credit, book_source, narration.
+    """
+    def clean_vno_str(vno: str | None) -> str:
+        if not vno:
+            return ""
+        return re.sub(r'\(optional\)', '', str(vno), flags=re.IGNORECASE).strip().lower()
+
+    def is_invoice_vno(vno: str | None) -> bool:
+        c = clean_vno_str(vno)
+        if not c or c.startswith('db-') or c.startswith('hdfc-') or c.startswith('yes-') or c.startswith('cash-'):
+            return False
+        if '@' in c or re.match(r'^(aug|spt|oct|nov|dec|jan|feb|mar|apr|may|jun|jul)\s', c, re.IGNORECASE):
+            return False
+        return True
+
+    # Sort so specialized vouchers come first, generic Day Book comes last
+    def sort_key(v: dict[str, Any]) -> int:
+        bs = v.get("book_source") or ""
+        vno = str(v.get("voucher_no") or "").lower()
+        is_gen = (bs == "Day Book") and (not vno or vno.startswith("db-"))
+        return 1 if is_gen else 0
+
+    sorted_v = sorted(vouchers, key=sort_key)
+
+    seen_invoices = set()
+    seen_generic_match = set()
+    seen_content = set()
+    result = []
+
+    for v in sorted_v:
+        vno = clean_vno_str(v.get("voucher_no"))
+        vt = (v.get("voucher_type") or "").lower()
+        deb = v.get("debit_paise") or 0
+        cred = v.get("credit_paise") or 0
+        vdate = str(v.get("voucher_date") or "")
+
+        # Real invoice number deduplication
+        if is_invoice_vno(v.get("voucher_no")):
+            inv_key = f"{vdate}:{vt}:{vno}:{deb}:{cred}"
+            if inv_key in seen_invoices:
+                continue
+            seen_invoices.add(inv_key)
+
+        # Cross-book generic match
+        generic_key = f"{vdate}:{vt}:{deb}:{cred}"
+        vno_raw = str(v.get("voucher_no") or "").lower()
+        is_gen_db = (v.get("book_source") == "Day Book") and (not vno_raw or vno_raw.startswith("db-"))
+        if is_gen_db and generic_key in seen_generic_match:
+            continue
+
+        # Exact full content match
+        narr = (v.get("narration") or "").strip().lower()
+        bs = v.get("book_source") or ""
+        content_key = f"{vdate}:{vt}:{vno}:{deb}:{cred}:{bs}:{narr}"
+        if content_key in seen_content:
+            continue
+
+        seen_content.add(content_key)
+        seen_generic_match.add(generic_key)
+        result.append(v)
+
+    return result
+
 def recompute_party_balance(party_id: str, conn = None):
-    """Recomputes party balance directly from Opening Balance + Net Vouchers (Debits - Credits) - Direct Payments."""
+    """Recomputes party balance directly from Opening Balance + Deduplicated Net Vouchers (Debits - Credits) - Direct Payments."""
     def _run(c):
         cur = c.cursor()
         # Opening balance
@@ -1691,16 +1767,20 @@ def recompute_party_balance(party_id: str, conn = None):
         else:
             ob_paise = 0
 
-        # All vouchers: Debits (+) and Credits (-)
+        # All vouchers with deduplication logic applied
         cur.execute(
             """
-            SELECT COALESCE(SUM(debit_paise), 0) - COALESCE(SUM(credit_paise), 0)
+            SELECT id, voucher_no, voucher_type, voucher_date, debit_paise, credit_paise, narration, book_source
             FROM vouchers
             WHERE party_id = ?
             """,
             (party_id,)
         )
-        voucher_net_paise = cur.fetchone()[0]
+        party_vchs = [dict(r) for r in cur.fetchall()]
+        deduped = deduplicate_vouchers_for_party(party_vchs)
+        tot_deb = sum(v.get("debit_paise") or 0 for v in deduped)
+        tot_cred = sum(v.get("credit_paise") or 0 for v in deduped)
+        voucher_net_paise = tot_deb - tot_cred
 
         # Direct customer payments
         cur.execute(
@@ -1737,6 +1817,21 @@ def recompute_party_balance(party_id: str, conn = None):
                 (new_balance_paise, datetime.now().isoformat(), party_id)
             )
 
+    if conn is not None:
+        _run(conn)
+    else:
+        with get_connection() as c:
+            _run(c)
+            c.commit()
+
+def recompute_all_party_balances(conn = None):
+    """Recomputes balances for all parties across the database."""
+    def _run(c):
+        cur = c.cursor()
+        cur.execute("SELECT id FROM parties")
+        party_ids = [r[0] for r in cur.fetchall()]
+        for pid in party_ids:
+            recompute_party_balance(pid, c)
     if conn is not None:
         _run(conn)
     else:

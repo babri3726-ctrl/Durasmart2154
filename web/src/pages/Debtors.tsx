@@ -709,6 +709,13 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
     ? calculatedOutstandingPaise
     : (debtor.balance !== undefined ? Math.round(Number(debtor.balance) * 100) : 0);
 
+  useEffect(() => {
+    if (uniqueVouchers.length > 0 || currentOpeningPaise !== 0) {
+      debtor.balance = calculatedOutstandingPaise / 100;
+      debtor.outstandingPaise = calculatedOutstandingPaise;
+    }
+  }, [calculatedOutstandingPaise, uniqueVouchers.length, currentOpeningPaise, debtor]);
+
   // FIFO Aging Calculation
   const aging = useMemo(() => {
     const buckets = {
@@ -1213,11 +1220,19 @@ function DebtorLedgerModal({ debtor, onClose }: { debtor: ServerDebtor; onClose:
                   <span className="text-xs font-bold text-amber-900">
                     Tally Ground Truth Mismatch: Current {rupeesDrCr(currentOutstandingPaise)} vs Tally {debtor.tallyClosing !== null && debtor.tallyClosing !== undefined ? formatRupeesDrCr(debtor.tallyClosing) : '—'}
                   </span>
-                  {debtor.tallyDiff !== undefined && (
-                    <span className="font-mono text-xs font-bold text-amber-800">
-                      (Diff: {debtor.tallyDiff > 0 ? '+' : ''}{formatRupeesDrCr(debtor.tallyDiff)})
-                    </span>
-                  )}
+                  {(() => {
+                    const tClPaise = debtor.tallyClosingPaise !== undefined && debtor.tallyClosingPaise !== null
+                      ? debtor.tallyClosingPaise
+                      : (debtor.tallyClosing !== null && debtor.tallyClosing !== undefined ? Math.round(debtor.tallyClosing * 100) : null);
+                    if (tClPaise === null) return null;
+                    const liveDiffPaise = currentOutstandingPaise - tClPaise;
+                    const liveDiffRupees = Math.round(liveDiffPaise) / 100;
+                    return (
+                      <span className="font-mono text-xs font-bold text-amber-800">
+                        (Diff: {liveDiffRupees > 0 ? '+' : ''}{formatRupeesDrCr(liveDiffRupees)})
+                      </span>
+                    );
+                  })()}
                 </div>
                 <p className="mt-0.5 text-[11px] text-amber-700">
                   Upload this party's individual Tally Excel ledger to verify transactions and automatically clear this mismatch warning.

@@ -2038,6 +2038,7 @@ export interface ServerDebtor {
   isOverdue?: boolean;
   balance?: number;
   balance_formatted?: string;
+  outstandingPaise?: number;
   status?: string;
   openingBalance?: number;
   openingPaise?: number;
