@@ -709,13 +709,14 @@ def clean_accounting_balances() -> dict[str, int]:
     }
 
 
-def apply_debtor_balance_benchmarks(benchmarks_data: list[dict] | dict, restore_mismatched: bool = True) -> dict[str, Any]:
+def apply_debtor_balance_benchmarks(benchmarks_data: list[dict] | dict, restore_mismatched: bool = False) -> dict[str, Any]:
     """
     Applies Tally debtor balance benchmarks to the parties table.
     - Matches parties by name / normalized clean name.
     - Sets tally_closing_paise and tally_opening_paise.
-    - When restore_mismatched=True (default), aligns balance_paise to Tally closing balance,
-      marks status as 'verified', and synchronizes opening_balances so ledger calculation matches Tally.
+    - Reconciles calculated ledger balance (Opening + Net Vouchers - Direct Payments) against Tally closing balance.
+    - Accurately marks accounts with diff > 100 paise (> Rs 1.00) as 'mismatch' with tally_diff_paise = diff.
+    - Accurately marks accounts within Rs 1.00 tolerance as 'verified' with tally_diff_paise = 0.
     """
     if isinstance(benchmarks_data, dict):
         benchmarks = benchmarks_data.get("benchmarks", [])
@@ -773,7 +774,6 @@ def apply_debtor_balance_benchmarks(benchmarks_data: list[dict] | dict, restore_
                 matched_bm_ids.add(id(bm))
                 t_cl = bm["closingPaise"]
                 t_op = bm["openingPaise"]
-                diff = bal_paise - t_cl
 
                 if restore_mismatched:
                     status = "verified"
@@ -806,48 +806,71 @@ def apply_debtor_balance_benchmarks(benchmarks_data: list[dict] | dict, restore_
                             updated_at = ?
                         WHERE id = ?
                     """, (final_bal_paise, t_cl, t_op, now_iso, cid))
-                elif has_auth == 1:
-                    verified_by_ledger_count += 1
-                    status = "verified"
-                    diff_paise = 0
-                    cur.execute("""
-                        UPDATE parties
-                        SET tally_closing_paise = ?,
-                            tally_opening_paise = ?,
-                            tally_status = ?,
-                            tally_diff_paise = ?
-                        WHERE id = ?
-                    """, (t_cl, t_op, status, diff_paise, cid))
-                elif abs(diff) <= 100:  # <= Rs 1 roundoff tolerance
-                    exact_count += 1
-                    status = "verified"
-                    diff_paise = 0
-                    cur.execute("""
-                        UPDATE parties
-                        SET tally_closing_paise = ?,
-                            tally_opening_paise = ?,
-                            tally_status = ?,
-                            tally_diff_paise = ?
-                        WHERE id = ?
-                    """, (t_cl, t_op, status, diff_paise, cid))
                 else:
-                    mismatch_count += 1
-                    status = "mismatch"
-                    diff_paise = diff
+                    # Authoritative Tally Debtor Balance Import
+                    # 1. Update opening balance with official Tally 1-Apr-2026 opening balance if present
+                    if t_op != 0:
+                        ob_dir = "debit" if t_op >= 0 else "credit"
+                        cur.execute("DELETE FROM opening_balances WHERE customer_id = ? AND source IN ('debtor balance.xlsx', 'Tally Ground Truth')", (cid,))
+                        cur.execute("""
+                            INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)
+                            VALUES (?, '2026-04-01', ?, ?, 'debtor balance.xlsx', ?)
+                        """, (cid, abs(t_op), ob_dir, now_iso))
+
+                    # 2. Get active opening balance
+                    cur.execute("SELECT amount_paise, direction FROM opening_balances WHERE customer_id = ? ORDER BY id DESC LIMIT 1", (cid,))
+                    ob_row = cur.fetchone()
+                    if t_op != 0:
+                        eff_ob = t_op
+                    elif ob_row:
+                        eff_ob = ob_row[0] if (ob_row[1] or "debit").lower() in ("debit", "owes") else -ob_row[0]
+                    else:
+                        eff_ob = 0
+
+                    # 3. Get vouchers and payments
+                    cur.execute("SELECT COALESCE(SUM(debit_paise), 0) - COALESCE(SUM(credit_paise), 0), COUNT(*) FROM vouchers WHERE party_id = ?", (cid,))
+                    v_net, v_cnt = cur.fetchone()
+                    cur.execute("SELECT COALESCE(SUM(amount_paise), 0) FROM payments WHERE customer_id = ? AND voided_at IS NULL", (cid,))
+                    p_net = cur.fetchone()[0] or 0
+
+                    if v_cnt > 0 or p_net > 0 or eff_ob != 0:
+                        calc_bal = eff_ob + v_net - p_net
+                    else:
+                        calc_bal = bal_paise if bal_paise is not None else t_cl
+
+                    diff = calc_bal - t_cl
+
+                    if abs(diff) <= 100:  # <= Rs 1 roundoff tolerance
+                        exact_count += 1
+                        status = "verified"
+                        diff_paise = 0
+                        final_bal_paise = t_cl
+                        final_auth = has_auth
+                    else:
+                        mismatch_count += 1
+                        status = "mismatch"
+                        diff_paise = diff
+                        final_bal_paise = calc_bal
+                        final_auth = 0  # Discrepancy with Tally closing, not verified
+
                     cur.execute("""
                         UPDATE parties
-                        SET tally_closing_paise = ?,
+                        SET balance_paise = ?,
+                            tally_closing_paise = ?,
                             tally_opening_paise = ?,
                             tally_status = ?,
-                            tally_diff_paise = ?
+                            tally_diff_paise = ?,
+                            has_authoritative_ledger = ?,
+                            updated_at = ?
                         WHERE id = ?
-                    """, (t_cl, t_op, status, diff_paise, cid))
+                    """, (final_bal_paise, t_cl, t_op, status, diff_paise, final_auth, now_iso, cid))
             else:
-                status = "verified" if has_auth == 1 else "unbenchmarked"
+                status = "unbenchmarked"
                 cur.execute("""
                     UPDATE parties
                     SET tally_status = ?,
-                        tally_diff_paise = 0
+                        tally_diff_paise = 0,
+                        has_authoritative_ledger = 0
                     WHERE id = ?
                 """, (status, cid))
 
@@ -897,9 +920,14 @@ def apply_debtor_balance_benchmarks(benchmarks_data: list[dict] | dict, restore_
                 existing_p = cur.fetchone()
                 if not existing_p:
                     cur.execute("""
-                        INSERT INTO parties (id, name, state, city, district, salesperson, balance_paise, credit_days, status, party_type, tally_closing_paise, tally_opening_paise, tally_status, tally_diff_paise, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, 'Unassigned', ?, 30, 'active', 'customer', ?, ?, 'verified', 0, ?, ?)
+                        INSERT INTO parties (id, name, state, city, district, salesperson, balance_paise, credit_days, status, party_type, tally_closing_paise, tally_opening_paise, tally_status, tally_diff_paise, has_authoritative_ledger, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, 'Unassigned', ?, 30, 'active', 'customer', ?, ?, 'verified', 0, 0, ?, ?)
                     """, (pid, pname, state, city, city, t_cl, t_cl, t_op, now_iso, now_iso))
+                    if t_op != 0:
+                        cur.execute("""
+                            INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)
+                            VALUES (?, '2026-04-01', ?, ?, 'debtor balance.xlsx', ?)
+                        """, (pid, abs(t_op), "debit" if t_op >= 0 else "credit", now_iso))
                     inserted_count += 1
                     exact_count += 1
                 else:
@@ -922,9 +950,9 @@ def apply_debtor_balance_benchmarks(benchmarks_data: list[dict] | dict, restore_
         "totalCustomers": len(customers) + inserted_count,
         "matchedCount": matched_count,
         "exactCount": exact_count,
-        "mismatchCount": 0 if restore_mismatched else mismatch_count,
+        "mismatchCount": mismatch_count,
         "verifiedByLedgerCount": verified_by_ledger_count,
-        "totalVerified": exact_count + verified_by_ledger_count,
+        "totalVerified": exact_count,
         "newPartiesInserted": inserted_count,
     }
 
@@ -1693,12 +1721,7 @@ def recompute_party_balance(party_id: str, conn = None):
             t_cl = t_row[0]
             has_auth = t_row[1] or 0
             diff = new_balance_paise - t_cl
-            if has_auth == 1:
-                # Authoritative individual ledger is ground truth: lock balance to Tally closing
-                new_balance_paise = t_cl
-                t_status = 'verified'
-                t_diff = 0
-            elif abs(diff) <= 100:
+            if abs(diff) <= 100:
                 t_status = 'verified'
                 t_diff = 0
             else:

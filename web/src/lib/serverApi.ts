@@ -119,6 +119,12 @@ export interface ServerPage<T> {
   pageSize: number;
   total: number;
   nextCursor: string | null;
+  summary?: {
+    mismatchCount?: number;
+    verifiedCount?: number;
+    unbenchmarkedCount?: number;
+    totalCount?: number;
+  };
 }
 
 /** The columns the panel's live screens display; the API returns more. */

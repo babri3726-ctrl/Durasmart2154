@@ -26,6 +26,7 @@ export function useLiveList<T>(
   state: 'loading' | 'ready' | 'error';
   rows: T[];
   total: number;
+  summary?: any;
   error: string;
   retry: () => void;
   sync: LiveSync;
@@ -33,6 +34,7 @@ export function useLiveList<T>(
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [rows, setRows] = useState<T[]>([]);
   const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState<any>(undefined);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -58,6 +60,7 @@ export function useLiveList<T>(
             if (!alive || mine !== sequence.current) return;
             setRows(result.items);
             setTotal(result.total);
+            setSummary(result.summary);
             setState('ready');
             setError('');
             setRefreshError('');
@@ -117,6 +120,7 @@ export function useLiveList<T>(
     state,
     rows,
     total,
+    summary,
     error,
     retry: () => setRetry((n) => n + 1),
     sync: { refresh, isRefreshing, syncedAt, refreshError },

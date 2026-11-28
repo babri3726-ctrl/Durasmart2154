@@ -2183,7 +2183,7 @@ function DebtorListCard() {
   };
 
   const refreshToken = useSyncToken(syncKeys.debtors);
-  const { state, rows, total, error, retry, sync } = useLiveList(load, term, page, refreshToken);
+  const { state, rows, total, error, retry, sync, summary } = useLiveList(load, term, page, refreshToken);
 
   const spOptions = useMemo(() => {
     const set = new Set<string>(salespeople);
@@ -2549,9 +2549,14 @@ function DebtorListCard() {
                 setStatusFilter('all');
                 setPage(1);
               }}
-              className={`rounded px-2.5 py-1 text-[11px] font-bold transition ${statusFilter === 'all' ? 'bg-brand-blue text-white shadow-sm' : 'text-muted hover:text-ink'}`}
+              className={`rounded px-2.5 py-1 text-[11px] font-bold transition flex items-center gap-1.5 ${statusFilter === 'all' ? 'bg-brand-blue text-white shadow-sm' : 'text-muted hover:text-ink'}`}
             >
-              All
+              <span>All</span>
+              {summary?.totalCount !== undefined && summary.totalCount > 0 && (
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-semibold ${statusFilter === 'all' ? 'bg-white/20 text-white' : 'bg-canvas text-muted'}`}>
+                  {summary.totalCount}
+                </span>
+              )}
             </button>
             <button
               type="button"
@@ -2559,11 +2564,16 @@ function DebtorListCard() {
                 setStatusFilter('mismatch');
                 setPage(1);
               }}
-              className={`rounded px-2.5 py-1 text-[11px] font-bold transition flex items-center gap-1 ${statusFilter === 'mismatch' ? 'bg-amber-600 text-white shadow-sm' : 'text-amber-700 hover:text-amber-900'}`}
+              className={`rounded px-2.5 py-1 text-[11px] font-bold transition flex items-center gap-1.5 ${statusFilter === 'mismatch' ? 'bg-amber-600 text-white shadow-sm' : 'text-amber-700 hover:text-amber-900'}`}
               title="Filter debtors whose panel balance does not match Tally Ground Truth"
             >
               <AlertTriangle size={11} />
-              Mismatches
+              <span>Mismatches</span>
+              {summary?.mismatchCount !== undefined && summary.mismatchCount > 0 && (
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${statusFilter === 'mismatch' ? 'bg-amber-800 text-amber-100' : 'bg-amber-200 text-amber-900'}`}>
+                  {summary.mismatchCount}
+                </span>
+              )}
             </button>
             <button
               type="button"
@@ -2571,11 +2581,16 @@ function DebtorListCard() {
                 setStatusFilter('verified');
                 setPage(1);
               }}
-              className={`rounded px-2.5 py-1 text-[11px] font-bold transition flex items-center gap-1 ${statusFilter === 'verified' ? 'bg-emerald-600 text-white shadow-sm' : 'text-emerald-700 hover:text-emerald-900'}`}
+              className={`rounded px-2.5 py-1 text-[11px] font-bold transition flex items-center gap-1.5 ${statusFilter === 'verified' ? 'bg-emerald-600 text-white shadow-sm' : 'text-emerald-700 hover:text-emerald-900'}`}
               title="Filter debtors 100% verified with Tally Ground Truth or authoritative ledger"
             >
               <CheckCircle2 size={11} />
-              Verified
+              <span>Verified</span>
+              {summary?.verifiedCount !== undefined && summary.verifiedCount > 0 && (
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${statusFilter === 'verified' ? 'bg-emerald-800 text-emerald-100' : 'bg-emerald-200 text-emerald-900'}`}>
+                  {summary.verifiedCount}
+                </span>
+              )}
             </button>
             <button
               type="button"
@@ -2583,9 +2598,14 @@ function DebtorListCard() {
                 setStatusFilter('unbenchmarked');
                 setPage(1);
               }}
-              className={`rounded px-2.5 py-1 text-[11px] font-bold transition ${statusFilter === 'unbenchmarked' ? 'bg-slate-700 text-white shadow-sm' : 'text-muted hover:text-ink'}`}
+              className={`rounded px-2.5 py-1 text-[11px] font-bold transition flex items-center gap-1.5 ${statusFilter === 'unbenchmarked' ? 'bg-slate-700 text-white shadow-sm' : 'text-muted hover:text-ink'}`}
             >
-              Unbenchmarked
+              <span>Unbenchmarked</span>
+              {summary?.unbenchmarkedCount !== undefined && summary.unbenchmarkedCount > 0 && (
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${statusFilter === 'unbenchmarked' ? 'bg-slate-900 text-slate-100' : 'bg-slate-200 text-slate-700'}`}>
+                  {summary.unbenchmarkedCount}
+                </span>
+              )}
             </button>
           </div>
 
