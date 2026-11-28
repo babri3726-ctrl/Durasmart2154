@@ -251,7 +251,7 @@ function DuplicateReviewModal({
               {partyName ? `Reviewing duplicates for ${partyName}` : 'Database-wide scan across all debtors'}
               {' · '}
               <span className="text-slate-600 font-medium">
-                Amount-checked: Split entries with different amounts are protected and never touched.
+                Tally Guardrail: Legitimate repeated entries verified by Tally closing balance are strictly protected.
               </span>
             </p>
           </div>
@@ -341,6 +341,11 @@ function DuplicateReviewModal({
                           <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
                             {group.voucherType} #{group.voucherNo || '-'}
                           </span>
+                          {(group as any).verifiedByClosingBalance && (
+                            <span className="rounded bg-emerald-100 border border-emerald-300 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                              ✓ Confirmed by Tally Closing Balance
+                            </span>
+                          )}
                         </div>
                         <div className="font-bold text-ink">
                           Amount: <span className={isDebit ? 'text-blue-700' : 'text-emerald-700'}>₹{amtFormatted} {isDebit ? 'Dr' : 'Cr'}</span>

@@ -1969,8 +1969,36 @@ def find_duplicate_voucher_candidates(party_id: str | None = None, conn=None) ->
 
         for gkey, v_list in grouped_candidates.items():
             if len(v_list) > 1:
-                # First one is original (to keep), subsequent ones are proposed duplicates
                 orig = v_list[0]
+                party_id = orig[1]
+
+                # Closing Balance Verification Guardrail
+                cur.execute("SELECT balance_paise, tally_closing_paise, tally_status FROM parties WHERE id = ?", (party_id,))
+                p_row = cur.fetchone()
+                verified_by_closing = False
+                diff_improvement = 0.0
+
+                if p_row and p_row[1] is not None:
+                    bal_paise = p_row[0] or 0
+                    t_cl = p_row[1]
+                    signed_amt = orig[6] - orig[7] # Debit (+) / Credit (-)
+                    diff_now = bal_paise - t_cl
+                    diff_after = (bal_paise - signed_amt) - t_cl
+
+                    # 1. Protection: If current balance already matches Tally closing balance (<= Rs 1),
+                    # deleting this voucher would break verified alignment! This proves Tally legitimately has both entries.
+                    if abs(diff_now) <= 100 and abs(diff_after) > 100:
+                        continue
+
+                    # 2. Protection: If deleting makes the discrepancy with Tally closing balance worse, do NOT delete!
+                    if abs(diff_after) > abs(diff_now):
+                        continue
+
+                    # 3. Confirmed duplicate: Deleting brings balance closer to or exactly equal to Tally closing balance
+                    if abs(diff_after) < abs(diff_now) or abs(diff_after) <= 100:
+                        verified_by_closing = True
+                        diff_improvement = round((abs(diff_now) - abs(diff_after)) / 100.0, 2)
+
                 dups = []
                 for d in v_list[1:]:
                     if d[0] not in seen_dup_vids:
@@ -1995,6 +2023,8 @@ def find_duplicate_voucher_candidates(party_id: str | None = None, conn=None) ->
                         "debitPaise": orig[6],
                         "creditPaise": orig[7],
                         "amountFormatted": f"₹{amt_paise / 100.0:,.2f} {direction}",
+                        "verifiedByClosingBalance": verified_by_closing,
+                        "diffImprovement": diff_improvement,
                         "original": {
                             "id": orig[0],
                             "voucherNo": orig[5],
@@ -2011,6 +2041,29 @@ def find_duplicate_voucher_candidates(party_id: str | None = None, conn=None) ->
                 shas = set(v[10] for v in v_list if v[10])
                 if len(shas) > 1:
                     orig = v_list[0]
+                    party_id = orig[1]
+
+                    # Closing Balance Verification Guardrail
+                    cur.execute("SELECT balance_paise, tally_closing_paise, tally_status FROM parties WHERE id = ?", (party_id,))
+                    p_row = cur.fetchone()
+                    verified_by_closing = False
+                    diff_improvement = 0.0
+
+                    if p_row and p_row[1] is not None:
+                        bal_paise = p_row[0] or 0
+                        t_cl = p_row[1]
+                        signed_amt = orig[6] - orig[7]
+                        diff_now = bal_paise - t_cl
+                        diff_after = (bal_paise - signed_amt) - t_cl
+
+                        if abs(diff_now) <= 100 and abs(diff_after) > 100:
+                            continue
+                        if abs(diff_after) > abs(diff_now):
+                            continue
+                        if abs(diff_after) < abs(diff_now) or abs(diff_after) <= 100:
+                            verified_by_closing = True
+                            diff_improvement = round((abs(diff_now) - abs(diff_after)) / 100.0, 2)
+
                     dups = []
                     for d in v_list[1:]:
                         if d[0] not in seen_dup_vids:
@@ -2035,6 +2088,8 @@ def find_duplicate_voucher_candidates(party_id: str | None = None, conn=None) ->
                             "debitPaise": orig[6],
                             "creditPaise": orig[7],
                             "amountFormatted": f"₹{amt_paise / 100.0:,.2f} {direction}",
+                            "verifiedByClosingBalance": verified_by_closing,
+                            "diffImprovement": diff_improvement,
                             "original": {
                                 "id": orig[0],
                                 "voucherNo": orig[5],
