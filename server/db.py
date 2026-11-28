@@ -808,10 +808,10 @@ def apply_debtor_balance_benchmarks(benchmarks_data: list[dict] | dict, restore_
                     """, (final_bal_paise, t_cl, t_op, now_iso, cid))
                 else:
                     # Authoritative Tally Debtor Balance Import
-                    # 1. Update opening balance with official Tally 1-Apr-2026 opening balance if present
+                    # 1. Update opening balance with official Tally 1-Apr-2026 opening balance strictly from debtor balance.xlsx
+                    cur.execute("DELETE FROM opening_balances WHERE customer_id = ?", (cid,))
                     if t_op != 0:
                         ob_dir = "debit" if t_op >= 0 else "credit"
-                        cur.execute("DELETE FROM opening_balances WHERE customer_id = ? AND source IN ('debtor balance.xlsx', 'Tally Ground Truth')", (cid,))
                         cur.execute("""
                             INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)
                             VALUES (?, '2026-04-01', ?, ?, 'debtor balance.xlsx', ?)
@@ -941,6 +941,12 @@ def apply_debtor_balance_benchmarks(benchmarks_data: list[dict] | dict, restore_
                             updated_at = ?
                         WHERE id = ?
                     """, (t_cl, t_cl, t_op, now_iso, existing_p[0]))
+                    cur.execute("DELETE FROM opening_balances WHERE customer_id = ?", (existing_p[0],))
+                    if t_op != 0:
+                        cur.execute("""
+                            INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)
+                            VALUES (?, '2026-04-01', ?, ?, 'debtor balance.xlsx', ?)
+                        """, (existing_p[0], abs(t_op), "debit" if t_op >= 0 else "credit", now_iso))
                     exact_count += 1
 
         conn.commit()
@@ -955,6 +961,107 @@ def apply_debtor_balance_benchmarks(benchmarks_data: list[dict] | dict, restore_
         "totalVerified": exact_count,
         "newPartiesInserted": inserted_count,
     }
+
+
+def fix_opening_balances_from_debtor_balance(filepath: str | None = None, conn = None) -> dict[str, Any]:
+    """
+    Enforces 'debtor balance.xlsx' as the single authoritative source for Opening Balances across the entire system.
+    1. Purges all non-'debtor balance.xlsx' opening balances (e.g. from opening.xlsx, customer_ledger, etc.).
+    2. Parses debtor balance.xlsx and sets exact 1-Apr-2026 opening balances for all parties.
+    3. Recomputes all party balances cleanly with deduplication.
+    """
+    import os, hashlib
+    from datetime import datetime
+    from .voucher_parser import parse_debtor_balance_workbook, clean_party_name
+
+    def _norm(s: str) -> str:
+        import re
+        return re.sub(r"[^a-zA-Z0-9]", "", str(s or "")).lower()
+
+    if not filepath:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for cand in ["debtor balance.xlsx", "debtor_balance.xlsx", "DEBTOR BALANCE.xlsx"]:
+            for p in [os.path.join(base_dir, cand), os.path.join(base_dir, "data", cand), os.path.join(base_dir, "data", "imports", cand)]:
+                if os.path.exists(p):
+                    filepath = p
+                    break
+            if filepath:
+                break
+
+    if not filepath or not os.path.exists(filepath):
+        return {"status": "no_file", "message": "debtor balance.xlsx not found"}
+
+    parsed = parse_debtor_balance_workbook(filepath)
+    benchmarks = parsed.get("benchmarks", [])
+    now_iso = datetime.now().isoformat()
+
+    bm_lookup = {}
+    bm_norm_lookup = {}
+    for bm in benchmarks:
+        raw = bm.get("rawName") or ""
+        pname = bm.get("partyName") or raw
+        k_clean = clean_party_name(pname).lower().strip()
+        k_raw = clean_party_name(raw).lower().strip()
+        k_norm = _norm(pname)
+        k_norm_raw = _norm(raw)
+        if k_clean:
+            bm_lookup[k_clean] = bm
+        if k_raw:
+            bm_lookup[k_raw] = bm
+        if k_norm:
+            bm_norm_lookup[k_norm] = bm
+        if k_norm_raw:
+            bm_norm_lookup[k_norm_raw] = bm
+
+    should_close = False
+    if conn is None:
+        conn = get_connection()
+        should_close = True
+
+    try:
+        cur = conn.cursor()
+        # 1. Purge all rogue opening balances that are NOT from debtor balance.xlsx
+        cur.execute("DELETE FROM opening_balances WHERE source != 'debtor balance.xlsx'")
+
+        # 2. Get all parties
+        cur.execute("SELECT id, name FROM parties WHERE party_type = 'customer'")
+        parties = cur.fetchall()
+
+        updated_count = 0
+        for pid, pname in parties:
+            k = clean_party_name(pname or "").lower().strip()
+            kn = _norm(pname or "")
+            bm = bm_lookup.get(k) or bm_norm_lookup.get(kn)
+
+            if bm:
+                t_op = bm.get("openingPaise", 0)
+                cur.execute("DELETE FROM opening_balances WHERE customer_id = ?", (pid,))
+                if t_op != 0:
+                    ob_dir = "debit" if t_op >= 0 else "credit"
+                    cur.execute("""
+                        INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)
+                        VALUES (?, '2026-04-01', ?, ?, 'debtor balance.xlsx', ?)
+                    """, (pid, abs(t_op), ob_dir, now_iso))
+                cur.execute("""
+                    UPDATE parties SET tally_opening_paise = ?, updated_at = ? WHERE id = ?
+                """, (t_op, now_iso, pid))
+                updated_count += 1
+
+        conn.commit()
+        # Recompute all party balances so opening balance changes reflect instantly
+        recompute_all_party_balances(conn)
+        conn.commit()
+
+        return {
+            "status": "success",
+            "updatedCount": updated_count,
+            "totalBenchmarks": len(benchmarks),
+            "message": f"Successfully fixed opening balances for {updated_count} parties exclusively from debtor balance.xlsx."
+        }
+    finally:
+        if should_close:
+            conn.close()
+
 
 
 def apply_single_party_ledger(party_id: str, filepath_or_bytes: str | bytes, filename: str) -> dict[str, Any]:
@@ -1002,12 +1109,7 @@ def apply_single_party_ledger(party_id: str, filepath_or_bytes: str | bytes, fil
             raise ValueError(f"Party ID {party_id} not found")
         party_name = p_row[1]
 
-        # Update opening balance if present in the ledger
-        if ob_paise != 0:
-            conn.execute("""
-                INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)
-                VALUES (?, '2026-04-01', ?, ?, 'Authoritative Party Ledger', datetime('now'))
-            """, (party_id, abs(ob_paise), "debit" if ob_paise >= 0 else "credit"))
+        # Opening balances are strictly preserved from debtor balance.xlsx and never modified by individual ledgers
 
         # Smart merge authoritative vouchers: do NOT wipe existing vouchers indiscriminately.
         # When voucher numbers are the same, amounts MUST ALSO MATCH!

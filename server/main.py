@@ -116,11 +116,7 @@ def seed_all_accounting_books() -> dict[str, Any]:
     for path in found:
         try:
             if os.path.basename(path).lower() in ("opening.xlsx", "trial_balance.xlsx"):
-                try:
-                    ob_res = db.import_opening_balances(path)
-                    sources.append(f"Opening Balances ({ob_res['updatedCount']} accounts)")
-                except Exception as e:
-                    print(f"Warning: Failed to import opening balances from {path}: {e}")
+                # Opening balances are strictly authoritative from debtor balance.xlsx only
                 continue
 
             with open(path, "rb") as f:
@@ -141,32 +137,6 @@ def seed_all_accounting_books() -> dict[str, Any]:
                 total_skipped += res["skippedCount"]
                 total_new_parties += res["newPartiesCount"]
             sources.append(parsed["bookSource"])
-
-            if parsed.get("isCustomerLedger") and parsed.get("customerName"):
-                cust_name = parsed["customerName"]
-                ob_paise = parsed.get("openingBalancePaise", 0)
-                tot_dr = sum(v["debitPaise"] for v in parsed["vouchers"])
-                tot_cr = sum(v["creditPaise"] for v in parsed["vouchers"])
-                closing_paise = max(0, ob_paise + tot_dr - tot_cr)
-                with db.get_connection() as conn:
-                    party_id, _ = db.find_or_create_party_by_name(conn, cust_name)
-                    if ob_paise != 0:
-                        conn.execute(
-                            "DELETE FROM opening_balances WHERE customer_id = ? AND source = 'customer_ledger'",
-                            (party_id,)
-                        )
-                        conn.execute(
-                            """
-                            INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?)
-                            """,
-                            (party_id, datetime.now().strftime("%Y-%m-%d"), abs(ob_paise), "debit" if ob_paise >= 0 else "credit", "customer_ledger", datetime.now().isoformat())
-                        )
-                    conn.execute(
-                        "UPDATE parties SET balance_paise = ?, updated_at = ? WHERE id = ?",
-                        (closing_paise, datetime.now().isoformat(), party_id)
-                    )
-                    conn.commit()
         except Exception as e:
             print(f"Warning: Failed to seed accounting book {path}: {e}")
 
@@ -341,9 +311,9 @@ except Exception as e:
 try:
     db.init_db(STATE)
     try:
-        db.recompute_all_party_balances()
+        db.fix_opening_balances_from_debtor_balance()
     except Exception as e:
-        print(f"Warning: Failed to recompute party balances: {e}")
+        print(f"Warning: Failed to fix opening balances from debtor balance: {e}")
     _persisted = db.load_all_persisted_state()
     if _persisted.get("orders"):
         STATE["orders"] = _persisted["orders"]
@@ -3124,14 +3094,20 @@ async def upload_debtor_benchmarks(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Only Excel .xlsx/.xls files are supported")
     content = await file.read()
     
-    # Save a copy to data/debtor balance.xlsx and root
+    # Save a copy to data/debtor balance.xlsx and root safely if not locked by Excel
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     data_dir = os.path.join(base_dir, "data")
     os.makedirs(data_dir, exist_ok=True)
-    with open(os.path.join(base_dir, "debtor balance.xlsx"), "wb") as f:
-        f.write(content)
-    with open(os.path.join(data_dir, "debtor balance.xlsx"), "wb") as f:
-        f.write(content)
+    try:
+        with open(os.path.join(base_dir, "debtor balance.xlsx"), "wb") as f:
+            f.write(content)
+    except Exception:
+        pass
+    try:
+        with open(os.path.join(data_dir, "debtor balance.xlsx"), "wb") as f:
+            f.write(content)
+    except Exception:
+        pass
 
     from .voucher_parser import parse_debtor_balance_workbook
     parsed = parse_debtor_balance_workbook(content)
@@ -3515,11 +3491,7 @@ async def apply_multi_excel_bundle(
                     with db.get_connection() as conn:
                         pid, _ = db.find_or_create_party_by_name(conn, c_name)
                         ob_paise = parsed_c.get("openingBalancePaise", 0)
-                        if ob_paise != 0:
-                            conn.execute("""
-                                INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)
-                                VALUES (?, '2026-04-01', ?, ?, 'Authoritative Ledger', datetime('now'))
-                            """, (pid, abs(ob_paise), "debit" if ob_paise >= 0 else "credit"))
+                        # Opening balances are strictly authoritative from debtor balance.xlsx only
                         conn.execute("DELETE FROM vouchers WHERE party_id = ?", (pid,))
                         conn.commit()
                     res = db.save_vouchers_batch(vchs, file_sha=f_sha)
@@ -6430,27 +6402,10 @@ async def apply_debtor_bytes(
             if is_cust_ledger and acct_data.get("customerName"):
                 cust_name = acct_data["customerName"]
                 ob_paise = acct_data.get("openingBalancePaise", 0)
-                tot_dr = sum(v["debitPaise"] for v in vouchers)
-                tot_cr = sum(v["creditPaise"] for v in vouchers)
-                closing_paise = max(0, ob_paise + tot_dr - tot_cr)
                 with db.get_connection() as conn:
                     party_id, _ = db.find_or_create_party_by_name(conn, cust_name)
-                    if ob_paise != 0:
-                        conn.execute(
-                            "DELETE FROM opening_balances WHERE customer_id = ? AND source = 'customer_ledger'",
-                            (party_id,)
-                        )
-                        conn.execute(
-                            """
-                            INSERT INTO opening_balances (customer_id, as_of, amount_paise, direction, source, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?)
-                            """,
-                            (party_id, datetime.now().strftime("%Y-%m-%d"), abs(ob_paise), "debit" if ob_paise >= 0 else "credit", "customer_ledger", datetime.now().isoformat())
-                        )
-                    conn.execute(
-                        "UPDATE parties SET balance_paise = ?, updated_at = ? WHERE id = ?",
-                        (closing_paise, datetime.now().isoformat(), party_id)
-                    )
+                    # Opening balance is strictly preserved from debtor balance.xlsx only
+                    db.recompute_party_balance(party_id, conn)
                     conn.commit()
 
             # Rehydrate in-memory state so UI updates instantly
