@@ -3073,12 +3073,27 @@ class CleanupDuplicatesPayload(BaseModel):
     partyId: Optional[str] = None
 
 @app.post("/api/v1/debtors/cleanup-duplicates")
-def cleanup_duplicate_vouchers(payload: Optional[CleanupDuplicatesPayload] = None):
+async def cleanup_duplicate_vouchers(request: Request):
     """
     Deletes ONLY the voucher IDs that have been previewed and explicitly approved by the user.
-    Never deletes anything automatically.
+    Never deletes anything automatically. Handles both object and stringified JSON payloads.
     """
-    approved_ids = payload.approvedVoucherIds if payload else None
+    approved_ids = None
+    try:
+        raw_body = await request.body()
+        if raw_body:
+            import json
+            try:
+                data = json.loads(raw_body)
+                if isinstance(data, str):
+                    data = json.loads(data)
+                if isinstance(data, dict):
+                    approved_ids = data.get("approvedVoucherIds")
+            except Exception:
+                pass
+    except Exception:
+        pass
+
     res = db.deduplicate_all_vouchers(approved_voucher_ids=approved_ids)
     persisted = db.load_all_persisted_state()
     for k in ["debtors", "customers"]:

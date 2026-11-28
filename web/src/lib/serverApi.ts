@@ -2310,7 +2310,7 @@ export function cleanupDuplicateVouchers(approvedVoucherIds?: string[], partyId?
 }> {
   return send('/debtors/cleanup-duplicates', {
     method: 'POST',
-    body: JSON.stringify({ approvedVoucherIds, partyId }),
+    body: { approvedVoucherIds, partyId },
   });
 }
 
